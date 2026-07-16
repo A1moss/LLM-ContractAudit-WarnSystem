@@ -216,3 +216,16 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# === LLM-ContractAudit-WarnSystem 项目专属 ===
+node_modules/
+*.db
+backend/uploads/
+data/*.docx
+data/*.pdf
+data/models/
+chroma_data/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
