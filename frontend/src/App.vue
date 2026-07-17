@@ -42,8 +42,8 @@
       <!-- 右侧占位 -->
       <div class="nav-spacer" />
 
-      <!-- 个人中心下拉 -->
-      <el-sub-menu index="user-sub" popper-class="user-popper">
+      <!-- 登录状态：个人中心下拉 -->
+      <el-sub-menu v-if="isLoggedIn" index="user-sub" popper-class="user-popper">
         <template #title>
           <el-icon><User /></el-icon>
           <span>{{ username }}</span>
@@ -57,6 +57,12 @@
           退出登录
         </el-menu-item>
       </el-sub-menu>
+
+      <!-- 未登录状态：登录按钮 -->
+      <el-menu-item v-else index="/login" class="login-menu-item">
+        <el-icon><User /></el-icon>
+        登录
+      </el-menu-item>
     </el-menu>
 
     <!-- 返回按钮 — 首页和登录页不显示 -->
@@ -104,6 +110,9 @@ const openSubs = computed(() => {
   if (route.path.startsWith('/audit')) subs.push('audit-sub')
   return subs
 })
+
+// ── 登录状态 ──
+const isLoggedIn = computed(() => !!localStorage.getItem('token'))
 
 // ── 用户名 ──
 const username = computed(() => {
