@@ -12,14 +12,14 @@ echo   启动后端服务 (port 8080)...
 echo   启动前端服务 (port 5173)...
 echo.
 
-REM 启动后端
-start "A24 后端" cmd /k "cd /d backend && venv\Scripts\activate && uvicorn main:app --reload --host 0.0.0.0 --port 8080"
+REM 启动后端 — 新窗口
+start "A24 后端" cmd /k "cd /d "%~dp0backend" && call venv\Scriptsctivate && uvicorn main:app --reload --host 0.0.0.0 --port 8080"
 
 REM 等后端先起来
 timeout /t 3 /nobreak >nul
 
-REM 启动前端
-start "A24 前端" cmd /k "cd /d frontend && npm run dev"
+REM 启动前端 — 新窗口
+start "A24 前端" cmd /k "cd /d "%~dp0frontend" && npm run dev"
 
 echo.
 echo   后端: http://localhost:8080/docs
