@@ -114,12 +114,6 @@ const username = ref(localStorage.getItem('username') || '用户')
 const backendStatus = ref('未检测')
 const barChartRef = ref(null)
 
-function handleLogout() {
-  localStorage.removeItem('token')
-  localStorage.removeItem('username')
-  router.push('/login')
-}
-
 async function checkBackend() {
   try {
     const res = await axios.get('/api/health')
