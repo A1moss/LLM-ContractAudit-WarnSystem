@@ -43,20 +43,56 @@
 
             <el-tab-pane label="审核结果" name="audit">
               <div class="tab-content">
-                <el-alert
-                  :title="`共检测到 ${riskSummary.total} 条风险，其中高风险 ${riskSummary.high} 条、中风险 ${riskSummary.mid} 条、低风险 ${riskSummary.low} 条`"
-                  type="warning" show-icon :closable="false" class="audit-alert"
-                />
-                <el-table :data="riskItems" stripe size="small" max-height="400">
-                  <el-table-column prop="level" label="等级" width="80">
-                    <template #default="{ row }">
-                      <el-tag :type="levelTag(row.level)" size="small">{{ row.level }}</el-tag>
+                <!-- 审核未触发 -->
+                <div v-if="contract.status === 'parsed' && riskItems.length === 0" class="audit-placeholder">
+                  <el-empty description="尚未审核此合同">
+                    <el-button type="primary" :loading="auditing" @click="handleTriggerAudit">
+                      开始审核
+                    </el-button>
+                  </el-empty>
+                </div>
+
+                <!-- 审核中 -->
+                <div v-else-if="contract.status === 'auditing'" class="audit-placeholder">
+                  <el-result icon="info" title="审核中" sub-title="AI 正在分析合同条款，请稍候...">
+                    <template #extra>
+                      <el-button :loading="true" type="primary">审核进行中</el-button>
                     </template>
-                  </el-table-column>
-                  <el-table-column prop="category" label="风险类别" width="130" />
-                  <el-table-column prop="clause" label="涉及条款" min-width="180" show-overflow-tooltip />
-                  <el-table-column prop="suggestion" label="建议" min-width="200" show-overflow-tooltip />
-                </el-table>
+                  </el-result>
+                </div>
+
+                <!-- 审核完成：展示风险列表 -->
+                <template v-else-if="riskItems.length > 0">
+                  <el-alert
+                    :title="`共检测到 ${riskSummary.total} 条风险，其中高风险 ${riskSummary.high} 条、中风险 ${riskSummary.mid} 条、低风险 ${riskSummary.low} 条`"
+                    type="warning" show-icon :closable="false" class="audit-alert"
+                  />
+                  <el-table :data="riskItems" stripe size="small" max-height="400">
+                    <el-table-column prop="level" label="等级" width="80">
+                      <template #default="{ row }">
+                        <el-tag :type="levelTag(row.level)" size="small">{{ row.level }}</el-tag>
+                      </template>
+                    </el-table-column>
+                    <el-table-column prop="category" label="风险类别" width="130" />
+                    <el-table-column prop="clause" label="涉及条款" min-width="180" show-overflow-tooltip />
+                    <el-table-column prop="suggestion" label="建议" min-width="200" show-overflow-tooltip />
+                    <el-table-column prop="confidence" label="置信度" width="100">
+                      <template #default="{ row }">
+                        <el-progress
+                          :percentage="Math.round((row.confidence || 0) * 100)"
+                          :color="row.confidence >= 0.7 ? '#67C23A' : row.confidence >= 0.5 ? '#E6A23C' : '#F56C6C'"
+                          :stroke-width="6"
+                        />
+                      </template>
+                    </el-table-column>
+                  </el-table>
+                  <el-button type="primary" size="small" class="audit-full-link" @click="goToAuditResult">
+                    全屏查看结果
+                  </el-button>
+                </template>
+
+                <!-- 审核完成但无风险 -->
+                <el-empty v-else description="审核完成，未检测到风险" />
               </div>
             </el-tab-pane>
 
@@ -68,9 +104,23 @@
 
             <el-tab-pane label="审核报告" name="report">
               <div class="tab-content">
-                <el-empty description="完整审核报告请前往 审核报告 页面查看">
-                  <el-button type="primary" @click="$router.push('/audit/report')">前往审核报告</el-button>
+                <el-empty v-if="contract.status !== 'completed'" description="审核完成后将自动生成报告">
+                  <el-button v-if="contract.status === 'parsed'" type="primary" :loading="auditing" @click="handleTriggerAudit">
+                    开始审核
+                  </el-button>
                 </el-empty>
+                <template v-else-if="riskItems.length > 0">
+                  <el-descriptions :column="2" border size="small" class="report-desc">
+                    <el-descriptions-item label="风险总数">{{ riskSummary.total }} 条</el-descriptions-item>
+                    <el-descriptions-item label="高风险">{{ riskSummary.high }} 条</el-descriptions-item>
+                    <el-descriptions-item label="中风险">{{ riskSummary.mid }} 条</el-descriptions-item>
+                    <el-descriptions-item label="低风险">{{ riskSummary.low }} 条</el-descriptions-item>
+                  </el-descriptions>
+                  <el-button type="primary" class="report-btn" @click="goToAuditReport">
+                    查看完整审核报告
+                  </el-button>
+                </template>
+                <el-empty v-else description="审核完成，未检测到风险" />
               </div>
             </el-tab-pane>
           </el-tabs>
@@ -135,7 +185,8 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Warning, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
-import { getContractDetail } from '../api/contract.js'
+import { ElMessage } from 'element-plus'
+import { getContractDetail, getAuditResult, triggerAudit } from '../api/contract.js'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
@@ -217,6 +268,7 @@ const totalPages = ref(0)
 const pdfError = ref('')
 const pdfCanvasRef = ref(null)
 let pdfDoc = null
+let pdfLoadingTask = null
 
 const pageSummary = ref('点击页码浏览各页合同条款')
 const pageSummaries = {
@@ -226,25 +278,38 @@ const pageSummaries = {
   4: '违约责任与争议解决：违约责任条款约定赔偿计算方式，争议提交甲方所在地法院管辖。',
 }
 
-// ── 模拟审核结果（审核 API 上线后替换） ──
-const riskItems = [
-  { level: '高风险', category: 'R01 保密期限缺失', clause: '第三条 保密期限', suggestion: '建议明确保密期限的起算时间和终止条件' },
-  { level: '高风险', category: 'R02 违约责任不明确', clause: '第四条 违约责任', suggestion: '建议约定违约金计算方式或赔偿上限' },
-  { level: '高风险', category: 'R03 管辖条款不利', clause: '第五条 争议解决', suggestion: '争议管辖地对接收方不利，建议协商变更' },
-  { level: '中风险', category: 'R04 保密范围过宽', clause: '第一条 定义', suggestion: '保密信息定义过于宽泛，建议限定具体范围' },
-  { level: '中风险', category: 'R05 例外情形缺失', clause: '第一条 定义', suggestion: '建议增加保密信息的例外情形' },
-  { level: '中风险', category: 'R06 返还义务缺失', clause: '第二条 义务', suggestion: '建议增加协议终止后保密信息返还/销毁条款' },
-  { level: '中风险', category: 'R07 转许可限制', clause: '第二条 义务', suggestion: '建议明确禁止向关联方转许可' },
-  { level: '低风险', category: 'R08 标题格式', clause: '全文', suggestion: '建议统一条款标题格式' },
-  { level: '低风险', category: 'R09 签署信息', clause: '末页', suggestion: '签署栏缺少日期填写提示' },
-]
+// ── 审核结果（从 API 获取）──
+const riskItems = ref([])
+
+// 风险等级映射：API 英文 → 前端中文
+const levelMap = { high: '高风险', medium: '中风险', low: '低风险' }
+
+async function fetchAuditResult() {
+  const id = route.params.id
+  if (!id) return
+  try {
+    const res = await getAuditResult(id)
+    riskItems.value = (res.data?.items || []).map(r => ({
+      level: levelMap[r.risk_level] || r.risk_level,
+      category: r.risk_type,
+      clause: r.clause_text,
+      suggestion: r.suggestion,
+      reason: r.reason,
+      confidence: r.confidence,
+      detection_method: r.detection_method,
+    }))
+  } catch {
+    // 无审核结果时静默，保持空列表
+    riskItems.value = []
+  }
+}
 
 // ── 审核结果汇总 ──
 const riskSummary = computed(() => {
-  const high = riskItems.filter(r => r.level === '高风险').length
-  const mid = riskItems.filter(r => r.level === '中风险').length
-  const low = riskItems.filter(r => r.level === '低风险').length
-  return { total: riskItems.length, high, mid, low }
+  const high = riskItems.value.filter(r => r.level === '高风险').length
+  const mid = riskItems.value.filter(r => r.level === '中风险').length
+  const low = riskItems.value.filter(r => r.level === '低风险').length
+  return { total: riskItems.value.length, high, mid, low }
 })
 
 function levelTag(level) {
@@ -253,12 +318,30 @@ function levelTag(level) {
   return 'success'
 }
 
+// ── 触发审核 ──
+const auditing = ref(false)
+async function handleTriggerAudit() {
+  auditing.value = true
+  try {
+    await triggerAudit(route.params.id)
+    contract.value.status = 'auditing'
+    // 审核完成后拉结果
+    await fetchAuditResult()
+    await fetchDetail()
+    ElMessage.success('审核完成')
+  } catch (e) {
+    ElMessage.error('审核触发失败')
+  } finally {
+    auditing.value = false
+  }
+}
+
 // ── pdf.js ──
 async function loadPdf() {
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
   try {
-    const task = pdfjsLib.getDocument({ url: '/test.pdf' })
-    pdfDoc = await task.promise
+    pdfLoadingTask = pdfjsLib.getDocument({ url: '/test.pdf' })
+    pdfDoc = await pdfLoadingTask.promise
     totalPages.value = pdfDoc.numPages
     renderPage(currentPage.value)
   } catch (e) {
@@ -297,17 +380,30 @@ function goToPage(p) {
 // ── 生命周期 ──
 onMounted(() => {
   fetchDetail()
+  fetchAuditResult()
   loadPdf()
 })
+
+// ── 导航到审核结果/报告页（列表页）──
+function goToAuditResult() {
+  router.push(`/audit/result/${route.params.id}`)
+}
+
+function goToAuditReport() {
+  router.push(`/audit/report/${route.params.id}`)
+}
 
 // 路由参数变化时重新拉数据（组件复用场景）
 watch(() => route.params.id, () => {
   fetchDetail()
+  fetchAuditResult()
 })
 
 onUnmounted(() => {
-  pdfDoc?.destroy()
+  // pdfjs-dist v6: destroy() 在 PDFDocumentLoadingTask 上，不在 PDFDocumentProxy
+  pdfLoadingTask?.destroy()
   pdfDoc = null
+  pdfLoadingTask = null
 })
 </script>
 
@@ -345,6 +441,22 @@ onUnmounted(() => {
 
 .audit-alert {
   margin-bottom: 16px;
+}
+
+.audit-placeholder {
+  padding: 60px 0;
+}
+
+.audit-full-link {
+  margin-top: 12px;
+}
+
+.report-desc {
+  margin-bottom: 16px;
+}
+
+.report-btn {
+  margin-top: 8px;
 }
 
 .tab-content {

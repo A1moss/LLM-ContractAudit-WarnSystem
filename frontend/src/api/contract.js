@@ -41,3 +41,27 @@ export function getContractDetail(id) {
 export function deleteContract(id) {
   return request.delete(`/contracts/${id}`)
 }
+
+/**
+ * 触发合同审核
+ * @param {number|string} id — 合同 ID
+ */
+export function triggerAudit(id) {
+  return request.post(`/contracts/${id}/audit`)
+}
+
+/**
+ * 获取合同审核结果（风险列表）
+ * @param {number|string} id — 合同 ID
+ */
+export function getAuditResult(id) {
+  return request.get(`/contracts/${id}/audit-result`)
+}
+
+/**
+ * 获取合同审核报告
+ * @param {number|string} id — 合同 ID
+ */
+export function getAuditReport(id) {
+  return request.get(`/contracts/${id}/audit-report`)
+}

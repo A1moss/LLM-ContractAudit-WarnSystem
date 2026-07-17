@@ -3,87 +3,226 @@
     <h3>审核结果</h3>
     <el-divider />
 
-    <!-- 统计卡片 -->
-    <el-row :gutter="20">
-      <el-col :span="6">
-        <el-card shadow="hover">
-          <el-statistic title="风险总数" :value="15" />
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover">
-          <el-statistic title="高风险" :value="3">
-            <template #suffix>
-              <span class="stat-suffix suffix-red">条</span>
-            </template>
-          </el-statistic>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover">
-          <el-statistic title="中风险" :value="7">
-            <template #suffix>
-              <span class="stat-suffix suffix-orange">条</span>
-            </template>
-          </el-statistic>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover">
-          <el-statistic title="低风险" :value="5">
-            <template #suffix>
-              <span class="stat-suffix suffix-green">条</span>
-            </template>
-          </el-statistic>
-        </el-card>
-      </el-col>
-    </el-row>
+    <!-- 加载状态 -->
+    <div v-if="loading" class="loading-state">
+      <el-skeleton :rows="6" animated />
+    </div>
 
-    <!-- 风险列表 -->
-    <el-card shadow="hover" class="risk-card">
-      <template #header>
-        <span>风险列表</span>
-      </template>
-      <el-table :data="riskList" stripe border>
-        <el-table-column prop="type" label="风险类型" width="150" />
-        <el-table-column prop="level" label="等级" width="100">
+    <!-- 错误状态 -->
+    <div v-else-if="error" class="error-state">
+      <el-result icon="error" :title="error">
+        <template #extra>
+          <el-button @click="fetchList">重试</el-button>
+        </template>
+      </el-result>
+    </div>
+
+    <!-- 空状态 -->
+    <div v-else-if="contracts.length === 0" class="empty-state">
+      <el-empty description="暂无已完成审核的合同">
+        <el-button type="primary" @click="$router.push('/contracts/upload')">上传合同</el-button>
+      </el-empty>
+    </div>
+
+    <!-- 合同审核结果列表 -->
+    <template v-else>
+      <el-table
+        :data="contracts"
+        stripe
+        border
+        row-key="id"
+        @expand-change="handleExpand"
+      >
+        <el-table-column type="expand">
           <template #default="{ row }">
-            <el-tag
-              :type="row.level === 'high' ? 'danger' : row.level === 'medium' ? 'warning' : 'success'"
-            >
-              {{ row.level === 'high' ? '高风险' : row.level === 'medium' ? '中风险' : '低风险' }}
-            </el-tag>
+            <div v-if="expandingRows[row.id]" class="expand-content">
+              <div v-if="row._riskLoading" class="expand-loading">
+                <el-skeleton :rows="3" animated />
+              </div>
+              <div v-else-if="row._riskError" class="expand-error">
+                <el-result icon="error" :title="row._riskError" />
+              </div>
+              <template v-else>
+                <div class="expand-summary">
+                  共 {{ row._riskTotal }} 条风险：
+                  <el-tag type="danger" size="small">高风险 {{ row._riskHigh }}</el-tag>
+                  <el-tag type="warning" size="small">中风险 {{ row._riskMid }}</el-tag>
+                  <el-tag type="success" size="small">低风险 {{ row._riskLow }}</el-tag>
+                </div>
+                <el-table :data="row._riskItems" size="small" border class="expand-table">
+                  <el-table-column prop="level" label="等级" width="80">
+                    <template #default="{ row: r }">
+                      <el-tag
+                        :type="r.level === '高风险' ? 'danger' : r.level === '中风险' ? 'warning' : 'success'"
+                        size="small"
+                      >{{ r.level }}</el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column prop="type" label="风险类型" width="130" />
+                  <el-table-column prop="clause" label="涉及条款" min-width="200" show-overflow-tooltip />
+                  <el-table-column prop="suggestion" label="建议" min-width="200" show-overflow-tooltip />
+                  <el-table-column prop="confidence" label="置信度" width="110">
+                    <template #default="{ row: r }">
+                      <el-progress
+                        :percentage="Math.round((r.confidence || 0) * 100)"
+                        :color="r.confidence >= 0.7 ? '#67C23A' : r.confidence >= 0.5 ? '#E6A23C' : '#F56C6C'"
+                        :stroke-width="6"
+                      />
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <el-button
+                  v-if="row._riskItems.length === 0"
+                  type="primary"
+                  size="small"
+                  class="expand-action"
+                  @click="$router.push(`/audit/result/${row.id}`)"
+                >查看合同详情</el-button>
+              </template>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column prop="clause" label="原文片段" min-width="250" show-overflow-tooltip />
-        <el-table-column prop="reason" label="判定理由" min-width="250" show-overflow-tooltip />
-        <el-table-column prop="confidence" label="置信度" width="120">
+        <el-table-column prop="file_name" label="合同名称" min-width="200">
           <template #default="{ row }">
-            <el-progress :percentage="row.confidence" :stroke-width="8" />
+            <el-link type="primary" @click="$router.push(`/audit/result/${row.id}`)">{{ row.file_name }}</el-link>
+          </template>
+        </el-table-column>
+        <el-table-column prop="contract_type" label="合同类型" width="130">
+          <template #default="{ row }">{{ typeLabel(row.contract_type) }}</template>
+        </el-table-column>
+        <el-table-column label="审核时间" width="170">
+          <template #default="{ row }">{{ formatTime(row.updated_at) }}</template>
+        </el-table-column>
+        <el-table-column label="风险概览" width="280">
+          <template #default="{ row }">
+            <div class="risk-badges">
+              <el-tag type="danger" size="small">高 {{ row._riskHigh ?? '—' }}</el-tag>
+              <el-tag type="warning" size="small">中 {{ row._riskMid ?? '—' }}</el-tag>
+              <el-tag type="success" size="small">低 {{ row._riskLow ?? '—' }}</el-tag>
+              <span class="risk-total">共 {{ row._riskTotal ?? '—' }} 条</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="140" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" type="primary" @click="$router.push(`/audit/result/${row.id}`)">
+              查看详情
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
-    </el-card>
+
+      <!-- 分页 -->
+      <div class="pagination-wrapper">
+        <el-pagination
+          v-model:current-page="pagination.page"
+          v-model:page-size="pagination.page_size"
+          :page-sizes="[10, 20, 50]"
+          :total="pagination.total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="fetchList"
+          @size-change="fetchList"
+        />
+      </div>
+    </template>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
+import { getContractList, getAuditResult } from '../api/contract.js'
 
-const riskList = ref([
-  { type: 'R01 违约金过高', level: 'high', clause: '若乙方违约，需支付合同总金额的 50% 作为违约金。', reason: '违约金比例 50% 超过法定上限 30%', confidence: 92 },
-  { type: 'R02 无限责任', level: 'high', clause: '乙方需赔偿甲方因此遭受的全部损失。', reason: '"全部损失"属于无限责任表述，应设赔偿上限', confidence: 88 },
-  { type: 'R03 单方解约权', level: 'high', clause: '甲方有权随时单方面解除本合同。', reason: '"随时单方面解除"剥夺乙方合同稳定性', confidence: 95 },
-  { type: 'R04 管辖条款缺失', level: 'medium', clause: '（未找到管辖条款）', reason: '合同未约定争议管辖法院或仲裁机构', confidence: 85 },
-  { type: 'R05 付款条件不明确', level: 'medium', clause: '甲方在验收合格后支付相应款项。', reason: '"相应款项"未明确金额或比例，存在支付争议风险', confidence: 78 },
-  { type: 'R06 知识产权归属', level: 'medium', clause: '项目成果的知识产权由双方协商确定。', reason: '知识产权归属未明确，应在签约前确定', confidence: 80 },
-  { type: 'R07 保密条款过宽', level: 'medium', clause: '乙方不得向任何第三方透露与本合同相关的任何信息。', reason: '保密范围"任何信息"过于宽泛，应限定为"商业秘密"', confidence: 75 },
-  { type: 'R08 验收标准缺失', level: 'medium', clause: '成果需达到甲方要求的标准。', reason: '验收标准由甲方单方决定，缺乏客观依据', confidence: 82 },
-  { type: 'R09 不可抗力条款', level: 'low', clause: '因不可抗力导致无法履行的，双方免责。', reason: '不可抗力定义范围过窄，建议补充具体情形', confidence: 70 },
-  { type: 'R10 合同期限', level: 'low', clause: '本合同有效期至项目完成。', reason: '"项目完成"缺乏明确的时间节点', confidence: 65 },
-  { type: 'R11 续约条款', level: 'low', clause: '（未找到续约条款）', reason: '长期合作合同建议加入续约机制', confidence: 60 },
-  { type: 'R12 通知送达', level: 'low', clause: '双方通过书面方式通知对方。', reason: '"书面方式"未明确包含电子邮件，建议补充', confidence: 55 },
-])
+// ── 列表状态 ──
+const contracts = ref([])
+const loading = ref(true)
+const error = ref('')
+const pagination = reactive({
+  page: 1,
+  page_size: 10,
+  total: 0,
+})
+
+// ── 展开行状态（记录哪些行已加载过风险数据）──
+const expandingRows = reactive({})
+
+// ── 合同类型映射 ──
+const typeMap = {
+  purchase: '采购合同', sales: '销售合同', nda: '保密协议 (NDA)',
+  outsourcing: '服务外包合同', employment: '劳动合同', other: '其他合同',
+}
+function typeLabel(type) { return typeMap[type] || type || '未分类' }
+function formatTime(iso) {
+  if (!iso) return '—'
+  return iso.replace('T', ' ').slice(0, 19)
+}
+
+// ── 获取已完成审核的合同列表 ──
+async function fetchList(page = pagination.page) {
+  loading.value = true
+  error.value = ''
+  pagination.page = page
+  try {
+    const res = await getContractList({
+      page,
+      page_size: pagination.page_size,
+      status: 'completed',
+    })
+    const items = res.data?.items || []
+    pagination.total = res.data?.total || 0
+
+    // 为每个合同预取风险计数
+    const enriched = await Promise.all(
+      items.map(async (c) => {
+        try {
+          const auditRes = await getAuditResult(c.id)
+          const risks = auditRes.data?.items || []
+          const high = risks.filter(r => r.risk_level === 'high').length
+          const mid = risks.filter(r => r.risk_level === 'medium').length
+          const low = risks.filter(r => r.risk_level === 'low').length
+          return { ...c, _riskTotal: risks.length, _riskHigh: high, _riskMid: mid, _riskLow: low }
+        } catch {
+          return { ...c, _riskTotal: 0, _riskHigh: 0, _riskMid: 0, _riskLow: 0 }
+        }
+      })
+    )
+    contracts.value = enriched
+  } catch (e) {
+    error.value = '加载审核结果列表失败'
+    console.warn('审核结果列表加载失败:', e)
+  } finally {
+    loading.value = false
+  }
+}
+
+// ── 展开行时按需加载详细风险项 ──
+const levelMap = { high: '高风险', medium: '中风险', low: '低风险' }
+
+async function handleExpand(row, expandedRows) {
+  const isExpanding = expandedRows.some(r => r.id === row.id)
+  if (!isExpanding) return
+  if (expandingRows[row.id]) return // 已加载过
+
+  expandingRows[row.id] = true
+  row._riskLoading = true
+  try {
+    const res = await getAuditResult(row.id)
+    row._riskItems = (res.data?.items || []).map(r => ({
+      level: levelMap[r.risk_level] || r.risk_level,
+      type: r.risk_type,
+      clause: r.clause_text,
+      reason: r.reason,
+      suggestion: r.suggestion,
+      confidence: r.confidence,
+      detection_method: r.detection_method,
+    }))
+  } catch {
+    row._riskError = '加载风险详情失败'
+  } finally {
+    row._riskLoading = false
+  }
+}
+
+onMounted(() => fetchList())
 </script>
 
 <style scoped>
@@ -93,23 +232,50 @@ const riskList = ref([
   margin: 0 auto;
 }
 
-.risk-card {
+.loading-state, .error-state, .empty-state {
+  padding: 60px 0;
+}
+
+.risk-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.risk-total {
+  margin-left: 4px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.expand-content {
+  padding: 12px 24px;
+}
+
+.expand-loading, .expand-error {
+  padding: 20px 0;
+}
+
+.expand-summary {
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #606266;
+}
+
+.expand-table {
+  margin-bottom: 8px;
+}
+
+.expand-action {
+  margin-top: 8px;
+}
+
+.pagination-wrapper {
   margin-top: 20px;
-}
-
-.stat-suffix {
-  font-size: 14px;
-}
-
-.suffix-red {
-  color: #F56C6C;
-}
-
-.suffix-orange {
-  color: #E6A23C;
-}
-
-.suffix-green {
-  color: #67C23A;
+  display: flex;
+  justify-content: flex-end;
 }
 </style>

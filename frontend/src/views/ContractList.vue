@@ -1,5 +1,5 @@
 <template>
-  <div class="list-page">
+  <div class="page-container">
     <div class="list-header">
       <h3>合同列表</h3>
       <el-button type="primary" @click="$router.push('/contracts/upload')">
@@ -267,7 +267,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.list-page {
+.page-container {
   max-width: 1200px;
   padding: 24px;
   margin: 0 auto;

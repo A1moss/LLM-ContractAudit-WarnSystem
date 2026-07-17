@@ -1,5 +1,5 @@
 <template>
-  <div class="upload-page">
+  <div class="page-container">
     <h3>合同上传</h3>
     <el-divider />
 
@@ -203,7 +203,7 @@ function handleReset() {
 </script>
 
 <style scoped>
-.upload-page {
+.page-container {
   padding: 24px;
   max-width: 1200px;
   margin: 0 auto;

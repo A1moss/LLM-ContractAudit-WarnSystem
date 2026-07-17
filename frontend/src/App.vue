@@ -99,7 +99,9 @@ const showBack = computed(() => route.path !== '/' && route.path !== '/login')
 const activeMenu = computed(() => {
   const p = route.path
   if (p.startsWith('/contracts')) return p
-  if (p.startsWith('/audit')) return p
+  // 审核结果/报告详情页高亮对应的菜单项
+  if (p.startsWith('/audit/result')) return '/audit/result'
+  if (p.startsWith('/audit/report')) return '/audit/report'
   return p
 })
 

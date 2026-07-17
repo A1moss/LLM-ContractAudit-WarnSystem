@@ -3,148 +3,315 @@
     <h3>审核报告</h3>
     <el-divider />
 
-    <!-- ECharts 饼图 + 柱状图 -->
-    <el-row :gutter="20">
-      <el-col :span="12">
-        <el-card shadow="hover">
-          <template #header>
-            <span>风险等级分布</span>
-          </template>
-          <div ref="pieChartRef" class="chart-box"></div>
-        </el-card>
-      </el-col>
-      <el-col :span="12">
-        <el-card shadow="hover">
-          <template #header>
-            <span>各类型风险数量</span>
-          </template>
-          <div ref="barChartRef" class="chart-box"></div>
-        </el-card>
-      </el-col>
-    </el-row>
+    <!-- 加载状态 -->
+    <div v-if="loading" class="loading-state">
+      <el-skeleton :rows="6" animated />
+    </div>
 
-    <!-- PDF 预览 -->
-    <el-card shadow="hover" class="pdf-card">
-      <template #header>
-        <span>合同原文预览</span>
-      </template>
-      <div class="pdf-preview">
-        <canvas v-if="!pdfError" ref="pdfCanvasRef" class="pdf-canvas"></canvas>
-        <div v-if="pdfError" class="pdf-error">
-          <el-icon :size="40"><Warning /></el-icon>
-          <p>PDF 加载失败：{{ pdfError }}</p>
-          <p class="pdf-error-hint">请确保 frontend/public/test.pdf 文件存在</p>
-        </div>
-        <div class="pdf-footer">
-          第 1 页 / 共 <span v-if="totalPages">{{ totalPages }}</span><span v-else>...</span> 页
-        </div>
-      </div>
-    </el-card>
+    <!-- 错误状态 -->
+    <div v-else-if="error" class="error-state">
+      <el-result icon="error" :title="error">
+        <template #extra>
+          <el-button @click="fetchList">重试</el-button>
+        </template>
+      </el-result>
+    </div>
+
+    <!-- 空状态 -->
+    <div v-else-if="contracts.length === 0" class="empty-state">
+      <el-empty description="暂无已完成审核的合同">
+        <el-button type="primary" @click="$router.push('/contracts/upload')">上传合同</el-button>
+      </el-empty>
+    </div>
+
+    <!-- 合同报告列表 + 右侧报告详情 -->
+    <template v-else>
+      <el-row :gutter="20">
+        <!-- 左侧：合同列表 -->
+        <el-col :span="selectedContract ? 8 : 24">
+          <el-table
+            :data="contracts"
+            stripe
+            border
+            highlight-current-row
+            @current-change="handleSelect"
+          >
+            <el-table-column prop="file_name" label="合同名称" min-width="180">
+              <template #default="{ row }">
+                <el-link type="primary" :underline="false">{{ row.file_name }}</el-link>
+              </template>
+            </el-table-column>
+            <el-table-column prop="contract_type" label="类型" width="120">
+              <template #default="{ row }">{{ typeLabel(row.contract_type) }}</template>
+            </el-table-column>
+            <el-table-column label="审核时间" width="160">
+              <template #default="{ row }">{{ formatTime(row.updated_at) }}</template>
+            </el-table-column>
+            <el-table-column label="风险评分" width="100" align="center">
+              <template #default="{ row }">
+                <el-tag
+                  :type="row._score >= 60 ? 'danger' : row._score >= 30 ? 'warning' : 'success'"
+                  size="small"
+                >{{ row._score ?? '—' }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="100">
+              <template #default="{ row }">
+                <el-button size="small" @click="$router.push(`/contracts/${row.id}`)">
+                  合同详情
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <div class="pagination-wrapper">
+            <el-pagination
+              v-model:current-page="pagination.page"
+              v-model:page-size="pagination.page_size"
+              :page-sizes="[10, 20, 50]"
+              :total="pagination.total"
+              layout="total, sizes, prev, pager, next, jumper"
+              @current-change="(p) => { selectedContract = null; reportData = null; riskItems = []; disposeCharts(); fetchList(p); }"
+              @size-change="() => { selectedContract = null; reportData = null; riskItems = []; disposeCharts(); fetchList(1); }"
+            />
+          </div>
+        </el-col>
+
+        <!-- 右侧：报告详情 -->
+        <el-col v-if="selectedContract" :span="16">
+          <el-card shadow="hover">
+            <template #header>
+              <div class="report-detail-header">
+                <span>{{ selectedContract.file_name }} — 审核报告</span>
+                <div class="report-detail-actions">
+                  <el-button size="small" @click="$router.push(`/audit/report/${selectedContract.id}`)">
+                    全屏查看
+                  </el-button>
+                  <el-button size="small" type="primary" @click="$router.push(`/contracts/${selectedContract.id}`)">
+                    合同详情
+                  </el-button>
+                </div>
+              </div>
+            </template>
+
+            <div v-if="reportLoading" class="report-detail-loading">
+              <el-skeleton :rows="6" animated />
+            </div>
+
+            <template v-else-if="reportData">
+              <!-- 综合评分 -->
+              <el-descriptions :column="4" border size="small" class="report-summary">
+                <el-descriptions-item label="综合评分">
+                  <el-tag
+                    :type="reportData.risk_score >= 60 ? 'danger' : reportData.risk_score >= 30 ? 'warning' : 'success'"
+                    size="large"
+                  >{{ reportData.risk_score }} 分</el-tag>
+                </el-descriptions-item>
+                <el-descriptions-item label="高风险">{{ reportData.high_risk_count }} 条</el-descriptions-item>
+                <el-descriptions-item label="中风险">{{ reportData.mid_risk_count }} 条</el-descriptions-item>
+                <el-descriptions-item label="低风险">{{ reportData.low_risk_count }} 条</el-descriptions-item>
+              </el-descriptions>
+
+              <!-- 图表区 -->
+              <el-row :gutter="20" class="chart-row">
+                <el-col :span="12">
+                  <div ref="pieChartRef" class="chart-box"></div>
+                </el-col>
+                <el-col :span="12">
+                  <div ref="barChartRef" class="chart-box"></div>
+                </el-col>
+              </el-row>
+
+              <!-- 风险明细列表 -->
+              <h4 class="detail-subtitle">风险明细</h4>
+              <el-table :data="riskItems" size="small" border max-height="300">
+                <el-table-column prop="level" label="等级" width="80">
+                  <template #default="{ row: r }">
+                    <el-tag
+                      :type="r.level === '高风险' ? 'danger' : r.level === '中风险' ? 'warning' : 'success'"
+                      size="small"
+                    >{{ r.level }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="type" label="风险类型" width="120" />
+                <el-table-column prop="clause" label="涉及条款" min-width="180" show-overflow-tooltip />
+                <el-table-column prop="suggestion" label="建议" min-width="180" show-overflow-tooltip />
+              </el-table>
+            </template>
+          </el-card>
+        </el-col>
+      </el-row>
+    </template>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
-import { Warning } from '@element-plus/icons-vue'
+import { ref, reactive, nextTick, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
-import * as pdfjsLib from 'pdfjs-dist'
-import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import { getContractList, getAuditResult, getAuditReport } from '../api/contract.js'
 
-// --- ECharts 饼图 ---
+// ── 列表状态 ──
+const contracts = ref([])
+const loading = ref(true)
+const error = ref('')
+const pagination = reactive({
+  page: 1,
+  page_size: 10,
+  total: 0,
+})
+
+// ── 选中合同 & 报告详情 ──
+const selectedContract = ref(null)
+const reportData = ref(null)
+const riskItems = ref([])
+const reportLoading = ref(false)
+
+// ── 图表 ──
 const pieChartRef = ref(null)
+const barChartRef = ref(null)
 let pieChartInstance = null
+let barChartInstance = null
 
-const initPieChart = () => {
-  pieChartInstance = echarts.init(pieChartRef.value)
-  pieChartInstance.setOption({
-    tooltip: { trigger: 'item' },
-    legend: { bottom: '0%' },
-    series: [
-      {
+// ── 工具函数 ──
+const typeMap = {
+  purchase: '采购合同', sales: '销售合同', nda: '保密协议 (NDA)',
+  outsourcing: '服务外包合同', employment: '劳动合同', other: '其他合同',
+}
+function typeLabel(type) { return typeMap[type] || type || '未分类' }
+function formatTime(iso) {
+  if (!iso) return '—'
+  return iso.replace('T', ' ').slice(0, 19)
+}
+
+// ── 获取列表 ──
+async function fetchList(page = pagination.page) {
+  loading.value = true
+  error.value = ''
+  pagination.page = page
+  try {
+    const res = await getContractList({
+      page,
+      page_size: pagination.page_size,
+      status: 'completed',
+    })
+    const items = res.data?.items || []
+    pagination.total = res.data?.total || 0
+
+    // 为每个合同预取评分
+    const enriched = await Promise.all(
+      items.map(async (c) => {
+        try {
+          const reportRes = await getAuditReport(c.id)
+          return { ...c, _score: reportRes.data?.risk_score ?? 0 }
+        } catch {
+          return { ...c, _score: 0 }
+        }
+      })
+    )
+    contracts.value = enriched
+  } catch (e) {
+    error.value = '加载审核报告列表失败'
+    console.warn('审核报告列表加载失败:', e)
+  } finally {
+    loading.value = false
+  }
+}
+
+// ── 选择合同 → 加载报告详情 ──
+const levelMap = { high: '高风险', medium: '中风险', low: '低风险' }
+
+async function handleSelect(row) {
+  if (!row) return
+  selectedContract.value = row
+  reportLoading.value = true
+  reportData.value = null
+  riskItems.value = []
+
+  try {
+    const [reportRes, resultRes] = await Promise.all([
+      getAuditReport(row.id),
+      getAuditResult(row.id),
+    ])
+    reportData.value = reportRes.data
+    riskItems.value = (resultRes.data?.items || []).map(r => ({
+      level: levelMap[r.risk_level] || r.risk_level,
+      type: r.risk_type,
+      clause: r.clause_text,
+      suggestion: r.suggestion,
+    }))
+
+    await nextTick()
+    initCharts()
+  } catch (e) {
+    console.warn('报告详情加载失败:', e)
+  } finally {
+    reportLoading.value = false
+  }
+}
+
+// ── ECharts ──
+function initCharts() {
+  disposeCharts()
+  if (!reportData.value) return
+
+  // 饼图
+  if (pieChartRef.value) {
+    pieChartInstance = echarts.init(pieChartRef.value)
+    pieChartInstance.setOption({
+      tooltip: { trigger: 'item' },
+      legend: { bottom: '0%' },
+      series: [{
         name: '风险等级',
         type: 'pie',
         radius: ['40%', '70%'],
         label: { show: true, formatter: '{b}: {c} 条' },
         data: [
-          { value: 3, name: '高风险', itemStyle: { color: '#F56C6C' } },
-          { value: 7, name: '中风险', itemStyle: { color: '#E6A23C' } },
-          { value: 5, name: '低风险', itemStyle: { color: '#67C23A' } },
+          { value: reportData.value.high_risk_count || 0, name: '高风险', itemStyle: { color: '#F56C6C' } },
+          { value: reportData.value.mid_risk_count || 0, name: '中风险', itemStyle: { color: '#E6A23C' } },
+          { value: reportData.value.low_risk_count || 0, name: '低风险', itemStyle: { color: '#67C23A' } },
         ],
+      }],
+    })
+  }
+
+  // 柱状图
+  if (barChartRef.value) {
+    const countByType = {}
+    riskItems.value.forEach(r => {
+      countByType[r.type] = (countByType[r.type] || 0) + 1
+    })
+    const types = Object.entries(countByType)
+
+    barChartInstance = echarts.init(barChartRef.value)
+    barChartInstance.setOption({
+      tooltip: { trigger: 'axis' },
+      xAxis: {
+        type: 'category',
+        data: types.map(t => t[0]),
+        axisLabel: { rotate: 45 },
       },
-    ],
-  })
-}
-
-// --- ECharts 柱状图 ---
-const barChartRef = ref(null)
-let barChartInstance = null
-
-const initBarChart = () => {
-  barChartInstance = echarts.init(barChartRef.value)
-  barChartInstance.setOption({
-    tooltip: { trigger: 'axis' },
-    xAxis: {
-      type: 'category',
-      data: ['R01', 'R02', 'R03', 'R04', 'R05', 'R06', 'R07', 'R08', 'R09', 'R10', 'R11', 'R12'],
-      axisLabel: { rotate: 45 }
-    },
-    yAxis: { type: 'value', name: '数量' },
-    series: [
-      {
+      yAxis: { type: 'value', name: '数量', minInterval: 1 },
+      series: [{
         name: '风险数量',
         type: 'bar',
-        data: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-        itemStyle: { color: '#409EFF' }
-      },
-    ],
-  })
-}
-
-// --- pdf.js 渲染第一页 ---
-const pdfCanvasRef = ref(null)
-const totalPages = ref(0)
-const pdfError = ref('')
-
-const renderPdf = async () => {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
-
-  try {
-    const loadingTask = pdfjsLib.getDocument({ url: '/test.pdf' })
-    const pdf = await loadingTask.promise
-    totalPages.value = pdf.numPages
-
-    const page = await pdf.getPage(1)
-    const canvas = pdfCanvasRef.value
-    const viewport = page.getViewport({ scale: 1.0 })
-
-    const maxWidth = 600
-    const containerWidth = Math.min(canvas.parentElement.clientWidth - 2, maxWidth)
-    const scale = containerWidth / viewport.width
-    const scaledViewport = page.getViewport({ scale })
-
-    canvas.width = scaledViewport.width
-    canvas.height = scaledViewport.height
-
-    const ctx = canvas.getContext('2d')
-    await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise
-  } catch (e) {
-    pdfError.value = e.message
-    console.warn('PDF 加载失败:', e.message)
+        data: types.map(t => t[1]),
+        itemStyle: { color: '#409EFF' },
+        barWidth: '50%',
+      }],
+    })
   }
 }
 
-onMounted(() => {
-  initPieChart()
-  initBarChart()
-  renderPdf()
-})
-
-onUnmounted(() => {
+function disposeCharts() {
   pieChartInstance?.dispose()
   pieChartInstance = null
   barChartInstance?.dispose()
   barChartInstance = null
-})
+}
+
+onMounted(() => fetchList())
+
+onUnmounted(() => disposeCharts())
 </script>
 
 <style scoped>
@@ -154,36 +321,47 @@ onUnmounted(() => {
   margin: 0 auto;
 }
 
+.loading-state, .error-state, .empty-state {
+  padding: 60px 0;
+}
+
+.pagination-wrapper {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.report-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.report-detail-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.report-detail-loading {
+  padding: 20px 0;
+}
+
+.report-summary {
+  margin-bottom: 16px;
+}
+
+.chart-row {
+  margin-bottom: 20px;
+}
+
 .chart-box {
   width: 100%;
-  height: 350px;
+  height: 300px;
 }
 
-.pdf-card {
-  margin-top: 20px;
-}
-
-.pdf-preview {
-  text-align: center;
-}
-
-.pdf-canvas {
-  border: 1px solid #ddd;
-  max-width: 100%;
-}
-
-.pdf-error {
-  padding: 50px;
-  color: #999;
-}
-
-.pdf-error-hint {
-  font-size: 12px;
-}
-
-.pdf-footer {
-  margin-top: 10px;
-  color: #999;
-  font-size: 13px;
+.detail-subtitle {
+  margin: 16px 0 8px;
+  font-size: 15px;
+  color: #303133;
 }
 </style>
