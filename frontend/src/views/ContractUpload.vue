@@ -56,11 +56,10 @@
 
         <el-form-item label="审核模式" prop="audit_mode">
           <el-radio-group v-model="form.audit_mode">
-            <el-radio value="light">轻量审核</el-radio>
-            <el-radio value="standard">标准审核</el-radio>
-            <el-radio value="deep">深度审核</el-radio>
+            <el-radio value="fast">快速审核</el-radio>
+            <el-radio value="precise">精细审核</el-radio>
           </el-radio-group>
-          <div class="form-hint">轻量 ~5s（快速筛查）｜标准 ~20s（多角色验证）｜深度 ~30s（含辩论裁决）</div>
+          <div class="form-hint">快速 ~5s（规则引擎 + LLM 初筛）｜精细 ~20s（含多 Agent 交叉验证，复杂合同自动启用深度辩论）</div>
         </el-form-item>
 
         <el-form-item>
@@ -108,7 +107,7 @@ const progressText = ref('')
 const form = reactive({
   name: '',
   contract_type: '',
-  audit_mode: 'standard',
+  audit_mode: 'fast',
 })
 
 const rules = {

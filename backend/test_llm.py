@@ -106,7 +106,26 @@ def test_08_parser():
 
 
 @test
-def test_09_corex():
+def test_09_ocr_import():
+    from ai.parser.ocr_parser import parse_image, _ocr_available
+    print(f"  ✅ OCR模块已加载 (PaddleOCR={'可用' if _ocr_available else '未安装'})")
+
+
+@test
+def test_10_knowledge():
+    import json
+    for f in ["risk_cases.json", "laws.json", "standard_clauses.json"]:
+        path = os.path.join(os.path.dirname(__file__), "ai", "knowledge", f)
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            print(f"  ✅ {f}: {len(data)} 条")
+        else:
+            print(f"  ⚠️ {f} 不存在")
+
+
+@test
+def test_11_corex():
     from ai.corex import run_review
     from ai.auditor.rule_engine import run_rules
     initial = run_rules(TEST_CONTRACT)
@@ -128,7 +147,9 @@ if __name__ == "__main__":
     test_06_safe_patterns()
     test_07_llm_auditor()
     test_08_parser()
-    test_09_corex()
+    test_09_ocr_import()
+    test_10_knowledge()
+    test_11_corex()
 
     print("=" * 60)
     print(f"结果: {passed} 通过 / {failed} 失败 / {passed + failed} 总计")
