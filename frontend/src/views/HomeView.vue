@@ -1,23 +1,9 @@
 <template>
-  <div style="padding: 30px; max-width: 1000px; margin: 0 auto;">
-    <!-- 顶部：欢迎语 + 退出按钮 -->
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-      <div>
-        <h2 style="margin: 0;">欢迎回来，{{ username }}</h2>
-        <p style="margin: 4px 0 0 0; color: #909399; font-size: 14px;">A24 合同智能审核系统</p>
-      </div>
-      <el-button @click="handleLogout">退出登录</el-button>
-    </div>
-
-    <!-- TODO: 临时导航 — A 做好全局菜单后删除 -->
-    <div style="margin-bottom: 20px; padding: 12px 16px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px;">
-      <span style="font-size: 12px; color: #856404; margin-right: 12px;">⚠ 临时导航（A 全局菜单上线后删除）</span>
-      <el-button size="small" @click="$router.push('/')">首页</el-button>
-      <el-button size="small" @click="$router.push('/contracts/upload')">上传合同</el-button>
-      <el-button size="small" @click="$router.push('/contracts')">合同列表</el-button>
-      <el-button size="small" @click="$router.push('/contracts/1')">合同详情</el-button>
-      <el-button size="small" @click="$router.push('/audit/result')">审核结果</el-button>
-      <el-button size="small" @click="$router.push('/audit/report')">审核报告</el-button>
+  <div class="home-page">
+    <!-- 顶部：欢迎语 -->
+    <div style="margin-bottom: 16px;">
+      <h2 style="margin: 0;">欢迎回来，{{ username }}</h2>
+      <p style="margin: 4px 0 0 0; color: #909399; font-size: 14px;">A24 合同智能审核系统</p>
     </div>
 
     <!-- 后端连通性 -->
@@ -114,12 +100,6 @@ const username = ref(localStorage.getItem('username') || '用户')
 const backendStatus = ref('未检测')
 const barChartRef = ref(null)
 
-function handleLogout() {
-  localStorage.removeItem('token')
-  localStorage.removeItem('username')
-  router.push('/login')
-}
-
 async function checkBackend() {
   try {
     const res = await axios.get('/api/health')
@@ -189,3 +169,11 @@ onUnmounted(() => {
   chartInstance = null
 })
 </script>
+
+<style scoped>
+.home-page {
+  max-width: 1200px;
+  padding: 24px;
+  margin: 0 auto;
+}
+</style>
