@@ -32,8 +32,12 @@ request.interceptors.response.use(
       const { status, data } = error.response
       if (status === 401) {
         localStorage.removeItem('token')
-        router.push('/login')
-        ElMessage.error('登录已过期，请重新登录')
+        // 不在登录页时才跳转，避免登录失败时死循环
+        if (router.currentRoute.value.path !== '/login') {
+          router.push('/login')
+        }
+        const msg = data?.detail || '用户名或密码错误'
+        ElMessage.error(msg)
       } else {
         const msg = data?.detail || data?.message || `请求失败 (${status})`
         ElMessage.error(msg)
