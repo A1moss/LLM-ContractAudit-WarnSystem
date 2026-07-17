@@ -6,18 +6,6 @@
         <h2>欢迎回来，{{ username }}</h2>
         <p class="page-subtitle">A24 合同智能审核系统</p>
       </div>
-      <el-button @click="handleLogout">退出登录</el-button>
-    </div>
-
-    <!-- TODO: 临时导航 — A 做好全局菜单后删除 -->
-    <div class="temp-nav">
-      <span>⚠ 临时导航（A 全局菜单上线后删除）</span>
-      <el-button size="small" @click="$router.push('/')">首页</el-button>
-      <el-button size="small" @click="$router.push('/contracts/upload')">上传合同</el-button>
-      <el-button size="small" @click="$router.push('/contracts')">合同列表</el-button>
-      <el-button size="small" @click="$router.push('/contracts/1')">合同详情</el-button>
-      <el-button size="small" @click="$router.push('/audit/result')">审核结果</el-button>
-      <el-button size="small" @click="$router.push('/audit/report')">审核报告</el-button>
     </div>
 
     <!-- 后端连通性 -->
@@ -206,20 +194,6 @@ onUnmounted(() => {
   margin: 4px 0 0 0;
   color: #909399;
   font-size: 14px;
-}
-
-.temp-nav {
-  margin-bottom: 20px;
-  padding: 12px 16px;
-  background: #fff3cd;
-  border: 1px solid #ffc107;
-  border-radius: 6px;
-}
-
-.temp-nav span {
-  font-size: 12px;
-  color: #856404;
-  margin-right: 12px;
 }
 
 .section-card {
