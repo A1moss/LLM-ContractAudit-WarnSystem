@@ -31,7 +31,7 @@
       </el-descriptions>
 
       <!-- 主体：左侧 tabs + 右侧 PDF -->
-      <el-row :gutter="20">
+      <el-row :gutter="20" class="detail-row">
         <el-col :span="14">
           <el-tabs v-model="activeTab" type="border-card">
             <el-tab-pane label="原始文本" name="text">
@@ -43,7 +43,10 @@
 
             <el-tab-pane label="审核结果" name="audit">
               <div class="tab-content">
-                <el-alert title="共检测到 15 条风险，其中高风险 3 条、中风险 7 条、低风险 5 条" type="warning" show-icon :closable="false" class="audit-alert" />
+                <el-alert
+                  :title="`共检测到 ${riskSummary.total} 条风险，其中高风险 ${riskSummary.high} 条、中风险 ${riskSummary.mid} 条、低风险 ${riskSummary.low} 条`"
+                  type="warning" show-icon :closable="false" class="audit-alert"
+                />
                 <el-table :data="riskItems" stripe size="small" max-height="400">
                   <el-table-column prop="level" label="等级" width="80">
                     <template #default="{ row }">
@@ -74,7 +77,7 @@
         </el-col>
 
         <!-- 右侧 PDF 预览面板 -->
-        <el-col :span="10">
+        <el-col :span="10" class="detail-right">
           <el-card shadow="hover">
             <template #header>
               <div class="pdf-header">
@@ -175,13 +178,18 @@ function formatTime(iso) {
   return iso.replace('T', ' ').slice(0, 19)
 }
 
-// ── 渲染文本（简单段落换行） ──
+// ── HTML 转义（防 XSS） ──
+function escapeHtml(text) {
+  const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
+  return text.replace(/[&<>"']/g, ch => map[ch])
+}
+
+// ── 渲染文本（段落换行，保留空行） ──
 const renderedText = computed(() => {
   const text = contract.value?.parsed_text || ''
   return text
     .split('\n')
-    .filter(p => p.trim())
-    .map(p => `<p>${p}</p>`)
+    .map(p => (p.trim() ? `<p>${escapeHtml(p)}</p>` : '<p><br></p>'))
     .join('')
 })
 
@@ -230,6 +238,14 @@ const riskItems = [
   { level: '低风险', category: 'R08 标题格式', clause: '全文', suggestion: '建议统一条款标题格式' },
   { level: '低风险', category: 'R09 签署信息', clause: '末页', suggestion: '签署栏缺少日期填写提示' },
 ]
+
+// ── 审核结果汇总 ──
+const riskSummary = computed(() => {
+  const high = riskItems.filter(r => r.level === '高风险').length
+  const mid = riskItems.filter(r => r.level === '中风险').length
+  const low = riskItems.filter(r => r.level === '低风险').length
+  return { total: riskItems.length, high, mid, low }
+})
 
 function levelTag(level) {
   if (level === '高风险') return 'danger'
@@ -309,12 +325,27 @@ onUnmounted(() => {
   margin-bottom: 20px;
 }
 
+/* 左右两列固定等高：CSS 变量统一基准，避免 calc 漂移 */
+.detail-row {
+  --row-height: calc(100vh - 200px);
+  height: var(--row-height);
+  min-height: 600px;
+  overflow: hidden;
+}
+
+.detail-right {
+  height: 100%;
+  overflow-y: auto;
+}
+
 .audit-alert {
   margin-bottom: 16px;
 }
 
 .tab-content {
-  min-height: 400px;
+  height: calc(var(--row-height) - 55px);
+  min-height: 540px;
+  overflow-y: auto;
   padding: 8px 0;
   line-height: 1.8;
   color: #303133;
