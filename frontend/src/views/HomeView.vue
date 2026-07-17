@@ -98,7 +98,7 @@ import axios from 'axios'
 import * as echarts from 'echarts'
 
 const router = useRouter()
-const username = ref(localStorage.getItem('username') || '用户')
+const username = ref('用户')
 const backendStatus = ref('未检测')
 const barChartRef = ref(null)
 
@@ -162,6 +162,7 @@ function handleResize() {
 }
 
 onMounted(() => {
+  username.value = localStorage.getItem('username') || '用户'
   initBarChart()
 })
 

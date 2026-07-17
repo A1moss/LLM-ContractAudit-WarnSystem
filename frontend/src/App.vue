@@ -79,7 +79,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
   HomeFilled, FolderOpened, Checked, User,
@@ -111,12 +111,13 @@ const openSubs = computed(() => {
   return subs
 })
 
-// ── 登录状态 ──
-const isLoggedIn = computed(() => !!localStorage.getItem('token'))
+// ── 登录状态与用户名（ref + router.afterEach 确保 localStorage 变化后同步）──
+const isLoggedIn = ref(!!localStorage.getItem('token'))
+const username = ref(localStorage.getItem('username') || '未登录')
 
-// ── 用户名 ──
-const username = computed(() => {
-  return localStorage.getItem('username') || '未登录'
+router.afterEach(() => {
+  isLoggedIn.value = !!localStorage.getItem('token')
+  username.value = localStorage.getItem('username') || '未登录'
 })
 
 // ── 返回 ──

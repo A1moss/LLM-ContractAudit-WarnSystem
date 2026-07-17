@@ -132,7 +132,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Warning, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import { getContractDetail } from '../api/contract.js'
@@ -298,6 +298,11 @@ function goToPage(p) {
 onMounted(() => {
   fetchDetail()
   loadPdf()
+})
+
+// 路由参数变化时重新拉数据（组件复用场景）
+watch(() => route.params.id, () => {
+  fetchDetail()
 })
 
 onUnmounted(() => {
