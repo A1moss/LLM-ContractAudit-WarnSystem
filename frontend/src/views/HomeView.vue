@@ -1,7 +1,11 @@
 <template>
-  <div style="padding: 30px; max-width: 900px; margin: 0 auto;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
-      <h1 style="margin: 0;">A24 合同智能审核系统</h1>
+  <div style="padding: 30px; max-width: 1000px; margin: 0 auto;">
+    <!-- 顶部：欢迎语 + 上传按钮 -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+      <div>
+        <h2 style="margin: 0;">欢迎回来，{{ username }}</h2>
+        <p style="margin: 4px 0 0 0; color: #909399; font-size: 14px;">A24 合同智能审核系统</p>
+      </div>
       <el-button type="primary" size="large" @click="goUpload">
         <el-icon style="margin-right: 6px;"><Plus /></el-icon>
         上传新合同
@@ -19,12 +23,74 @@
       </div>
     </el-card>
 
+    <!-- 四个统计卡片 -->
+    <el-row :gutter="20" style="margin-bottom: 20px;">
+      <el-col :span="6">
+        <el-card shadow="hover">
+          <el-statistic title="今日审核" :value="12">
+            <template #suffix>
+              <span style="font-size: 14px; color: #67C23A;">份</span>
+            </template>
+          </el-statistic>
+        </el-card>
+      </el-col>
+      <el-col :span="6">
+        <el-card shadow="hover">
+          <el-statistic title="待处理" :value="5">
+            <template #suffix>
+              <span style="font-size: 14px; color: #E6A23C;">份</span>
+            </template>
+          </el-statistic>
+        </el-card>
+      </el-col>
+      <el-col :span="6">
+        <el-card shadow="hover">
+          <el-statistic title="本月风险" :value="38">
+            <template #suffix>
+              <span style="font-size: 14px; color: #F56C6C;">条</span>
+            </template>
+          </el-statistic>
+        </el-card>
+      </el-col>
+      <el-col :span="6">
+        <el-card shadow="hover">
+          <el-statistic title="通过率" :value="92.3">
+            <template #suffix>
+              <span style="font-size: 14px; color: #409EFF;">%</span>
+            </template>
+          </el-statistic>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <!-- 最近合同列表 -->
+    <el-card shadow="hover" style="margin-bottom: 20px;">
+      <template #header>
+        <span>最近合同</span>
+      </template>
+      <el-table :data="recentContracts" stripe>
+        <el-table-column prop="filename" label="文件名" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="type" label="类型" width="120" />
+        <el-table-column prop="status" label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="statusTag(row.status)" size="small">{{ row.status }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="riskLevel" label="风险等级" width="100">
+          <template #default="{ row }">
+            <el-tag :type="riskTag(row.riskLevel)" size="small">{{ row.riskLevel }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="uploadTime" label="上传时间" width="160" />
+      </el-table>
+    </el-card>
+
     <!-- 近 7 天审核量柱状图 -->
     <el-card shadow="hover">
       <template #header>
         <span>近 7 天审核量</span>
       </template>
-      <div ref="barChartRef" style="width: 100%; height: 320px;"></div>
+      <div ref="barChartRef" style="width: 100%; height: 300px;"></div>
     </el-card>
   </div>
 </template>
@@ -37,6 +103,7 @@ import axios from 'axios'
 import * as echarts from 'echarts'
 
 const router = useRouter()
+const username = ref(localStorage.getItem('username') || '用户')
 const backendStatus = ref('未检测')
 const barChartRef = ref(null)
 
@@ -53,9 +120,31 @@ async function checkBackend() {
   }
 }
 
+// ── 最近合同（写死数据） ──
+const recentContracts = [
+  { filename: '2026年度采购框架协议.pdf', type: '采购合同', status: '审核完成', riskLevel: '高风险', uploadTime: '2026-07-17 14:30' },
+  { filename: '员工保密协议-李四.docx', type: '保密协议', status: '审核完成', riskLevel: '中风险', uploadTime: '2026-07-17 11:20' },
+  { filename: '软件开发外包合同-v2.pdf', type: '服务合同', status: '审核中', riskLevel: '—', uploadTime: '2026-07-17 09:15' },
+  { filename: '办公室租赁合同.pdf', type: '租赁合同', status: '待审核', riskLevel: '—', uploadTime: '2026-07-16 16:45' },
+  { filename: '战略合作协议-XX科技.docx', type: '合作协议', status: '审核完成', riskLevel: '低风险', uploadTime: '2026-07-16 10:00' },
+]
+
+function statusTag(status) {
+  if (status === '审核完成') return 'success'
+  if (status === '审核中') return 'warning'
+  return 'info'
+}
+
+function riskTag(level) {
+  if (level === '高风险') return 'danger'
+  if (level === '中风险') return 'warning'
+  if (level === '低风险') return 'success'
+  return 'info'
+}
+
+// ── ECharts 柱状图 ──
 let chartInstance = null
 
-// ── ECharts：近 7 天审核量（写死数据） ──
 function initBarChart() {
   chartInstance = echarts.init(barChartRef.value)
   chartInstance.setOption({
@@ -65,22 +154,15 @@ function initBarChart() {
       type: 'category',
       data: ['07/11', '07/12', '07/13', '07/14', '07/15', '07/16', '07/17'],
     },
-    yAxis: {
-      type: 'value',
-      name: '审核数',
-      minInterval: 1,
-    },
-    series: [
-      {
-        name: '审核量',
-        type: 'bar',
-        data: [3, 5, 2, 8, 4, 6, 7],
-        itemStyle: { color: '#409EFF' },
-        barWidth: '50%',
-      },
-    ],
+    yAxis: { type: 'value', name: '审核数', minInterval: 1 },
+    series: [{
+      name: '审核量',
+      type: 'bar',
+      data: [3, 5, 2, 8, 4, 6, 7],
+      itemStyle: { color: '#409EFF' },
+      barWidth: '50%',
+    }],
   })
-
   window.addEventListener('resize', handleResize)
 }
 
