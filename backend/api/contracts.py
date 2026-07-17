@@ -11,6 +11,10 @@ from api.deps import get_current_user
 from ai.parser import detect_and_parse
 from ai.classifier import classify_contract
 from ai.extractor import extract_elements
+from ai.auditor import run_rules, audit_with_llm
+from ai.corex import run_review
+from models.audit_record import AuditRecord
+from models.audit_report import AuditReport
 
 router = APIRouter(prefix="/contracts", tags=["contracts"])
 
@@ -174,3 +178,129 @@ def delete_contract(
     db.delete(c)
     db.commit()
     return {"code": 0, "message": "ok", "data": None}
+
+
+@router.post("/{contract_id}/audit")
+def trigger_audit(
+    contract_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    c = db.query(Contract).filter(Contract.id == contract_id, Contract.user_id == current_user.id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="contract not found")
+    if not c.parsed_text:
+        raise HTTPException(status_code=400, detail="contract has no parsed text, upload first")
+
+    # Mark auditing
+    c.status = "auditing"
+    db.commit()
+
+    audit_batch = str(uuid.uuid4())
+    full_text = c.parsed_text
+
+    # 1. Rule engine (always runs)
+    rule_results = run_rules(full_text)
+
+    all_risks = list(rule_results)
+
+    # 2. LLM auditor (precise mode only)
+    if c.audit_mode == "precise":
+        try:
+            llm_results = audit_with_llm(full_text)
+            for r in llm_results:
+                r["detection_method"] = "rag"
+            all_risks.extend(llm_results)
+        except Exception as e:
+            pass  # LLM unavailable, fall back to rule-only
+
+        # 3. Corex multi-agent review (precise mode only)
+        try:
+            corex_result = run_review(full_text, rule_results)
+            for r in corex_result.get("risks", []):
+                r["detection_method"] = "corex_review"
+                r["corex_agent_log"] = corex_result.get("agent_logs")
+            all_risks.extend(corex_result.get("risks", []))
+        except Exception as e:
+            pass
+
+    # Save each risk as AuditRecord
+    records = []
+    missing_clauses = []
+    for r in all_risks:
+        record = AuditRecord(
+            contract_id=contract_id,
+            audit_batch=audit_batch,
+            risk_type=r.get("risk_type", "R00"),
+            risk_level=r.get("level", "low"),
+            clause_text=r.get("clause_text", ""),
+            clause_position=r.get("clause_position"),
+            reason=r.get("reason"),
+            suggestion=r.get("suggestion"),
+            detection_method=r.get("detection_method", "rule"),
+            confidence=r.get("confidence", 0.8),
+            corex_agent_log=r.get("corex_agent_log"),
+            feedback_status="pending",
+        )
+        db.add(record)
+        records.append(record)
+
+        if r.get("risk_type") in ("R08", "R09", "R10"):
+            missing_clauses.append({
+                "risk_type": r["risk_type"],
+                "clause": r.get("name", r["risk_type"]),
+                "suggestion": r.get("suggestion"),
+            })
+
+    db.commit()
+    for record in records:
+        db.refresh(record)
+
+    # Calculate report stats
+    high = sum(1 for r in all_risks if r.get("level") == "high")
+    mid = sum(1 for r in all_risks if r.get("level") == "medium")
+    low = sum(1 for r in all_risks if r.get("level") == "low")
+    risk_score = min(100, high * 30 + mid * 15 + low * 5)
+
+    # Generate simple HTML report
+    risk_rows = "".join(
+        f"<tr><td>{r.get('risk_type','')}</td><td>{r.get('level','')}</td>"
+        f"<td>{r.get('reason','')[:80]}</td><td>{r.get('suggestion','')[:80]}</td></tr>"
+        for r in all_risks
+    )
+    report_html = (
+        f"<html><body><h2>Audit Report</h2>"
+        f"<p>Batch: {audit_batch} | Mode: {c.audit_mode} | Score: {risk_score}</p>"
+        f"<table border='1'><tr><th>Type</th><th>Level</th><th>Reason</th><th>Suggestion</th></tr>{risk_rows}</table>"
+        f"</body></html>"
+    )
+
+    report = AuditReport(
+        contract_id=contract_id,
+        audit_batch=audit_batch,
+        report_html=report_html,
+        risk_score=risk_score,
+        high_risk_count=high,
+        mid_risk_count=mid,
+        low_risk_count=low,
+        risk_heatmap_data={"high": high, "mid": mid, "low": low},
+        missing_clauses=missing_clauses if missing_clauses else None,
+    )
+    db.add(report)
+
+    c.status = "completed"
+    db.commit()
+
+    return {
+        "code": 0,
+        "message": "ok",
+        "data": {
+            "audit_batch": audit_batch,
+            "risk_score": risk_score,
+            "high_risk_count": high,
+            "mid_risk_count": mid,
+            "low_risk_count": low,
+            "total_risks": len(all_risks),
+            "records": len(records),
+        },
+    }

@@ -194,7 +194,7 @@ function handleReset() {
   formRef.value?.resetFields()
   form.name = ''
   form.contract_type = ''
-  form.audit_mode = 'standard'
+  form.audit_mode = 'fast'
   selectedFile.value = null
   progress.value = 0
   progressStatus.value = ''
