@@ -1,7 +1,7 @@
 <template>
-  <div class="contract-detail">
+  <div class="page-container">
     <!-- 顶部：合同元信息 -->
-    <el-descriptions title="合同详情" :column="5" border style="margin-bottom: 20px;">
+    <el-descriptions title="合同详情" :column="5" border class="meta-descriptions">
       <el-descriptions-item label="文件名">
         <el-tag type="primary" size="small">测试合同-保密协议.pdf</el-tag>
       </el-descriptions-item>
@@ -50,7 +50,7 @@
 
           <el-tab-pane label="审核结果" name="audit">
             <div class="tab-content">
-              <el-alert title="共检测到 15 条风险，其中高风险 3 条、中风险 7 条、低风险 5 条" type="warning" show-icon :closable="false" style="margin-bottom: 16px;" />
+              <el-alert title="共检测到 15 条风险，其中高风险 3 条、中风险 7 条、低风险 5 条" type="warning" show-icon :closable="false" class="audit-alert" />
               <el-table :data="riskItems" stripe size="small" max-height="400">
                 <el-table-column prop="level" label="等级" width="80">
                   <template #default="{ row }">
@@ -84,7 +84,7 @@
       <el-col :span="10">
         <el-card shadow="hover">
           <template #header>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div class="pdf-header">
               <span>合同原文</span>
               <el-tag size="small">第 {{ currentPage }} / {{ totalPages }} 页</el-tag>
             </div>
@@ -92,11 +92,11 @@
 
           <!-- PDF 渲染区 -->
           <div v-if="!pdfError" class="pdf-viewer">
-            <canvas ref="pdfCanvasRef" style="border: 1px solid #e4e7ed; width: 100%;"></canvas>
+            <canvas ref="pdfCanvasRef" class="pdf-canvas"></canvas>
           </div>
-          <div v-if="pdfError" style="padding: 40px; text-align: center; color: #999;">
+          <div v-if="pdfError" class="pdf-error">
             <el-icon :size="32"><Warning /></el-icon>
-            <p style="margin-top: 8px;">{{ pdfError }}</p>
+            <p>{{ pdfError }}</p>
           </div>
 
           <!-- 页码跳转按钮组 -->
@@ -122,9 +122,9 @@
 
           <!-- 侧栏文本展示（当前页条款摘要） -->
           <div v-if="!pdfError" class="text-sidebar">
-            <el-divider style="margin: 12px 0;" />
-            <span style="font-size: 13px; color: #909399;">当前页条款摘要</span>
-            <p style="margin-top: 8px; font-size: 13px; line-height: 1.8; color: #606266;">
+            <el-divider class="sidebar-divider" />
+            <span class="sidebar-label">当前页条款摘要</span>
+            <p class="sidebar-text">
               {{ pageSummary }}
             </p>
           </div>
@@ -232,10 +232,18 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.contract-detail {
-  max-width: 1200px;
+.page-container {
   padding: 24px;
+  max-width: 1200px;
   margin: 0 auto;
+}
+
+.meta-descriptions {
+  margin-bottom: 20px;
+}
+
+.audit-alert {
+  margin-bottom: 16px;
 }
 
 .tab-content {
@@ -253,12 +261,33 @@ onUnmounted(() => {
   margin: 16px 0 8px 0;
 }
 
+.pdf-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
 .pdf-viewer {
   text-align: center;
   min-height: 200px;
   background: #f5f7fa;
   border-radius: 4px;
   padding: 4px;
+}
+
+.pdf-canvas {
+  border: 1px solid #e4e7ed;
+  width: 100%;
+}
+
+.pdf-error {
+  padding: 40px;
+  text-align: center;
+  color: #999;
+}
+
+.pdf-error p {
+  margin-top: 8px;
 }
 
 .page-nav {
@@ -280,5 +309,21 @@ onUnmounted(() => {
 
 .text-sidebar {
   padding: 0 4px;
+}
+
+.sidebar-divider {
+  margin: 12px 0;
+}
+
+.sidebar-label {
+  font-size: 13px;
+  color: #909399;
+}
+
+.sidebar-text {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.8;
+  color: #606266;
 }
 </style>

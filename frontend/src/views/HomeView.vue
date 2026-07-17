@@ -1,15 +1,29 @@
 <template>
-  <div class="home-page">
-    <!-- 顶部：欢迎语 -->
-    <div style="margin-bottom: 16px;">
-      <h2 style="margin: 0;">欢迎回来，{{ username }}</h2>
-      <p style="margin: 4px 0 0 0; color: #909399; font-size: 14px;">A24 合同智能审核系统</p>
+  <div class="page-container">
+    <!-- 顶部：欢迎语 + 退出按钮 -->
+    <div class="page-header">
+      <div>
+        <h2>欢迎回来，{{ username }}</h2>
+        <p class="page-subtitle">A24 合同智能审核系统</p>
+      </div>
+      <el-button @click="handleLogout">退出登录</el-button>
+    </div>
+
+    <!-- TODO: 临时导航 — A 做好全局菜单后删除 -->
+    <div class="temp-nav">
+      <span>⚠ 临时导航（A 全局菜单上线后删除）</span>
+      <el-button size="small" @click="$router.push('/')">首页</el-button>
+      <el-button size="small" @click="$router.push('/contracts/upload')">上传合同</el-button>
+      <el-button size="small" @click="$router.push('/contracts')">合同列表</el-button>
+      <el-button size="small" @click="$router.push('/contracts/1')">合同详情</el-button>
+      <el-button size="small" @click="$router.push('/audit/result')">审核结果</el-button>
+      <el-button size="small" @click="$router.push('/audit/report')">审核报告</el-button>
     </div>
 
     <!-- 后端连通性 -->
-    <el-card shadow="hover" style="margin-bottom: 20px;">
-      <div style="display: flex; align-items: center; gap: 12px;">
-        <span style="color: #606266;">后端状态：</span>
+    <el-card shadow="hover" class="section-card">
+      <div class="backend-row">
+        <span class="backend-label">后端状态：</span>
         <el-tag v-if="backendStatus === '未检测'" type="info">未检测</el-tag>
         <el-tag v-else-if="backendStatus.startsWith('✅')" type="success">已连通</el-tag>
         <el-tag v-else type="danger">未连通</el-tag>
@@ -18,12 +32,12 @@
     </el-card>
 
     <!-- 四个统计卡片 -->
-    <el-row :gutter="20" style="margin-bottom: 20px;">
+    <el-row :gutter="20" class="stat-row">
       <el-col :span="6">
         <el-card shadow="hover">
           <el-statistic title="今日审核" :value="12">
             <template #suffix>
-              <span style="font-size: 14px; color: #67C23A;">份</span>
+              <span class="stat-suffix suffix-green">份</span>
             </template>
           </el-statistic>
         </el-card>
@@ -32,7 +46,7 @@
         <el-card shadow="hover">
           <el-statistic title="待处理" :value="5">
             <template #suffix>
-              <span style="font-size: 14px; color: #E6A23C;">份</span>
+              <span class="stat-suffix suffix-orange">份</span>
             </template>
           </el-statistic>
         </el-card>
@@ -41,7 +55,7 @@
         <el-card shadow="hover">
           <el-statistic title="本月风险" :value="38">
             <template #suffix>
-              <span style="font-size: 14px; color: #F56C6C;">条</span>
+              <span class="stat-suffix suffix-red">条</span>
             </template>
           </el-statistic>
         </el-card>
@@ -50,7 +64,7 @@
         <el-card shadow="hover">
           <el-statistic title="通过率" :value="92.3">
             <template #suffix>
-              <span style="font-size: 14px; color: #409EFF;">%</span>
+              <span class="stat-suffix suffix-blue">%</span>
             </template>
           </el-statistic>
         </el-card>
@@ -58,7 +72,7 @@
     </el-row>
 
     <!-- 最近合同列表 -->
-    <el-card shadow="hover" style="margin-bottom: 20px;">
+    <el-card shadow="hover" class="section-card">
       <template #header>
         <span>最近合同</span>
       </template>
@@ -84,7 +98,7 @@
       <template #header>
         <span>近 7 天审核量</span>
       </template>
-      <div ref="barChartRef" style="width: 100%; height: 300px;"></div>
+      <div ref="barChartRef" class="chart-container"></div>
     </el-card>
   </div>
 </template>
@@ -171,9 +185,83 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.home-page {
-  max-width: 1200px;
+.page-container {
   padding: 24px;
+  max-width: 1200px;
   margin: 0 auto;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.page-header h2 {
+  margin: 0;
+}
+
+.page-subtitle {
+  margin: 4px 0 0 0;
+  color: #909399;
+  font-size: 14px;
+}
+
+.temp-nav {
+  margin-bottom: 20px;
+  padding: 12px 16px;
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 6px;
+}
+
+.temp-nav span {
+  font-size: 12px;
+  color: #856404;
+  margin-right: 12px;
+}
+
+.section-card {
+  margin-bottom: 20px;
+}
+
+.backend-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.backend-label {
+  color: #606266;
+}
+
+.stat-row {
+  margin-bottom: 20px;
+}
+
+.stat-suffix {
+  font-size: 14px;
+}
+
+.suffix-green {
+  color: #67C23A;
+}
+
+.suffix-orange {
+  color: #E6A23C;
+}
+
+.suffix-red {
+  color: #F56C6C;
+}
+
+.suffix-blue {
+  color: #409EFF;
+}
+
+.chart-container {
+  width: 100%;
+  height: 300px;
 }
 </style>
