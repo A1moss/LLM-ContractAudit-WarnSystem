@@ -233,7 +233,9 @@ onUnmounted(() => {
 
 <style scoped>
 .contract-detail {
-  padding: 20px;
+  max-width: 1200px;
+  padding: 24px;
+  margin: 0 auto;
 }
 
 .tab-content {

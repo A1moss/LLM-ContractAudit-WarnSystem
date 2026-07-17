@@ -204,8 +204,8 @@ function handleReset() {
 
 <style scoped>
 .upload-page {
-  padding: 20px;
-  max-width: 800px;
+  padding: 24px;
+  max-width: 1200px;
   margin: 0 auto;
 }
 
