@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-cd /d "D:\学习材料留档\2026暑期社会实践\LLM\LLM-ContractAudit-WarnSystem\backend"
+cd /d "%~dp0..\backend"
 call venv\Scripts\activate.bat
 echo 启动后端服务...
 echo API 文档: http://localhost:8080/docs

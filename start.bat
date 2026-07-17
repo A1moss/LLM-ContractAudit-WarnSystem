@@ -2,7 +2,7 @@
 chcp 65001 >nul
 title A24 合同审核系统 — 一键启动
 
-cd /d "D:\学习材料留档\2026暑期社会实践\LLM\LLM-ContractAudit-WarnSystem"
+cd /d "%~dp0"
 
 echo ========================================
 echo   A24 合同智能审核系统
