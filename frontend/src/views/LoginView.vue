@@ -44,6 +44,19 @@
           </el-form>
         </el-tab-pane>
       </el-tabs>
+
+      <!-- 游客模式开关 -->
+      <el-divider />
+      <div class="guest-toggle">
+        <span>游客模式</span>
+        <el-switch
+          v-model="guestMode"
+          active-text="开"
+          inactive-text="关"
+          @change="handleGuestModeChange"
+        />
+        <span class="guest-hint">关闭后需登录才能访问任何页面</span>
+      </div>
     </el-card>
   </div>
 </template>
@@ -57,6 +70,13 @@ import request from '../utils/request.js'
 const router = useRouter()
 const activeTab = ref('login')
 const loading = ref(false)
+
+// ── 游客模式 ──
+const guestMode = ref(localStorage.getItem('guest_mode') !== 'false')
+
+function handleGuestModeChange(val) {
+  localStorage.setItem('guest_mode', val ? 'true' : 'false')
+}
 
 // ── 已有 token 直接跳首页 ──
 onMounted(() => {
@@ -172,5 +192,19 @@ async function handleRegister() {
 
 .login-tabs {
   --el-tabs-header-margin: 0 0 12px 0;
+}
+.guest-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 4px;
+  font-size: 14px;
+  color: #606266;
+}
+
+.guest-hint {
+  font-size: 12px;
+  color: #909399;
+  margin-left: auto;
 }
 </style>

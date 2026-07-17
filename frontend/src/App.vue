@@ -27,7 +27,7 @@
           合同管理
         </template>
         <el-menu-item index="/contracts">合同列表</el-menu-item>
-        <el-menu-item index="/contracts/upload">上传合同</el-menu-item>
+        <el-menu-item index="/contracts/upload" :disabled="!isLoggedIn">上传合同</el-menu-item>
       </el-sub-menu>
 
       <el-sub-menu index="audit-sub">
