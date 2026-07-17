@@ -1,7 +1,17 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from database import Base, engine
+from api.auth import router as auth_router
 
-app = FastAPI(title="A24 合同审核系统", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    yield
+
+
+app = FastAPI(title="A24 合同审核系统", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,3 +30,4 @@ def root():
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+app.include_router(auth_router, prefix="/api")
