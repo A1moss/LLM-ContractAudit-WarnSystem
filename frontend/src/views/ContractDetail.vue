@@ -1,157 +1,216 @@
 <template>
   <div class="page-container">
-    <!-- 顶部：合同元信息 -->
-    <el-descriptions title="合同详情" :column="5" border class="meta-descriptions">
-      <el-descriptions-item label="文件名">
-        <el-tag type="primary" size="small">测试合同-保密协议.pdf</el-tag>
-      </el-descriptions-item>
-      <el-descriptions-item label="合同类型">保密协议 (NDA)</el-descriptions-item>
-      <el-descriptions-item label="上传时间">2026-07-17 10:30</el-descriptions-item>
-      <el-descriptions-item label="页数">{{ totalPages }} 页</el-descriptions-item>
-      <el-descriptions-item label="审核状态">
-        <el-tag type="success">审核完成</el-tag>
-      </el-descriptions-item>
-    </el-descriptions>
+    <!-- 加载状态 -->
+    <div v-if="loading" class="loading-state">
+      <el-skeleton :rows="8" animated />
+    </div>
 
-    <!-- 主体：左侧 tabs + 右侧 PDF -->
-    <el-row :gutter="20">
-      <el-col :span="14">
-        <el-tabs v-model="activeTab" type="border-card">
-          <el-tab-pane label="原始文本" name="text">
-            <div class="tab-content">
-              <h4>保密协议</h4>
-              <p>
-                本保密协议（以下简称"本协议"）由以下双方于 2026 年 7 月 17 日签署：
-              </p>
-              <p><strong>甲方（披露方）：</strong>网新恒天科技有限公司</p>
-              <p><strong>乙方（接收方）：</strong>XX 科技有限公司</p>
-              <p>
-                鉴于甲方拟向乙方披露某些保密信息，双方经友好协商，达成如下协议：
-              </p>
-              <h5>第一条 保密信息的定义</h5>
-              <p>
-                本协议所称"保密信息"是指甲方向乙方披露的、与甲方业务相关的所有非公开信息，
-                包括但不限于技术资料、商业计划、客户信息、财务数据、产品设计、源代码、
-                算法模型以及其他任何甲方明确标注为"保密"或根据其性质应被合理视为保密的信息。
-              </p>
-              <h5>第二条 保密义务</h5>
-              <p>乙方承诺对甲方披露的保密信息承担以下义务：</p>
-              <p>
-                1. 未经甲方书面同意，不得向任何第三方披露、泄露、转让或允许其使用保密信息；
-              </p>
-              <p>2. 仅为本协议约定的目的使用保密信息，不得用于任何其他目的；</p>
-              <p>3. 采取不低于保护自身同类保密信息的注意程度保管保密信息。</p>
-              <h5>第三条 保密期限</h5>
-              <p>
-                本协议项下的保密义务自保密信息披露之日起持续有效，有效期为 5 年。
-              </p>
+    <!-- 错误状态 -->
+    <div v-else-if="error" class="error-state">
+      <el-result icon="error" title="加载失败" :sub-title="error">
+        <template #extra>
+          <el-button type="primary" @click="fetchDetail">重新加载</el-button>
+          <el-button @click="$router.push('/contracts')">返回列表</el-button>
+        </template>
+      </el-result>
+    </div>
+
+    <!-- 正常内容 -->
+    <template v-else-if="contract">
+      <!-- 顶部：合同元信息 -->
+      <el-descriptions title="合同详情" :column="5" border class="meta-descriptions">
+        <el-descriptions-item label="文件名">
+          <el-tag type="primary" size="small">{{ contract.file_name }}</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="合同类型">{{ typeLabel(contract.contract_type) }}</el-descriptions-item>
+        <el-descriptions-item label="上传时间">{{ formatTime(contract.created_at) }}</el-descriptions-item>
+        <el-descriptions-item label="页数">{{ totalPages }} 页</el-descriptions-item>
+        <el-descriptions-item label="审核状态">
+          <el-tag :type="statusTag(contract.status)">{{ statusLabel(contract.status) }}</el-tag>
+        </el-descriptions-item>
+      </el-descriptions>
+
+      <!-- 主体：左侧 tabs + 右侧 PDF -->
+      <el-row :gutter="20">
+        <el-col :span="14">
+          <el-tabs v-model="activeTab" type="border-card">
+            <el-tab-pane label="原始文本" name="text">
+              <div class="tab-content">
+                <div v-if="contract.parsed_text" v-html="renderedText"></div>
+                <el-empty v-else description="暂无解析文本" />
+              </div>
+            </el-tab-pane>
+
+            <el-tab-pane label="审核结果" name="audit">
+              <div class="tab-content">
+                <el-alert title="共检测到 15 条风险，其中高风险 3 条、中风险 7 条、低风险 5 条" type="warning" show-icon :closable="false" class="audit-alert" />
+                <el-table :data="riskItems" stripe size="small" max-height="400">
+                  <el-table-column prop="level" label="等级" width="80">
+                    <template #default="{ row }">
+                      <el-tag :type="levelTag(row.level)" size="small">{{ row.level }}</el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column prop="category" label="风险类别" width="130" />
+                  <el-table-column prop="clause" label="涉及条款" min-width="180" show-overflow-tooltip />
+                  <el-table-column prop="suggestion" label="建议" min-width="200" show-overflow-tooltip />
+                </el-table>
+              </div>
+            </el-tab-pane>
+
+            <el-tab-pane label="条款比对" name="compare">
+              <div class="tab-content">
+                <el-empty description="标准条款比对结果将在审核完成后生成" />
+              </div>
+            </el-tab-pane>
+
+            <el-tab-pane label="审核报告" name="report">
+              <div class="tab-content">
+                <el-empty description="完整审核报告请前往 审核报告 页面查看">
+                  <el-button type="primary" @click="$router.push('/audit/report')">前往审核报告</el-button>
+                </el-empty>
+              </div>
+            </el-tab-pane>
+          </el-tabs>
+        </el-col>
+
+        <!-- 右侧 PDF 预览面板 -->
+        <el-col :span="10">
+          <el-card shadow="hover">
+            <template #header>
+              <div class="pdf-header">
+                <span>合同原文</span>
+                <el-tag size="small">第 {{ currentPage }} / {{ totalPages }} 页</el-tag>
+              </div>
+            </template>
+
+            <!-- PDF 渲染区 -->
+            <div v-if="!pdfError" class="pdf-viewer">
+              <canvas ref="pdfCanvasRef" class="pdf-canvas"></canvas>
             </div>
-          </el-tab-pane>
-
-          <el-tab-pane label="审核结果" name="audit">
-            <div class="tab-content">
-              <el-alert title="共检测到 15 条风险，其中高风险 3 条、中风险 7 条、低风险 5 条" type="warning" show-icon :closable="false" class="audit-alert" />
-              <el-table :data="riskItems" stripe size="small" max-height="400">
-                <el-table-column prop="level" label="等级" width="80">
-                  <template #default="{ row }">
-                    <el-tag :type="levelTag(row.level)" size="small">{{ row.level }}</el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="category" label="风险类别" width="130" />
-                <el-table-column prop="clause" label="涉及条款" min-width="180" show-overflow-tooltip />
-                <el-table-column prop="suggestion" label="建议" min-width="200" show-overflow-tooltip />
-              </el-table>
+            <div v-if="pdfError" class="pdf-error">
+              <el-icon :size="32"><Warning /></el-icon>
+              <p>{{ pdfError }}</p>
             </div>
-          </el-tab-pane>
 
-          <el-tab-pane label="条款比对" name="compare">
-            <div class="tab-content">
-              <el-empty description="标准条款比对结果将在审核完成后生成" />
-            </div>
-          </el-tab-pane>
-
-          <el-tab-pane label="审核报告" name="report">
-            <div class="tab-content">
-              <el-empty description="完整审核报告请前往 审核报告 页面查看">
-                <el-button type="primary" @click="$router.push('/audit/report')">前往审核报告</el-button>
-              </el-empty>
-            </div>
-          </el-tab-pane>
-        </el-tabs>
-      </el-col>
-
-      <!-- 右侧 PDF 预览面板 -->
-      <el-col :span="10">
-        <el-card shadow="hover">
-          <template #header>
-            <div class="pdf-header">
-              <span>合同原文</span>
-              <el-tag size="small">第 {{ currentPage }} / {{ totalPages }} 页</el-tag>
-            </div>
-          </template>
-
-          <!-- PDF 渲染区 -->
-          <div v-if="!pdfError" class="pdf-viewer">
-            <canvas ref="pdfCanvasRef" class="pdf-canvas"></canvas>
-          </div>
-          <div v-if="pdfError" class="pdf-error">
-            <el-icon :size="32"><Warning /></el-icon>
-            <p>{{ pdfError }}</p>
-          </div>
-
-          <!-- 页码跳转按钮组 -->
-          <div v-if="!pdfError" class="page-nav">
-            <el-button size="small" :disabled="currentPage <= 1" @click="goToPage(currentPage - 1)">
-              <el-icon><ArrowLeft /></el-icon>
-            </el-button>
-            <span class="page-buttons">
-              <el-button
-                v-for="p in totalPages"
-                :key="p"
-                :type="p === currentPage ? 'primary' : 'default'"
-                size="small"
-                @click="goToPage(p)"
-              >
-                {{ p }}
+            <!-- 页码跳转按钮组 -->
+            <div v-if="!pdfError" class="page-nav">
+              <el-button size="small" :disabled="currentPage <= 1" @click="goToPage(currentPage - 1)">
+                <el-icon><ArrowLeft /></el-icon>
               </el-button>
-            </span>
-            <el-button size="small" :disabled="currentPage >= totalPages" @click="goToPage(currentPage + 1)">
-              <el-icon><ArrowRight /></el-icon>
-            </el-button>
-          </div>
+              <span class="page-buttons">
+                <el-button
+                  v-for="p in totalPages"
+                  :key="p"
+                  :type="p === currentPage ? 'primary' : 'default'"
+                  size="small"
+                  @click="goToPage(p)"
+                >
+                  {{ p }}
+                </el-button>
+              </span>
+              <el-button size="small" :disabled="currentPage >= totalPages" @click="goToPage(currentPage + 1)">
+                <el-icon><ArrowRight /></el-icon>
+              </el-button>
+            </div>
 
-          <!-- 侧栏文本展示（当前页条款摘要） -->
-          <div v-if="!pdfError" class="text-sidebar">
-            <el-divider class="sidebar-divider" />
-            <span class="sidebar-label">当前页条款摘要</span>
-            <p class="sidebar-text">
-              {{ pageSummary }}
-            </p>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
+            <!-- 侧栏文本展示（当前页条款摘要） -->
+            <div v-if="!pdfError" class="text-sidebar">
+              <el-divider class="sidebar-divider" />
+              <span class="sidebar-label">当前页条款摘要</span>
+              <p class="sidebar-text">
+                {{ pageSummary }}
+              </p>
+            </div>
+          </el-card>
+        </el-col>
+      </el-row>
+    </template>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { Warning, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
+import { getContractDetail } from '../api/contract.js'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
-// ── 状态 ──
+const route = useRoute()
+const router = useRouter()
+
+// ── 数据状态 ──
+const loading = ref(true)
+const error = ref('')
+const contract = ref(null)
+
+// ── 合同类型映射 ──
+const typeMap = {
+  purchase: '采购合同',
+  sales: '销售合同',
+  nda: '保密协议 (NDA)',
+  outsourcing: '服务外包合同',
+  employment: '劳动合同',
+  other: '其他合同',
+}
+
+function typeLabel(type) {
+  return typeMap[type] || type || '未分类'
+}
+
+// ── 状态映射 ──
+function statusLabel(status) {
+  const map = { uploaded: '已上传', parsed: '已解析', auditing: '审核中', completed: '审核完成' }
+  return map[status] || status || '未知'
+}
+
+function statusTag(status) {
+  if (status === 'completed') return 'success'
+  if (status === 'auditing') return 'warning'
+  return 'info'
+}
+
+function formatTime(iso) {
+  if (!iso) return '—'
+  return iso.replace('T', ' ').slice(0, 19)
+}
+
+// ── 渲染文本（简单段落换行） ──
+const renderedText = computed(() => {
+  const text = contract.value?.parsed_text || ''
+  return text
+    .split('\n')
+    .filter(p => p.trim())
+    .map(p => `<p>${p}</p>`)
+    .join('')
+})
+
+// ── 获取合同详情 ──
+async function fetchDetail() {
+  loading.value = true
+  error.value = ''
+  try {
+    const res = await getContractDetail(route.params.id)
+    contract.value = res.data
+  } catch (e) {
+    error.value = '无法加载合同详情，请确认合同 ID 有效且后端已启动'
+    console.warn('合同详情加载失败:', e)
+  } finally {
+    loading.value = false
+  }
+}
+
+// ── Tab 状态 ──
 const activeTab = ref('text')
+
+// ── PDF 状态 ──
 const currentPage = ref(1)
 const totalPages = ref(0)
 const pdfError = ref('')
 const pdfCanvasRef = ref(null)
 let pdfDoc = null
 
-// ── 模拟元数据 ──
 const pageSummary = ref('点击页码浏览各页合同条款')
-
-// 各页条款摘要（写死，联调时替换为后端返回的段落结构）
 const pageSummaries = {
   1: '保密协议定义条款：明确保密信息的范围，包括技术资料、商业计划、客户信息、财务数据等，采用概括+列举的定义方式。',
   2: '保密义务条款：乙方不得向第三方披露、仅可用于约定目的、需采取不低于保护自身同类信息的注意程度。',
@@ -159,7 +218,7 @@ const pageSummaries = {
   4: '违约责任与争议解决：违约责任条款约定赔偿计算方式，争议提交甲方所在地法院管辖。',
 }
 
-// ── 模拟审核结果 ──
+// ── 模拟审核结果（审核 API 上线后替换） ──
 const riskItems = [
   { level: '高风险', category: 'R01 保密期限缺失', clause: '第三条 保密期限', suggestion: '建议明确保密期限的起算时间和终止条件' },
   { level: '高风险', category: 'R02 违约责任不明确', clause: '第四条 违约责任', suggestion: '建议约定违约金计算方式或赔偿上限' },
@@ -196,7 +255,6 @@ async function renderPage(pageNum) {
   if (!pdfDoc) return
   currentPage.value = pageNum
 
-  // 更新侧栏摘要
   pageSummary.value = pageSummaries[pageNum] || `第 ${pageNum} 页（暂无条款摘要）`
 
   const page = await pdfDoc.getPage(pageNum)
@@ -222,6 +280,7 @@ function goToPage(p) {
 
 // ── 生命周期 ──
 onMounted(() => {
+  fetchDetail()
   loadPdf()
 })
 
@@ -236,6 +295,14 @@ onUnmounted(() => {
   padding: 24px;
   max-width: 1200px;
   margin: 0 auto;
+}
+
+.loading-state {
+  padding: 40px 0;
+}
+
+.error-state {
+  padding: 60px 0;
 }
 
 .meta-descriptions {
