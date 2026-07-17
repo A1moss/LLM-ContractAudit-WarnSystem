@@ -221,6 +221,7 @@ __marimo__/
 node_modules/
 *.db
 backend/uploads/
+backend/data/
 data/*.docx
 data/*.pdf
 data/models/
