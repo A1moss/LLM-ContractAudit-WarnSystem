@@ -22,7 +22,7 @@ class LoginRequest(BaseModel):
 
 
 class UserOut(BaseModel):
-    id: str
+    id: int
     username: str
     email: str
 
@@ -56,7 +56,7 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
 
-    token = create_access_token({'sub': user.id, 'username': user.username})
+    token = create_access_token({'sub': str(user.id), 'username': user.username})
     return AuthResponse(
         data={
             'token': token,
@@ -76,7 +76,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
             detail='incorrect username/email or password',
         )
 
-    token = create_access_token({'sub': user.id, 'username': user.username})
+    token = create_access_token({'sub': str(user.id), 'username': user.username})
     return AuthResponse(
         data={
             'token': token,

@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import Base, engine
 from api.auth import router as auth_router
+from api.contracts import router as contracts_router
 
 
 @asynccontextmanager
@@ -31,3 +32,4 @@ def root():
 def health():
     return {"status": "ok"}
 app.include_router(auth_router, prefix="/api")
+app.include_router(contracts_router, prefix="/api")
