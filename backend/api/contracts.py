@@ -304,3 +304,81 @@ def trigger_audit(
             "records": len(records),
         },
     }
+@router.get("/{contract_id}/audit-result")
+def get_audit_result(
+    contract_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    c = db.query(Contract).filter(Contract.id == contract_id, Contract.user_id == current_user.id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="contract not found")
+
+    records = (
+        db.query(AuditRecord)
+        .filter(AuditRecord.contract_id == contract_id)
+        .order_by(AuditRecord.audit_batch.desc(), AuditRecord.risk_level.desc())
+        .all()
+    )
+
+    return {
+        "code": 0,
+        "message": "ok",
+        "data": {
+            "contract_id": contract_id,
+            "total": len(records),
+            "items": [
+                {
+                    "id": r.id,
+                    "audit_batch": r.audit_batch,
+                    "risk_type": r.risk_type,
+                    "risk_level": r.risk_level,
+                    "clause_text": r.clause_text,
+                    "reason": r.reason,
+                    "suggestion": r.suggestion,
+                    "detection_method": r.detection_method,
+                    "confidence": r.confidence,
+                    "feedback_status": r.feedback_status,
+                }
+                for r in records
+            ],
+        },
+    }
+
+
+@router.get("/{contract_id}/audit-report")
+def get_audit_report(
+    contract_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    c = db.query(Contract).filter(Contract.id == contract_id, Contract.user_id == current_user.id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="contract not found")
+
+    report = (
+        db.query(AuditReport)
+        .filter(AuditReport.contract_id == contract_id)
+        .order_by(AuditReport.created_at.desc())
+        .first()
+    )
+    if not report:
+        raise HTTPException(status_code=404, detail="no audit report found")
+
+    return {
+        "code": 0,
+        "message": "ok",
+        "data": {
+            "id": report.id,
+            "contract_id": report.contract_id,
+            "audit_batch": report.audit_batch,
+            "report_html": report.report_html,
+            "risk_score": report.risk_score,
+            "high_risk_count": report.high_risk_count,
+            "mid_risk_count": report.mid_risk_count,
+            "low_risk_count": report.low_risk_count,
+            "risk_heatmap_data": report.risk_heatmap_data,
+            "missing_clauses": report.missing_clauses,
+            "created_at": report.created_at.isoformat() if report.created_at else None,
+        },
+    }
