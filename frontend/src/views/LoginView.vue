@@ -1,7 +1,7 @@
 <template>
   <div class="login-wrapper">
     <el-card class="login-card" shadow="always">
-      <h2 style="text-align: center; margin-bottom: 24px;">A24 合同智能审核系统</h2>
+      <h2 class="login-title">A24 合同智能审核系统</h2>
 
       <el-tabs v-model="activeTab" class="login-tabs">
         <!-- ── 登录 Tab ── -->
@@ -14,7 +14,7 @@
               <el-input v-model="loginForm.password" type="password" show-password placeholder="请输入密码" />
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" style="width: 100%;" :loading="loading" @click="handleLogin">
+              <el-button type="primary" class="login-btn" :loading="loading" @click="handleLogin">
                 登 录
               </el-button>
             </el-form-item>
@@ -37,7 +37,7 @@
               <el-input v-model="regForm.confirmPassword" type="password" show-password placeholder="再次输入密码" />
             </el-form-item>
             <el-form-item>
-              <el-button type="success" style="width: 100%;" :loading="loading" @click="handleRegister">
+              <el-button type="success" class="login-btn" :loading="loading" @click="handleRegister">
                 注 册
               </el-button>
             </el-form-item>
@@ -157,8 +157,17 @@ async function handleRegister() {
   background: #f0f2f5;
 }
 
+.login-title {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
 .login-card {
   width: 420px;
+}
+
+.login-btn {
+  width: 100%;
 }
 
 .login-tabs {

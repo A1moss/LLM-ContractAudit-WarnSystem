@@ -1,5 +1,5 @@
 <template>
-  <div style="padding: 20px;">
+  <div class="page-container">
     <h3>审核报告</h3>
     <el-divider />
 
@@ -10,7 +10,7 @@
           <template #header>
             <span>风险等级分布</span>
           </template>
-          <div ref="pieChartRef" style="width: 100%; height: 350px;"></div>
+          <div ref="pieChartRef" class="chart-box"></div>
         </el-card>
       </el-col>
       <el-col :span="12">
@@ -18,24 +18,24 @@
           <template #header>
             <span>各类型风险数量</span>
           </template>
-          <div ref="barChartRef" style="width: 100%; height: 350px;"></div>
+          <div ref="barChartRef" class="chart-box"></div>
         </el-card>
       </el-col>
     </el-row>
 
     <!-- PDF 预览 -->
-    <el-card shadow="hover" style="margin-top: 20px;">
+    <el-card shadow="hover" class="pdf-card">
       <template #header>
         <span>合同原文预览</span>
       </template>
-      <div style="text-align: center;">
-        <canvas v-if="!pdfError" ref="pdfCanvasRef" style="border: 1px solid #ddd; max-width: 100%;"></canvas>
-        <div v-if="pdfError" style="padding: 50px; color: #999;">
+      <div class="pdf-preview">
+        <canvas v-if="!pdfError" ref="pdfCanvasRef" class="pdf-canvas"></canvas>
+        <div v-if="pdfError" class="pdf-error">
           <el-icon :size="40"><Warning /></el-icon>
           <p>PDF 加载失败：{{ pdfError }}</p>
-          <p style="font-size: 12px;">请确保 frontend/public/test.pdf 文件存在</p>
+          <p class="pdf-error-hint">请确保 frontend/public/test.pdf 文件存在</p>
         </div>
-        <div style="margin-top: 10px; color: #999; font-size: 13px;">
+        <div class="pdf-footer">
           第 1 页 / 共 <span v-if="totalPages">{{ totalPages }}</span><span v-else>...</span> 页
         </div>
       </div>
@@ -44,7 +44,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { Warning } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import * as pdfjsLib from 'pdfjs-dist'
@@ -52,10 +52,11 @@ import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 // --- ECharts 饼图 ---
 const pieChartRef = ref(null)
+let pieChartInstance = null
 
 const initPieChart = () => {
-  const chart = echarts.init(pieChartRef.value)
-  chart.setOption({
+  pieChartInstance = echarts.init(pieChartRef.value)
+  pieChartInstance.setOption({
     tooltip: { trigger: 'item' },
     legend: { bottom: '0%' },
     series: [
@@ -76,10 +77,11 @@ const initPieChart = () => {
 
 // --- ECharts 柱状图 ---
 const barChartRef = ref(null)
+let barChartInstance = null
 
 const initBarChart = () => {
-  const chart = echarts.init(barChartRef.value)
-  chart.setOption({
+  barChartInstance = echarts.init(barChartRef.value)
+  barChartInstance.setOption({
     tooltip: { trigger: 'axis' },
     xAxis: {
       type: 'category',
@@ -107,7 +109,6 @@ const renderPdf = async () => {
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
   try {
-    // 加载 public 目录下的测试 PDF（你需要放一个 test.pdf 到 frontend/public/）
     const loadingTask = pdfjsLib.getDocument({ url: '/test.pdf' })
     const pdf = await loadingTask.promise
     totalPages.value = pdf.numPages
@@ -116,7 +117,6 @@ const renderPdf = async () => {
     const canvas = pdfCanvasRef.value
     const viewport = page.getViewport({ scale: 1.0 })
 
-    // 按容器宽度等比缩放，最大宽度限制 600px
     const maxWidth = 600
     const containerWidth = Math.min(canvas.parentElement.clientWidth - 2, maxWidth)
     const scale = containerWidth / viewport.width
@@ -138,4 +138,52 @@ onMounted(() => {
   initBarChart()
   renderPdf()
 })
+
+onUnmounted(() => {
+  pieChartInstance?.dispose()
+  pieChartInstance = null
+  barChartInstance?.dispose()
+  barChartInstance = null
+})
 </script>
+
+<style scoped>
+.page-container {
+  padding: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.chart-box {
+  width: 100%;
+  height: 350px;
+}
+
+.pdf-card {
+  margin-top: 20px;
+}
+
+.pdf-preview {
+  text-align: center;
+}
+
+.pdf-canvas {
+  border: 1px solid #ddd;
+  max-width: 100%;
+}
+
+.pdf-error {
+  padding: 50px;
+  color: #999;
+}
+
+.pdf-error-hint {
+  font-size: 12px;
+}
+
+.pdf-footer {
+  margin-top: 10px;
+  color: #999;
+  font-size: 13px;
+}
+</style>

@@ -1,5 +1,5 @@
 <template>
-  <div style="padding: 20px;">
+  <div class="page-container">
     <h3>审核结果</h3>
     <el-divider />
 
@@ -14,7 +14,7 @@
         <el-card shadow="hover">
           <el-statistic title="高风险" :value="3">
             <template #suffix>
-              <span style="color: #F56C6C; font-size: 14px;">条</span>
+              <span class="stat-suffix suffix-red">条</span>
             </template>
           </el-statistic>
         </el-card>
@@ -23,7 +23,7 @@
         <el-card shadow="hover">
           <el-statistic title="中风险" :value="7">
             <template #suffix>
-              <span style="color: #E6A23C; font-size: 14px;">条</span>
+              <span class="stat-suffix suffix-orange">条</span>
             </template>
           </el-statistic>
         </el-card>
@@ -32,7 +32,7 @@
         <el-card shadow="hover">
           <el-statistic title="低风险" :value="5">
             <template #suffix>
-              <span style="color: #67C23A; font-size: 14px;">条</span>
+              <span class="stat-suffix suffix-green">条</span>
             </template>
           </el-statistic>
         </el-card>
@@ -40,11 +40,11 @@
     </el-row>
 
     <!-- 风险列表 -->
-    <el-card shadow="hover" style="margin-top: 20px;">
+    <el-card shadow="hover" class="risk-card">
       <template #header>
         <span>风险列表</span>
       </template>
-      <el-table :data="riskList" stripe border style="width: 100%;">
+      <el-table :data="riskList" stripe border>
         <el-table-column prop="type" label="风险类型" width="150" />
         <el-table-column prop="level" label="等级" width="100">
           <template #default="{ row }">
@@ -85,3 +85,31 @@ const riskList = ref([
   { type: 'R12 通知送达', level: 'low', clause: '双方通过书面方式通知对方。', reason: '"书面方式"未明确包含电子邮件，建议补充', confidence: 55 },
 ])
 </script>
+
+<style scoped>
+.page-container {
+  padding: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.risk-card {
+  margin-top: 20px;
+}
+
+.stat-suffix {
+  font-size: 14px;
+}
+
+.suffix-red {
+  color: #F56C6C;
+}
+
+.suffix-orange {
+  color: #E6A23C;
+}
+
+.suffix-green {
+  color: #67C23A;
+}
+</style>
