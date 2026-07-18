@@ -65,3 +65,21 @@ export function getAuditResult(id) {
 export function getAuditReport(id) {
   return request.get(`/contracts/${id}/audit-report`)
 }
+
+// ====== 反馈标注 ======
+
+/**
+ * 提交反馈标注
+ * @param {Object} data — { record_id, action_type, corrected_risk?, comment? }
+ */
+export function submitFeedback(data) {
+  return request.post('/feedback', data)
+}
+
+/**
+ * 获取某合同的所有反馈记录
+ * @param {number|string} contractId — 合同 ID
+ */
+export function getFeedback(contractId) {
+  return request.get(`/feedback/${contractId}`)
+}
