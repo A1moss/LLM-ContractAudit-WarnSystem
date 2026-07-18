@@ -27,13 +27,14 @@
         <el-button @click="$router.push('/audit/result')">
           <el-icon><ArrowLeft /></el-icon>返回审核结果列表
         </el-button>
-        <el-button
-          type="primary"
-          size="small"
-          @click="$router.push(`/audit/report/${contractId}`)"
-        >
-          查看审核报告
-        </el-button>
+        <el-button-group>
+          <el-button type="primary" size="small" @click="$router.push(`/contracts/${contractId}`)">
+            查看合同详情
+          </el-button>
+          <el-button type="primary" size="small" @click="$router.push(`/audit/report/${contractId}`)">
+            查看审核报告
+          </el-button>
+        </el-button-group>
       </div>
 
       <!-- 统计卡片 -->

@@ -41,7 +41,7 @@
               </div>
             </el-tab-pane>
 
-            <el-tab-pane label="审核结果" name="audit">
+            <el-tab-pane label="风险详情" name="audit">
               <div class="tab-content">
                 <!-- 审核未触发 -->
                 <div v-if="contract.status === 'parsed' && riskItems.length === 0" class="audit-placeholder">
@@ -287,7 +287,7 @@ const pageSummaries = {
   4: '违约责任与争议解决：违约责任条款约定赔偿计算方式，争议提交甲方所在地法院管辖。',
 }
 
-// ── 审核结果（从 API 获取）──
+// ── 风险详情（从 API 获取）──
 const riskItems = ref([])
 
 // 风险等级映射：API 英文 → 前端中文
@@ -312,12 +312,12 @@ async function fetchAuditResult() {
       detection_method: r.detection_method,
     }))
   } catch {
-    // 无审核结果时静默，保持空列表
+    // 无风险详情时静默，保持空列表
     riskItems.value = []
   }
 }
 
-// ── 审核结果汇总 ──
+// ── 风险详情汇总 ──
 const riskSummary = computed(() => {
   const high = riskItems.value.filter(r => r.level === '高风险').length
   const mid = riskItems.value.filter(r => r.level === '中风险').length
@@ -405,7 +405,7 @@ onMounted(() => {
   loadPdf()
 })
 
-// ── 导航到审核结果/报告页（列表页）──
+// ── 导航到风险详情/报告页（列表页）──
 function goToAuditResult() {
   router.push(`/audit/result/${route.params.id}`)
 }
