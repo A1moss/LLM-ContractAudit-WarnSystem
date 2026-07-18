@@ -103,8 +103,10 @@
 
         <!-- 反馈标注面板 -->
         <FeedbackPanel
+          ref="feedbackRef"
           :risk-items="riskItems"
           :contract-id="contractId"
+          @feedback-change="onFeedback"
         />
       </el-card>
     </template>
@@ -116,10 +118,14 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { getAuditResult, getContractDetail } from '../api/contract.js'
+import { useFeedback } from '../composables/useFeedback.js'
 import FeedbackPanel from '../components/FeedbackPanel.vue'
 
 const route = useRoute()
 const contractId = computed(() => route.params.contractId || '')
+
+// ── 反馈标注 ──
+const { feedbackRef, onFeedback, loadFeedback } = useFeedback(contractId)
 
 const contractName = ref('')
 const riskItems = ref([])
@@ -178,10 +184,14 @@ watch(contractId, (newId, oldId) => {
     error.value = ''
     riskItems.value = []
     fetchResult()
+    loadFeedback()
   }
 })
 
-onMounted(() => fetchResult())
+onMounted(() => {
+  fetchResult()
+  loadFeedback()
+})
 </script>
 
 <style scoped>

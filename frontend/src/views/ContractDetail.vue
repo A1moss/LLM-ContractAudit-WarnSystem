@@ -196,11 +196,18 @@ import { Warning, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import FeedbackPanel from '../components/FeedbackPanel.vue'
 import { ElMessage } from 'element-plus'
 import { getContractDetail, getAuditResult, triggerAudit } from '../api/contract.js'
+import { useFeedback } from '../composables/useFeedback.js'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 const route = useRoute()
 const router = useRouter()
+
+// ── 合同 ID ──
+const contractId = computed(() => route.params.id)
+
+// ── 反馈标注 ──
+const { feedbackRef, onFeedback, loadFeedback } = useFeedback(contractId)
 
 // ── 数据状态 ──
 const loading = ref(true)
@@ -349,14 +356,6 @@ async function handleTriggerAudit() {
   }
 }
 
-// ── 反馈标注回调 ──
-function onFeedback(payload) {
-  // payload = { record_id, action_type, corrected_risk?, comment?, contract_id }
-  // 纯前端本地状态，暂不调后端 API（等 C 角色实现 POST /api/feedback）
-  console.log('[FeedbackPanel] 反馈数据:', payload)
-  ElMessage.success(`反馈已记录：${payload.action_type}`)
-}
-
 // ── pdf.js ──
 async function loadPdf() {
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
@@ -403,6 +402,7 @@ onMounted(() => {
   fetchDetail()
   fetchAuditResult()
   loadPdf()
+  loadFeedback()
 })
 
 // ── 导航到风险详情/报告页（列表页）──
@@ -418,6 +418,7 @@ function goToAuditReport() {
 watch(() => route.params.id, () => {
   fetchDetail()
   fetchAuditResult()
+  loadFeedback()
 })
 
 onUnmounted(() => {

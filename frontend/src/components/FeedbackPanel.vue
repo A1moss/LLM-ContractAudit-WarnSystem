@@ -247,11 +247,15 @@ function submitSupplement() {
   supplementDialog.visible = false
 }
 
+function clearStates() {
+  Object.keys(feedbackStates).forEach(k => delete feedbackStates[k])
+  Object.keys(feedbackComments).forEach(k => delete feedbackComments[k])
+  Object.keys(feedbackCorrected).forEach(k => delete feedbackCorrected[k])
+}
+
 defineExpose({
   resetAll() {
-    Object.keys(feedbackStates).forEach(k => delete feedbackStates[k])
-    Object.keys(feedbackComments).forEach(k => delete feedbackComments[k])
-    Object.keys(feedbackCorrected).forEach(k => delete feedbackCorrected[k])
+    clearStates()
   },
   getSnapshot() {
     return {
@@ -259,6 +263,14 @@ defineExpose({
       comments: { ...feedbackComments },
       corrected: { ...feedbackCorrected },
     }
+  },
+  restore(records) {
+    clearStates()
+    records.forEach(r => {
+      feedbackStates[r.record_id] = r.action_type
+      if (r.comment) feedbackComments[r.record_id] = r.comment
+      if (r.corrected_risk) feedbackCorrected[r.record_id] = r.corrected_risk
+    })
   },
 })
 </script>
