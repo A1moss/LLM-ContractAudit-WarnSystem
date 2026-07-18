@@ -95,7 +95,9 @@
                     ref="feedbackRef"
                     :risk-items="riskItems"
                     :contract-id="contract?.id"
+                    :loaded-feedbacks="loadedFeedbacks"
                     @feedback-change="onFeedback"
+                    @feedback-undo="onFeedbackUndo"
                   />
                 </template>
 
@@ -195,8 +197,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Warning, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import FeedbackPanel from '../components/FeedbackPanel.vue'
 import { ElMessage } from 'element-plus'
-import { getContractDetail, getAuditResult, triggerAudit } from '../api/contract.js'
-import { useFeedback } from '../composables/useFeedback.js'
+import { getContractDetail, getAuditResult, triggerAudit, submitFeedback, getFeedback } from '../api/contract.js'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
@@ -267,6 +268,7 @@ async function fetchDetail() {
   try {
     const res = await getContractDetail(route.params.id)
     contract.value = res.data
+    fetchFeedback()
   } catch (e) {
     error.value = '无法加载合同详情，请确认合同 ID 有效且后端已启动'
     console.warn('合同详情加载失败:', e)
@@ -283,6 +285,8 @@ const currentPage = ref(1)
 const totalPages = ref(0)
 const pdfError = ref('')
 const pdfCanvasRef = ref(null)
+const feedbackRef = ref(null)
+const loadedFeedbacks = ref([])
 let pdfDoc = null
 let pdfLoadingTask = null
 
@@ -356,6 +360,37 @@ async function handleTriggerAudit() {
   }
 }
 
+// ── 加载已有反馈 ──
+async function fetchFeedback() {
+  const cid = contract.value?.id
+  if (!cid) return
+  try {
+    const res = await getFeedback(cid)
+    loadedFeedbacks.value = res.data?.items || []
+  } catch {
+    loadedFeedbacks.value = []
+  }
+}
+
+// ── 反馈标注回调 ──
+async function onFeedback(payload) {
+  try {
+    await submitFeedback(payload)
+    ElMessage.success('反馈已保存')
+    // 刷新反馈列表确保状态同步
+    fetchFeedback()
+  } catch (e) {
+    ElMessage.error('反馈提交失败：' + (e.response?.data?.detail || e.message))
+  }
+}
+
+// ── 撤销反馈回调 ──
+function onFeedbackUndo(payload) {
+  // TODO: 等 C 角色实现 DELETE /api/feedback/{id} 后对接
+  console.log('[FeedbackPanel] 撤销反馈:', payload)
+  ElMessage.info('已撤销（本地状态）')
+}
+
 // ── pdf.js ──
 async function loadPdf() {
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
@@ -418,7 +453,11 @@ function goToAuditReport() {
 watch(() => route.params.id, () => {
   fetchDetail()
   fetchAuditResult()
-  loadFeedback()
+})
+
+// 合同数据就绪后加载反馈
+watch(() => contract.value?.id, (cid) => {
+  if (cid) fetchFeedback()
 })
 
 onUnmounted(() => {

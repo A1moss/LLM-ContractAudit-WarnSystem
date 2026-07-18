@@ -134,6 +134,8 @@ import RiskBadge from './RiskBadge.vue'
 const props = defineProps({
   riskItems: { type: Array, default: () => [] },
   contractId: { type: [Number, String], default: null },
+  /** API 加载的已有反馈记录: [{ record_id, action_type, comment, corrected_risk? }] */
+  loadedFeedbacks: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits([
@@ -147,6 +149,19 @@ const feedbackComments = reactive({})
 const feedbackCorrected = reactive({})
 
 watch(() => props.riskItems, (val) => { items.value = val || [] }, { immediate: true, deep: true })
+
+// 从 API 加载已有反馈状态
+watch(() => props.loadedFeedbacks, (list) => {
+  if (!list || !list.length) return
+  for (const fb of list) {
+    const rid = fb.record_id
+    if (!feedbackStates[rid]) {
+      feedbackStates[rid] = fb.action_type
+      if (fb.comment) feedbackComments[rid] = fb.comment
+      if (fb.corrected_risk) feedbackCorrected[rid] = fb.corrected_risk
+    }
+  }
+}, { immediate: true, deep: true })
 
 // ── 映射 ──
 const LEVEL_MAP = { high: '高风险', medium: '中风险', low: '低风险' }
