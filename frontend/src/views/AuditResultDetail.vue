@@ -100,6 +100,12 @@
             </template>
           </el-table-column>
         </el-table>
+
+        <!-- 反馈标注面板 -->
+        <FeedbackPanel
+          :risk-items="riskItems"
+          :contract-id="contractId"
+        />
       </el-card>
     </template>
   </div>
@@ -110,6 +116,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { getAuditResult, getContractDetail } from '../api/contract.js'
+import FeedbackPanel from '../components/FeedbackPanel.vue'
 
 const route = useRoute()
 const contractId = computed(() => route.params.contractId || '')
@@ -146,8 +153,11 @@ async function fetchResult() {
   try {
     const res = await getAuditResult(id)
     riskItems.value = (res.data?.items || []).map(r => ({
+      id: r.id,
       level: levelMap[r.risk_level] || r.risk_level,
+      risk_type: r.risk_type,
       type: r.risk_type,
+      clause_text: r.clause_text,
       clause: r.clause_text,
       reason: r.reason,
       suggestion: r.suggestion,
