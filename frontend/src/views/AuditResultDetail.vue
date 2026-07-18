@@ -37,6 +37,11 @@
         </el-button-group>
       </div>
 
+      <!-- 合同名称 -->
+      <div class="contract-title" v-if="contractName">
+        <h3>{{ contractName }}</h3>
+      </div>
+
       <!-- 统计卡片 -->
       <el-row :gutter="20">
         <el-col :span="6">
@@ -84,7 +89,7 @@
           <el-table-column prop="type" label="风险类型" width="130" />
           <el-table-column prop="clause" label="原文片段" min-width="220" show-overflow-tooltip />
           <el-table-column prop="reason" label="判定理由" min-width="220" show-overflow-tooltip />
-          <el-table-column prop="suggestion" label="建议" min-width="180" show-overflow-tooltip />
+          <el-table-column prop="suggestion" label="建议" min-width="180" />
           <el-table-column prop="confidence" label="置信度" width="120">
             <template #default="{ row }">
               <el-progress
@@ -104,11 +109,12 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
-import { getAuditResult } from '../api/contract.js'
+import { getAuditResult, getContractDetail } from '../api/contract.js'
 
 const route = useRoute()
 const contractId = computed(() => route.params.contractId || '')
 
+const contractName = ref('')
 const riskItems = ref([])
 const loading = ref(true)
 const error = ref('')
@@ -122,6 +128,13 @@ const riskSummary = computed(() => {
   return { total: riskItems.value.length, high, mid, low }
 })
 
+async function fetchContractName(id) {
+  try {
+    const res = await getContractDetail(id)
+    contractName.value = res.data?.file_name || ''
+  } catch { contractName.value = '' }
+}
+
 async function fetchResult() {
   const id = contractId.value
   if (!id) {
@@ -129,6 +142,7 @@ async function fetchResult() {
     loading.value = false
     return
   }
+  fetchContractName(id)
   try {
     const res = await getAuditResult(id)
     riskItems.value = (res.data?.items || []).map(r => ({
@@ -176,6 +190,15 @@ onMounted(() => fetchResult())
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
+}
+
+.contract-title {
+  margin-bottom: 16px;
+}
+.contract-title h3 {
+  margin: 0;
+  font-size: 18px;
+  color: #303133;
 }
 
 .risk-card {
