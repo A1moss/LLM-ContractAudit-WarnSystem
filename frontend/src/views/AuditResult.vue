@@ -106,7 +106,7 @@
         <el-table-column label="操作" width="140" fixed="right">
           <template #default="{ row }">
             <el-button size="small" type="primary" @click="$router.push(`/audit/result/${row.id}`)">
-              查看详情
+              风险明细
             </el-button>
           </template>
         </el-table-column>

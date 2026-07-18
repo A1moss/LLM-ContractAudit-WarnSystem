@@ -35,7 +35,7 @@
           <el-icon><Checked /></el-icon>
           审核中心
         </template>
-        <el-menu-item index="/audit/result">审核结果</el-menu-item>
+        <el-menu-item index="/audit/result">审核历史</el-menu-item>
         <el-menu-item index="/audit/report">审核报告</el-menu-item>
       </el-sub-menu>
 
