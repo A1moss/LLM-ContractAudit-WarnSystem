@@ -38,7 +38,7 @@
           >
             <el-table-column prop="file_name" label="合同名称" min-width="180">
               <template #default="{ row }">
-                <el-link type="primary" :underline="false">{{ row.file_name }}</el-link>
+                <el-link type="primary" :underline="false" @click="$router.push(`/audit/report/${row.id}`)">{{ row.file_name }}</el-link>
               </template>
             </el-table-column>
             <el-table-column prop="contract_type" label="类型" width="120">
@@ -57,8 +57,8 @@
             </el-table-column>
             <el-table-column label="操作" width="100">
               <template #default="{ row }">
-                <el-button size="small" @click="$router.push(`/contracts/${row.id}`)">
-                  合同详情
+                <el-button size="small" @click="$router.push(`/audit/report/${row.id}`)">
+                  查看报告
                 </el-button>
               </template>
             </el-table-column>
