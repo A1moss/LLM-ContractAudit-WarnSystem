@@ -121,7 +121,7 @@
           :total="pagination.total"
           layout="total, sizes, prev, pager, next, jumper"
           @current-change="fetchList"
-          @size-change="fetchList"
+          @size-change="() => { fetchList(1) }"
         />
       </div>
     </template>
@@ -161,6 +161,8 @@ async function fetchList(page = pagination.page) {
   loading.value = true
   error.value = ''
   pagination.page = page
+  // 切换页面时清理旧的展开行缓存
+  Object.keys(expandingRows).forEach(k => delete expandingRows[k])
   try {
     const res = await getContractList({
       page,

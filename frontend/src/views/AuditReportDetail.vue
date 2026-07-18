@@ -117,13 +117,19 @@ async function fetchReport() {
   }
 }
 
-watch(contractId, (newId, oldId) => {
+watch(contractId, async (newId, oldId) => {
   if (newId && newId !== oldId) {
+    disposeCharts()
+    pdfLoadingTask?.destroy()
+    pdfLoadingTask = null
     loading.value = true
     error.value = ''
     report.value = null
     riskTypes.value = []
-    fetchReport()
+    await fetchReport()
+    await nextTick()
+    initCharts()
+    await renderPdf()
   }
 })
 
@@ -199,6 +205,7 @@ async function renderPdf() {
 
     const page = await pdf.getPage(1)
     const canvas = pdfCanvasRef.value
+    if (!canvas) return
     const viewport = page.getViewport({ scale: 1.0 })
     const maxWidth = 600
     const containerWidth = Math.min(canvas.parentElement.clientWidth - 2, maxWidth)
