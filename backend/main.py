@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from database import Base, engine
 from api.auth import router as auth_router
 from api.contracts import router as contracts_router
+from api.feedback import router as feedback_router
 
 
 @asynccontextmanager
@@ -33,3 +34,4 @@ def health():
     return {"status": "ok"}
 app.include_router(auth_router, prefix="/api")
 app.include_router(contracts_router, prefix="/api")
+app.include_router(feedback_router, prefix="/api")
