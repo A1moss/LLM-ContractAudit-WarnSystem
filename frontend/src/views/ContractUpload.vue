@@ -181,14 +181,18 @@ async function handleUpload() {
 
     const contractId = res.data?.id
     if (contractId) {
-      // 触发审核（异步，不阻塞页面跳转）
-      triggerAudit(contractId).catch(() => {})
+      ElMessage.success('合同上传成功，审核已触发')
+      triggerAudit(contractId).catch(() => {
+        ElMessage.warning('审核触发失败，请在合同列表页手动触发')
+      })
+    } else {
+      ElMessage.success('合同上传成功')
     }
-    ElMessage.success('合同上传成功，审核已触发')
     router.push('/contracts')
   } catch {
     progressStatus.value = 'exception'
     progressText.value = '上传失败，请重试'
+    ElMessage.error('上传失败，请检查网络连接后重试')
   } finally {
     uploading.value = false
   }

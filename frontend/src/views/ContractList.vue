@@ -183,7 +183,8 @@ async function fetchList() {
     contractList.value = res.data?.items || []
     pagination.total = res.data?.total || 0
   } catch {
-    contractList.value = []
+    console.warn('合同列表加载失败')
+    ElMessage.error('加载合同列表失败，请检查网络连接')
   } finally {
     loading.value = false
   }

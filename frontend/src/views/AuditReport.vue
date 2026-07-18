@@ -71,8 +71,8 @@
               :page-sizes="[10, 20, 50]"
               :total="pagination.total"
               layout="total, sizes, prev, pager, next, jumper"
-              @current-change="(p) => { selectedContract = null; reportData = null; riskItems = []; disposeCharts(); fetchList(p); }"
-              @size-change="() => { selectedContract = null; reportData = null; riskItems = []; disposeCharts(); fetchList(1); }"
+              @current-change="(p) => { clearReport(); fetchList(p); }"
+              @size-change="() => { clearReport(); fetchList(1); }"
             />
           </div>
         </el-col>
@@ -147,6 +147,7 @@
 
 <script setup>
 import { ref, reactive, nextTick, onMounted, onUnmounted } from 'vue'
+import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import { getContractList, getAuditResult, getAuditReport } from '../api/contract.js'
 
@@ -171,6 +172,7 @@ const pieChartRef = ref(null)
 const barChartRef = ref(null)
 let pieChartInstance = null
 let barChartInstance = null
+let selectSeq = 0  // 防止 handleSelect 竞态
 
 // ── 工具函数 ──
 const typeMap = {
@@ -217,11 +219,20 @@ async function fetchList(page = pagination.page) {
   }
 }
 
+// ── 清除报告详情 ──
+function clearReport() {
+  selectedContract.value = null
+  reportData.value = null
+  riskItems.value = []
+  disposeCharts()
+}
+
 // ── 选择合同 → 加载报告详情 ──
 const levelMap = { high: '高风险', medium: '中风险', low: '低风险' }
 
 async function handleSelect(row) {
   if (!row) return
+  const seq = ++selectSeq
   selectedContract.value = row
   reportLoading.value = true
   reportData.value = null
@@ -232,6 +243,8 @@ async function handleSelect(row) {
       getAuditReport(row.id),
       getAuditResult(row.id),
     ])
+    // 只保留最后一次点击的结果
+    if (seq !== selectSeq) return
     reportData.value = reportRes.data
     riskItems.value = (resultRes.data?.items || []).map(r => ({
       level: levelMap[r.risk_level] || r.risk_level,
@@ -243,9 +256,13 @@ async function handleSelect(row) {
     await nextTick()
     initCharts()
   } catch (e) {
+    if (seq !== selectSeq) return
     console.warn('报告详情加载失败:', e)
+    ElMessage.error('加载报告详情失败')
   } finally {
-    reportLoading.value = false
+    if (seq === selectSeq) {
+      reportLoading.value = false
+    }
   }
 }
 

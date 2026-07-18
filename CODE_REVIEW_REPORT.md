@@ -1,163 +1,203 @@
-# LLM-ContractAudit-WarnSystem 代码审查报告 (Day 1)
+# LLM-ContractAudit-WarnSystem 代码审查报告 (v2)
 
-**审查日期**: 2026-07-17  
-**项目阶段**: Day 1 — 骨架代码 + 原型 (开发指南预期：Day 1 为"设计文档通读 + 骨架代码 + 原型草图")  
-**审查范围**: 全部后端 Python 源码 (22 文件) + 全部前端 Vue.js 源码 (14 文件)  
+**审查日期**: 2026-07-18
+**审查范围**: 全部后端 Python 源码 + 全部前端 Vue.js 源码
 **技术栈**: FastAPI + SQLAlchemy + SQLite (后端), Vue 3 + Element Plus + Vite (前端)
-
----
-
-## 重要说明：Day 1 上下文
-
-本报告与开发指南《A24-开工准备指南-v4.md》对照编写。指南明确规划了 15 天开发路线：
-- **Day 0 (7.17)**: 环境搭建
-- **Day 1 (7.18)**: 骨架代码 + 原型草图
-- **Day 2-3 (7.19-20)**: 数据库建表 + 登录注册 + 上传/分类 + RAG/Dify
-- **Day 4-5 (7.22-23)**: 审核引擎 + 审核报告 + 条款比对
-- **Day 10+ (7.29+)**: Corex Review、BERT 训练等高级功能
-
-**当前代码实际上已超前于 Day 1 规划**——已实现了审核引擎、Corex 编排器、分类器等 Day 3-5 的功能。以下将每个问题标注为"需要现在修复的真 bug"或"按计划后续实现的功能"。
 
 ---
 
 ## 总体评估
 
-| 维度 | 评分 | Day 1 预期对比 |
-|------|------|---------------|
-| **后端架构** | 7.0/10 | 超前——AI 管道、解析器、分类器、Corex 已实现骨架，超出 Day 1 "骨架代码"规划 |
-| **前端架构** | 6.0/10 | 正常——5 个页面骨架 + 路由 + API 层就绪，符合 Day 1 预期，甚至超前（图表和 PDF 已集成） |
-| **整体** | **6.5/10** | 项目已超前日程，代码骨架质量好。重点是修 4 个真 bug + 统一代码模式 |
+| 维度 | 评分 | 说明 |
+|------|------|------|
+| **后端架构** | 7.0/10 | AI 管道、Corex 编排器、解析器、分类器骨架完整，但 RAG/matcher/reporter 三个模块只有 .gitkeep |
+| **前端架构** | 6.5/10 | 10 个页面功能完整，路由设计合理，但存在 2 个 HIGH 级 bug + 多处静默吞异常 |
+| **整体** | **6.5/10** | 核心业务闭环能跑通（上传→审核→结果→报告），工程化补全（测试/文档/Docker/降级）几乎空白 |
 
 ---
 
-## 需要现在修复的真 Bug (共 4 个)
+## 自上次审查以来的变化
 
-这些是不管开发第几天都该修的代码缺陷，与进度无关。
-
-### Bug 1: 外键类型不匹配
-**文件**: `backend/models/contract.py:13`, `backend/models/user.py:13`  
-**问题**: `Contract.user_id` 是 `String(36)`, `User.id` 是 `Integer`。外键约束无法建立。  
-**影响**: SQLite 可能静默接受，但切换到 MySQL 时建表失败。  
-**修复**: 统一为相同类型。建议 `User.id` 也改为 `String(36)` + UUID，或者 `Contract.user_id` 改为 `Integer`。团队 C 在 Day 2 建模时应一并修复。  
-**应修复时间**: Day 2（7.19，数据库建表日）
-
-### Bug 2: 分类器键名不匹配
-**文件**: `backend/api/contracts.py:56`  
-**问题**: 分类器返回 `{"contract_type": "采购合同", ...}`，代码读 `cls_result.get("type", "other")`。所有上传合同的类型被存为 "other"。  
-**影响**: AI 分类功能形同虚设。  
-**修复**: 改为 `cls_result.get("contract_type", "other")`。  
-**应修复时间**: Day 3（7.20，合同上传+分类器集成日）
-
-### Bug 3: Self-QA 空结果逻辑反转
-**文件**: `backend/ai/corex/orchestrator.py:85`  
-**问题**: `if qa and not any(r.get("failed") for r in qa)` — 当 Self-QA 正确判定所有风险为假阳性返回空列表 `[]` 时，条件为 `False`，回退到未去重结果。  
-**影响**: Self-QA 的去伪功能完全被破坏。  
-**修复**: 改为 `if qa is not None and not any(r.get("failed") for r in qa):`  
-**应修复时间**: Day 10（7.29，Corex Review 开发日）——但建议现在就修，因为这是个一行修改。
-
-### Bug 4: pdf_parser.py context manager 退出后访问属性
-**文件**: `backend/ai/parser/pdf_parser.py:32`  
-**问题**: `pdf.pages` 在 `with pdfplumber.open(file_path) as pdf:` 块退出后访问。虽然 pdfplumber 内存缓存使其当前可用，但违反了 Python 资源管理惯例。  
-**修复**: 将 `page_count = len(pdf.pages)` 移入 `with` 块内。  
-**应修复时间**: 随时（一行移动即可）
+| 事项 | 状态 |
+|------|:--:|
+| 路由守卫 (beforeEach) | ✅ 已修复 |
+| pdfjs-dist v6 destroy() API | ✅ 已修复 (ContractDetail.vue + AuditReportDetail.vue) |
+| 审核结果/报告页重构为列表页 + 详情子路由 | ✅ 已完成 |
+| ContractList goToResult 跳转修复 | ✅ 已修复 |
+| ContractUpload 上传后触发审核 → 跳转列表页 | ✅ 已完成 |
+| AuditReport 列表页文件名/操作列跳转修复 | ✅ 已修复 |
+| 上次报告的 Bug 1-4 | ❌ 四个仍在 |
 
 ---
 
-## 代码模式问题 — 建议在 Day 2-3 统一修复
+## Bug — 需要修复 (共 12 个)
 
-这些问题不是单个 bug，而是贯穿代码库的模式问题。越早统一，后面越省力。
+### HIGH (3 个)
 
-### P1: `_extract_json` 重复 5 次 (Shotgun Surgery)
-**出现位置**: `llm_auditor.py:42-69`, `classifier.py:22-42`, `extractor.py:41-59`, `orchestrator.py:12-32`, `rule_engine.py:43-47`  
-**问题**: 相同的 LLM JSON 提取逻辑（处理 markdown 代码块、部分提取等）复制了 5 份。  
-**修复**: 抽取到 `backend/ai/utils.py` 或 `backend/ai/llm_utils.py` 作为共享函数。  
-**应修复时间**: Day 2-3（趁模块还在骨架阶段，改起来成本低）
+#### H1: AuditReportDetail — 路由参数变化时图表和 PDF 不更新 · B
+**文件**: `AuditReportDetail.vue:120-128, 219-224`
 
-### P2: 静默吞异常模式
-**出现位置**: `contracts.py`, `classifier.py`, `extractor.py`, `llm_auditor.py`  
-**问题**: 大量 `except Exception: pass` 将错误完全静默。开发阶段可以理解（快速跑通），但需要有计划地替换。  
-**修复**: 至少加 `logger.warning(f"xxx failed: {e}")`。Day 5 开发指南明确要求 D 同学"规则引擎增加错误处理"。  
-**应修复时间**: Day 4-5（审核引擎完善阶段）
+`watch(contractId, ...)` 在参数变化后只调了 `fetchReport()`，更新了文本数据，但 `initCharts()` 和 `renderPdf()` 只在 `onMounted` 中调用。从 `/audit/report/1` 跳转到 `/audit/report/2` 时，饼图、柱状图和 PDF 画布仍显示合同 1 的内容。此外 PDF 始终加载的是硬编码的 `/test.pdf`，与合同 ID 无关。
 
-### P3: 前端硬编码假数据
-**出现位置**: `HomeView.vue`（统计卡片、图表数据、近期合同列表）, `ContractDetail.vue`（页级摘要引用特定 NDA 内容）, `AuditReport.vue`（固定加载 test.pdf）  
-**评估**: 这**不是 bug**——开发指南 Day 1-2 明确写了"数据先写死，后面接真实数据"。Day 2 A 验收标准就是"首页 Dashboard（卡片+表格有数据）"，Day 3 开始接 API。  
-**应修复时间**: Day 3-5（分别对接各页面 API）
+**修复**: watcher 回调中在 `fetchReport()` 完成后调用 `await nextTick(); initCharts(); renderPdf()`。`renderPdf` 需接受合同 ID 参数替换 `/test.pdf`。
 
-### P4: 缺少路由守卫
-**问题**: `router/index.js` 没有 `beforeEach` 守卫。  
-**评估**: 开发指南 Day 1 A 明确写了"配好 5 条路由（含路由守卫，未登录跳 /login）"，Day 2 A 也写了"在 router/index.js 加路由守卫"。这是按计划 Day 1-2 完成的。  
-**应修复时间**: Day 2（7.19）
+#### H2: 分类器键名不匹配 (旧 Bug 2) · C
+**文件**: `backend/api/contracts.py:56`
+
+`classify_contract()` 返回 `{"contract_type": "采购合同", ...}`，但代码读取 `cls_result.get("type", "other")`。键名不匹配导致所有自动分类结果被丢弃，合同类型始终为 "other"。
+
+**修复**: 改为 `cls_result.get("contract_type", "other")`。
+
+#### H3: Self-QA 空结果逻辑反转 (旧 Bug 3) · D
+**文件**: `backend/ai/corex/orchestrator.py:85`
+
+```python
+final = qa if qa and not any(r.get("failed") for r in qa) else all_risks
+```
+
+当 QA Agent 正确判断所有风险为假阳性返回 `[]` 时，空列表为 falsy，条件回退到未去重的 `all_risks`，去伪功能完全失效。
+
+**修复**: 改为 `if qa is not None and not any(r.get("failed") for r in qa)`。
+
+### MEDIUM (5 个)
+
+#### M1: AuditResult — 分页 size-change 处理器入参错误 · B
+**文件**: `AuditResult.vue:123-124`
+
+```html
+@size-change="fetchList"
+```
+
+Element Plus 的 size-change 事件传入新 page_size（如 20），`fetchList(page)` 将其赋值给 `pagination.page`，导致页码被覆盖为 size 值。页面会先发一次错误请求，再被 current-change 纠正。
+
+**修复**: 改为 `@size-change="() => { fetchList(1) }"`。
+
+#### M2: AuditReport — handleSelect 竞态条件 · B
+**文件**: `AuditReport.vue:223-250`
+
+用户快速点击两个合同时，两个 `handleSelect` 并发执行。如果先点击的请求后返回，最终展示的报告数据和图表属于先点的合同，但高亮选中的是后点的合同。
+
+**修复**: 使用递增序号或 AbortController 实现"最后请求胜出"模式。
+
+#### M3: ContractUpload — 审核触发静默失败 · A
+**文件**: `ContractUpload.vue:185-186`
+
+```js
+triggerAudit(contractId).catch(() => {})
+ElMessage.success('合同上传成功，审核已触发')
+```
+
+`triggerAudit` 失败时错误被吞掉，但成功消息无条件弹出。用户看到"审核已触发"实际审核可能根本没跑。
+
+**修复**: 至少捕获错误后改为 `ElMessage.warning`。
+
+#### M4: 外键类型不匹配 (旧 Bug 1) · C
+**文件**: `backend/models/contract.py:13`, `backend/models/user.py:13`
+
+`User.id` 是 `Integer`，`Contract.user_id` 是 `String(36)`。SQLite 静默接受，但切换到 MySQL 时建表失败。
+
+**修复**: 统一类型，建议全局改用 UUID 字符串。
+
+#### M5: pdf_parser context manager 退出后访问属性 (旧 Bug 4) · D
+**文件**: `backend/ai/parser/pdf_parser.py:32`
+
+`len(pdf.pages)` 在 `with pdfplumber.open(file_path) as pdf:` 块外执行。文件句柄已关闭，依赖 pdfplumber 的内存缓存可能在未来版本中失效。
+
+**修复**: 将 `page_count` 移入 `with` 块内。
+
+### LOW (4 个)
+
+#### L1: AuditResult — N+1 API 调用 · B + C
+**文件**: `AuditResult.vue:174-186`
+
+`fetchList` 对列表中的每个合同调用 `getAuditResult(c.id)` 预取风险计数。每页 10 个合同 = 11 次串行 API 调用才能渲染列表。
+
+**修复**: 后端提供批量风险计数端点，或将风险计数合并到合同列表 API 的响应中。
+
+#### L2: ContractUpload — 上传失败不弹错误提示 · A
+**文件**: `ContractUpload.vue:189-194`
+
+catch 块只设置了进度条状态，未调用 `ElMessage.error`。用户如果滚动过了进度条区域，不会知道上传失败。
+
+#### L3: ContractList — fetchList 静默吞异常 · A
+**文件**: `ContractList.vue:185-188`
+
+API 失败时只清空列表，不调用 `ElMessage.error`。用户看到空表格但不知道是没数据还是接口挂了。
+
+#### L4: AuditReportDetail — PDF canvas 缺少空值守卫 · B
+**文件**: `AuditReportDetail.vue:200-201`
+
+`pdfCanvasRef.value.parentElement` 在 `await` 后 DOM 可能已卸载时为 null，直接访问 `.clientWidth` 会抛出 TypeError。
 
 ---
 
-## 按计划后续实现的功能 (非问题)
+## 代码模式问题
 
-以下模块当前为空或未实现，但开发指南已规划了具体的开发日期：
+### P1: `_extract_json` 重复 5 次 (仍存在) · D
+**出现位置**: `llm_auditor.py`, `classifier.py`, `extractor.py`, `orchestrator.py`, `rule_engine.py`
 
-| 模块 | 当前状态 | 计划开发日 | 开发指南引用 |
-|------|---------|-----------|------------|
-| RAG 向量检索 | 空目录 (`.gitkeep`) | Day 2-3 | "E — 知识库初始化 + ChromaDB 连通" |
-| 标准条款比对 (matcher) | 空目录 (`.gitkeep`) | Day 5 | "E — 创建 matcher.py，双层对齐" |
-| 报告生成 (reporter) | 空目录 (`.gitkeep`) | Day 5 | "E — 报告生成 + 条款比对" |
-| BERT 本地分类器 | 未实现（仅有 LLM 分类） | Week 4 (8.4-8.10) | "BERT 微调训练（5 分类）" |
-| OCR 解析器 | 已实现但 API 层未接入 | Day 12 (7.31) | "OCR 基础集成" |
-| 审计操作日志 | 未实现 | Day 6+ | "反馈 API + 错误处理统一" |
-| Dify 工作流集成 | 未实现 | Day 2 | "E — Dify 工作流搭建" |
-| 反馈标注面板 | 未实现 | Day 6 | "A+B — 反馈标注面板" |
+相同的 LLM JSON 提取逻辑复制了 5 份。建议抽取到 `backend/ai/utils.py`。
 
----
+### P2: 静默吞异常 (仍存在) · C + D
+**出现位置**: `contracts.py`, `classifier.py`, `extractor.py`, `llm_auditor.py`
 
-## 架构亮点 (值得保留的做法)
+大量 `except Exception: pass` 导致问题难以排查。建议至少加 `logger.warning`。
 
-以下设计决策值得在后续开发中继续保持：
+### P3: 前端硬编码假数据 (部分改善) · A + B
+- HomeView.vue 统计卡片和图表数据仍为硬编码
+- ContractDetail.vue 仍引用特定 NDA 的页级摘要
+- AuditReport.vue / AuditReportDetail.vue 固定加载 `/test.pdf`
 
-1. **AI 模块作为 Python 函数调用而非 HTTP 微服务**：`contracts.py` 直接 import AI 模块，避免了 RPC 网络开销和序列化问题。与开发指南的"协作边界约定"一致。
-
-2. **多 Agent Corex 架构**：法务→合规→财务→Self-QA 四步流水线设计合理，能有效缓解单 LLM 视角偏差。
-
-3. **统一解析器入口**：`detect_and_parse(filepath)` 根据扩展名分发的设计使得调用方无需关心文件类型。
-
-4. **LLM JSON 提取的防御性设计**：处理 markdown 代码块、部分提取、正则回退等场景，说明团队对 LLM 输出不稳定性有认知。
-
-5. **前端 lazy loading**：所有路由组件使用 `() => import(...)` 懒加载。
-
----
-
-## 建议的开发节奏调整
-
-基于当前代码已超前日程的实际情况：
-
-| 优先级 | 事项 | 建议日期 |
-|--------|------|---------|
-| 今天 (Day 1) | 修复 Bug 4 (pdf_parser) + Bug 3 (Self-QA 一行修复) | 立刻 |
-| Day 2 | 修复 Bug 1 (FK 类型) + P1 (_extract_json 抽取) | 数据库建模时统一 |
-| Day 3 | 修复 Bug 2 (分类器键名) | 分类器集成时修复 |
-| Day 4-5 | 替换裸 except (P2) + 去重逻辑 | 审核引擎完善时 |
-| Day 10 | 前后端数据解包约定统一 (P3 潜在问题的根源) | Corex 开发时 |
+### P4: 缺失的模块
+| 模块 | 状态 | 负责人 |
+|------|------|:--:|
+| RAG 向量检索 (ai/rag/) | 只有 .gitkeep | E |
+| 条款比对 (ai/matcher/) | 只有 .gitkeep | E |
+| 报告生成 (ai/reporter/) | 只有 .gitkeep | E |
+| 审核调度独立服务 (services/audit_service.py) | 不存在，逻辑在 contracts.py 里 | C |
+| Dify 接口封装 (services/dify_client.py) | 不存在 | C + E |
+| Dockerfile | 不存在 | C |
+| schema.sql | 不存在 | C |
+| 测试目录 (backend/tests/) | 不存在 | C + D + E |
+| 反馈 API (backend/api/feedback_router.py) | 不存在，但 FeedbackPanel 组件和 FeedbackLog 模型已有 | C |
 
 ---
 
-## 给各角色的具体建议
+## 已修复 (自上次审查)
 
-### C (后端)
-- **Day 2 建表时**：修复 FK 类型不匹配。建议全项目统一用 UUID 字符串作主键。
-- **Day 4 写 audit_service 时**：确保每步异常单独捕获并记录，参考指南"每个步骤的异常单独捕获并记录，不阻塞后续步骤"。
-- **现在就可以做**：把 `_extract_json` 抽取到 `backend/ai/utils.py`，然后让 D/E 同学引用。
+| 事项 | 文件 |
+|------|------|
+| 路由守卫 beforeEach | router/index.js |
+| pdfjs-dist v6 destroy() 调用错误 | ContractDetail.vue, AuditReportDetail.vue |
+| 审核结果按钮跳转到错误路由 | ContractList.vue goToResult |
+| 审核报告页文件名/操作列跳转 | AuditReport.vue |
+| 上传页进度条第二阶段无意义 | ContractUpload.vue |
 
-### D (AI 引擎)
-- **Day 2-3 完善分类器时**：统一与 C 的接口约定（`contract_type` 键名），避免前后不一致。
-- **Day 4 规则引擎时**：抽出魔法数字到常量配置。
-- **Day 10 Corex 开发前**：修复 Self-QA 空结果判断。
+---
 
-### E (AI 引擎)
-- **Day 2-3 RAG 开发时**：设计好 `search()` 的接口，与 D 的 `audit_with_llm(rag_context=...)` 对接。
-- **Day 5 条款比对时**：与 A/B 约定前端展示数据格式。
+## 建议修复优先级
 
-### A (前端)
-- **Day 2 登录页 + 首页时**：注意 `res.data.token` vs `res.token` 的数据解包层级，建议与 C 约定统一的响应格式。
-- **Day 3 合同上传时**：用指南中的 A 提示词"首页 AI 测试按钮"作为前后端联调入口。
+| 优先级 | Bug | 理由 | 负责人 |
+|--------|-----|------|:--:|
+| P0 | H2 分类器键名 (旧 Bug 2) | 一行修复，AI 分类功能当前形同虚设 | C |
+| P0 | H3 Self-QA 空结果 (旧 Bug 3) | 一行修复，Corex 去伪功能失效 | D |
+| P0 | M3 审核触发静默失败 | 刚改的代码，用户可能被误导 | A |
+| P1 | H1 AuditReportDetail 参数变化不刷新 | 审核报告核心页面的展示 bug | B |
+| P1 | M1 AuditResult 分页错误 | 每次切换 page_size 都会触发 | B |
+| P2 | M4 FK 类型 (旧 Bug 1) | SQLite 下不暴露，MySQL 部署时致命 | C |
+| P2 | M5 pdf_parser (旧 Bug 4) | 当前不触发但违反规范 | D |
+| P3 | L1-L4 + M2 | 体验问题和边界 case | A + B + C |
 
-### B (前端)
-- **Day 1-2 图表 + PDF 时**：可以保留硬编码数据，但建议给假数据的变量名加上 `MOCK_` 前缀，方便后续搜索替换。
-- **Day 4 审核结果页时**：注意审核时序——审核是异步的，需要轮询 status 而非立即取结果。
+---
+
+## 按负责人汇总
+
+| 负责人 | Bug | 模式问题 | 缺失模块 |
+|:------:|------|---------|---------|
+| **A** | M3, L2, L3 | P3 | — |
+| **B** | H1, M1, M2, L1, L4 | P3 | — |
+| **C** | H2, M4, L1 | P2 | audit_service, dify_client, Dockerfile, schema.sql, feedback_router, tests |
+| **D** | H3, M5 | P1, P2 | tests |
+| **E** | — | — | rag, matcher, reporter, dify_client, tests |
+
+> L1 同时涉及 B 和 C，需后端配合新增批量接口。
