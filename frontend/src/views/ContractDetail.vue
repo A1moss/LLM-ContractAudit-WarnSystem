@@ -89,6 +89,14 @@
                   <el-button type="primary" size="small" class="audit-full-link" @click="goToAuditResult">
                     全屏查看结果
                   </el-button>
+
+                  <!-- 反馈标注面板 -->
+                  <FeedbackPanel
+                    ref="feedbackRef"
+                    :risk-items="riskItems"
+                    :contract-id="contract?.id"
+                    @feedback-change="onFeedback"
+                  />
                 </template>
 
                 <!-- 审核完成但无风险 -->
@@ -185,6 +193,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Warning, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
+import FeedbackPanel from '../components/FeedbackPanel.vue'
 import { ElMessage } from 'element-plus'
 import { getContractDetail, getAuditResult, triggerAudit } from '../api/contract.js'
 import * as pdfjsLib from 'pdfjs-dist'
@@ -290,6 +299,10 @@ async function fetchAuditResult() {
   try {
     const res = await getAuditResult(id)
     riskItems.value = (res.data?.items || []).map(r => ({
+      id: r.id,
+      risk_level: r.risk_level,
+      risk_type: r.risk_type,
+      clause_text: r.clause_text,
       level: levelMap[r.risk_level] || r.risk_level,
       category: r.risk_type,
       clause: r.clause_text,
@@ -334,6 +347,14 @@ async function handleTriggerAudit() {
   } finally {
     auditing.value = false
   }
+}
+
+// ── 反馈标注回调 ──
+function onFeedback(payload) {
+  // payload = { record_id, action_type, corrected_risk?, comment?, contract_id }
+  // 纯前端本地状态，暂不调后端 API（等 C 角色实现 POST /api/feedback）
+  console.log('[FeedbackPanel] 反馈数据:', payload)
+  ElMessage.success(`反馈已记录：${payload.action_type}`)
 }
 
 // ── pdf.js ──
