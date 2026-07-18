@@ -48,12 +48,12 @@ async def upload_contract(
     except Exception as e:
         raise HTTPException(status_code=422, detail="parse failed: " + str(e))
 
-    cls_result = {"type": contract_type or "other", "confidence": 0.0}
+    cls_result = {"contract_type": contract_type or "other", "confidence": 0.0}
     try:
         cls_result = classify_contract(full_text)
     except Exception:
         pass
-    actual_type = contract_type or cls_result.get("type", "other")
+    actual_type = contract_type or cls_result.get("contract_type", "other")
     confidence = cls_result.get("confidence", 0.0)
 
     elements = {}
