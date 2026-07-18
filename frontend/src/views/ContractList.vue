@@ -217,7 +217,7 @@ function goToDetail(id) {
 }
 
 function goToResult(id) {
-  router.push(`/audit/result?contract_id=${id}`)
+  router.push(`/audit/result/${id}`)
 }
 
 function typeLabel(type) {

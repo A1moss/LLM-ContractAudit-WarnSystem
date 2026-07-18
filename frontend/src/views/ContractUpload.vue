@@ -89,7 +89,7 @@ import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { UploadFilled } from '@element-plus/icons-vue'
-import { uploadContract } from '../api/contract.js'
+import { uploadContract, triggerAudit } from '../api/contract.js'
 
 const router = useRouter()
 
@@ -164,8 +164,13 @@ async function handleUpload() {
       audit_mode: form.audit_mode,
       onProgress: (e) => {
         if (e.total) {
-          progress.value = Math.round((e.loaded / e.total) * 100)
-          progressText.value = `正在上传... ${progress.value}%`
+          const pct = Math.round((e.loaded / e.total) * 100)
+          progress.value = pct
+          if (e.loaded === e.total) {
+            progressText.value = '文件已上传，正在解析合同文本...'
+          } else {
+            progressText.value = `正在上传... ${pct}%`
+          }
         }
       },
     })
@@ -174,13 +179,13 @@ async function handleUpload() {
     progressStatus.value = 'success'
     progressText.value = '上传成功！'
 
-    ElMessage.success('合同上传成功')
     const contractId = res.data?.id
     if (contractId) {
-      router.push(`/contracts/${contractId}`)
-    } else {
-      router.push('/contracts')
+      // 触发审核（异步，不阻塞页面跳转）
+      triggerAudit(contractId).catch(() => {})
     }
+    ElMessage.success('合同上传成功，审核已触发')
+    router.push('/contracts')
   } catch {
     progressStatus.value = 'exception'
     progressText.value = '上传失败，请重试'
