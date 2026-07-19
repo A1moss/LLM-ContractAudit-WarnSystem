@@ -70,7 +70,36 @@
                 <el-empty v-else description="审核完成，未检测到风险" />
               </div>
             </el-tab-pane>
-            <el-tab-pane label="条款比对" name="compare"><div class="tab-content"><el-empty description="标准条款比对结果将在审核完成后生成" /></div></el-tab-pane>
+            <el-tab-pane label="条款比对" name="compare">
+              <div class="tab-content">
+                <div v-if="comparing" style="text-align:center;padding:40px">
+                  <el-icon class="is-loading" :size="32"><Loading /></el-icon>
+                  <p style="margin-top:12px;color:#909399">AI 正在进行条款比对，请稍候...</p>
+                </div>
+                <el-empty v-else-if="!clauseComparison && contract.status === 'completed'" description="点击按钮生成条款比对结果">
+                  <el-button type="primary" :loading="comparing" @click="fetchClauseComparison">生成条款比对</el-button>
+                </el-empty>
+                <el-empty v-else-if="!clauseComparison && contract.status !== 'completed'" description="审核完成后可生成条款比对结果" />
+                <template v-else>
+                  <el-alert :title="`条款覆盖率 ${Math.round(clauseComparison.summary.coverage_rate * 100)}%，缺失 ${clauseComparison.summary.missing} 条关键条款`" :type="clauseComparison.summary.missing > 0 ? 'warning' : 'success'" show-icon :closable="false" class="audit-alert" />
+                  <el-tag v-for="c in clauseComparison.missing_critical" :key="c" type="danger" size="small" style="margin:4px">缺失: {{ c }}</el-tag>
+                  <el-table :data="clauseComparison.clauses" stripe size="small" max-height="400" style="margin-top:12px">
+                    <el-table-column prop="title" label="条款名称" width="140" />
+                    <el-table-column label="状态" width="100">
+                      <template #default="{row}">
+                        <el-tag :type="row.status === 'covered' ? 'success' : row.status === 'partial' ? 'warning' : 'danger'" size="small">
+                          {{ row.status === 'covered' ? '已覆盖' : row.status === 'partial' ? '部分偏离' : '缺失' }}
+                        </el-tag>
+                      </template>
+                    </el-table-column>
+                    <el-table-column prop="matched_text" label="匹配条款" min-width="180" show-overflow-tooltip />
+                    <el-table-column prop="deviation" label="偏离说明" min-width="160" show-overflow-tooltip />
+                    <el-table-column prop="completion" label="补全建议" min-width="160" show-overflow-tooltip />
+                    <el-table-column prop="risk" label="风险说明" width="120" show-overflow-tooltip />
+                  </el-table>
+                </template>
+              </div>
+            </el-tab-pane>
             <el-tab-pane label="审核报告" name="report">
               <div class="tab-content">
                 <el-empty v-if="contract.status !== 'completed'" description="审核完成后将自动生成报告">
@@ -185,7 +214,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Warning, ArrowLeft, ArrowRight, Loading } from '@element-plus/icons-vue'
 import FeedbackPanel from '../components/FeedbackPanel.vue'
 import { ElMessage } from 'element-plus'
-import { getContractDetail, getAuditResult, triggerAudit, submitFeedback, getFeedback, getContractFile } from '../api/contract.js'
+import { getContractDetail, getAuditResult, triggerAudit, getClauseComparison, submitFeedback, getFeedback, getContractFile } from '../api/contract.js'
 import { formatTime } from '../utils/format.js'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -411,6 +440,17 @@ function levelTag(level) {
   if (level === '高风险') return 'danger'
   if (level === '中风险') return 'warning'
   return 'success'
+}
+
+const clauseComparison = ref(null)
+const comparing = ref(false)
+async function fetchClauseComparison() {
+  comparing.value = true
+  try {
+    const res = await getClauseComparison(route.params.id)
+    clauseComparison.value = res.data || null
+  } catch { clauseComparison.value = null }
+  finally { comparing.value = false }
 }
 
 const auditing = ref(false)

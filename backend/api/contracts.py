@@ -463,3 +463,50 @@ def compare_contract_clauses(
             "created_at": _iso(report.created_at),
         },
     }
+
+
+@router.post("/{contract_id}/clause-comparison")
+def trigger_clause_comparison(
+    contract_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """独立触发条款比对：审核完成后前端单独请求，不阻塞审核流程。"""
+    c = db.query(Contract).filter(Contract.id == contract_id, Contract.user_id == current_user.id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="contract not found")
+    if not c.parsed_text:
+        raise HTTPException(status_code=400, detail="no parsed text")
+
+    try:
+        from ai.matcher import compare_clauses
+        result = compare_clauses(c.parsed_text, c.contract_type or "采购合同")
+    except Exception as e:
+        logger.warning("条款比对失败: %s", e)
+        return {"code": 0, "message": "ok", "data": None}
+
+    # 写入报告
+    report = (
+        db.query(AuditReport)
+        .filter(AuditReport.contract_id == contract_id)
+        .order_by(AuditReport.created_at.desc())
+        .first()
+    )
+    if report:
+        report.missing_clauses = result
+        # 更新报告 HTML 加入条款比对片段
+        compare_rows = ""
+        for cl in result.get("clauses", []):
+            status_cn = {"covered": "已覆盖", "partial": "部分偏离", "missing": "缺失"}
+            compare_rows += (
+                f"<tr><td>{cl.get('title','')}</td><td>{status_cn.get(cl.get('status',''),'')}</td>"
+                f"<td>{cl.get('deviation','') or ''}</td><td>{cl.get('completion','') or ''}</td></tr>"
+            )
+        if compare_rows:
+            report.report_html += (
+                f"<h3>条款比对</h3>"
+                f"<table border='1'><tr><th>条款</th><th>状态</th><th>偏离说明</th><th>补全建议</th></tr>{compare_rows}</table>"
+            )
+        db.commit()
+
+    return {"code": 0, "message": "ok", "data": result}
