@@ -150,6 +150,7 @@ import { ref, reactive, nextTick, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import { getContractList, getAuditResult, getAuditReport } from '../api/contract.js'
+import { formatTime } from '../utils/format.js'
 
 // ── 列表状态 ──
 const contracts = ref([])
@@ -180,10 +181,6 @@ const typeMap = {
   outsourcing: '服务外包合同', employment: '劳动合同', other: '其他合同',
 }
 function typeLabel(type) { return typeMap[type] || type || '未分类' }
-function formatTime(iso) {
-  if (!iso) return '—'
-  return iso.replace('T', ' ').slice(0, 19)
-}
 
 // ── 获取列表 ──
 async function fetchList(page = pagination.page) {

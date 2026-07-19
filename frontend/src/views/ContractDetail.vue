@@ -199,6 +199,7 @@ import FeedbackPanel from '../components/FeedbackPanel.vue'
 import { ElMessage } from 'element-plus'
 import { getContractDetail, getAuditResult, triggerAudit, submitFeedback, getFeedback } from '../api/contract.js'
 import { useFeedback } from '../composables/useFeedback.js'
+import { formatTime } from '../utils/format.js'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
@@ -240,11 +241,6 @@ function statusTag(status) {
   if (status === 'completed') return 'success'
   if (status === 'auditing') return 'warning'
   return 'info'
-}
-
-function formatTime(iso) {
-  if (!iso) return '—'
-  return iso.replace('T', ' ').slice(0, 19)
 }
 
 // ── HTML 转义（防 XSS） ──

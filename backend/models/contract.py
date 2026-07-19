@@ -19,5 +19,6 @@ class Contract(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="uploaded")
     audit_mode: Mapped[str] = mapped_column(String(10), nullable=False, default="fast")
     template_version: Mapped[int] = mapped_column(Integer, nullable=True, default=None)
+    stored_path: Mapped[str] = mapped_column(String(500), nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

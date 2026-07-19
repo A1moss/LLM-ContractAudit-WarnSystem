@@ -1,7 +1,9 @@
 import os
 import uuid
+import mimetypes
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -20,6 +22,13 @@ router = APIRouter(prefix="/contracts", tags=["contracts"])
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+def _iso(ts) -> str | None:
+    """Return UTC-aware ISO string. SQLite CURRENT_TIMESTAMP is UTC."""
+    if ts is None:
+        return None
+    return ts.isoformat() + "Z"
 
 
 @router.post("/upload")
@@ -65,6 +74,7 @@ async def upload_contract(
     contract = Contract(
         user_id=current_user.id,
         file_name=name or file.filename,
+        stored_path=file_path,
         contract_type=actual_type,
         type_confidence=confidence,
         parsed_text=full_text,
@@ -113,8 +123,8 @@ def list_contracts(
             "type_confidence": c.type_confidence,
             "status": c.status,
             "audit_mode": c.audit_mode,
-            "created_at": c.created_at.isoformat() if c.created_at else None,
-            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+            "created_at": _iso(c.created_at),
+            "updated_at": _iso(c.updated_at),
         }
 
     return {
@@ -156,8 +166,8 @@ def get_contract(
             "template_version": c.template_version,
             "parsed_text": c.parsed_text,
             "extracted_elements": c.extracted_elements,
-            "created_at": c.created_at.isoformat() if c.created_at else None,
-            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+            "created_at": _iso(c.created_at),
+            "updated_at": _iso(c.updated_at),
         },
     }
 
@@ -178,6 +188,31 @@ def delete_contract(
     db.delete(c)
     db.commit()
     return {"code": 0, "message": "ok", "data": None}
+
+
+@router.get("/{contract_id}/file")
+def get_contract_file(
+    contract_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Serve the original contract file for PDF preview."""
+    c = (
+        db.query(Contract)
+        .filter(Contract.id == contract_id, Contract.user_id == current_user.id)
+        .first()
+    )
+    if not c:
+        raise HTTPException(status_code=404, detail="contract not found")
+    if not c.stored_path or not os.path.isfile(c.stored_path):
+        raise HTTPException(status_code=404, detail="file not found on disk")
+
+    mime_type, _ = mimetypes.guess_type(c.file_name)
+    return FileResponse(
+        path=c.stored_path,
+        media_type=mime_type or "application/octet-stream",
+        filename=c.file_name,
+    )
 
 
 @router.post("/{contract_id}/audit")
@@ -379,6 +414,6 @@ def get_audit_report(
             "low_risk_count": report.low_risk_count,
             "risk_heatmap_data": report.risk_heatmap_data,
             "missing_clauses": report.missing_clauses,
-            "created_at": report.created_at.isoformat() if report.created_at else None,
+            "created_at": _iso(report.created_at),
         },
     }

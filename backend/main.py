@@ -7,9 +7,28 @@ from api.contracts import router as contracts_router
 from api.feedback import router as feedback_router
 
 
+def _ensure_columns():
+    """Safe migration: add new columns that may be missing from existing tables."""
+    import sqlite3
+    try:
+        url = str(engine.url)
+        if "sqlite" not in url:
+            return
+        path = url.replace("sqlite:///", "").replace("sqlite://", "")
+        db = sqlite3.connect(path)
+        existing = {row[1] for row in db.execute("PRAGMA table_info(contracts)")}
+        if "stored_path" not in existing:
+            db.execute("ALTER TABLE contracts ADD COLUMN stored_path VARCHAR(500)")
+            db.commit()
+        db.close()
+    except Exception:
+        pass  # non-fatal: table may not exist yet
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    _ensure_columns()
     yield
 
 

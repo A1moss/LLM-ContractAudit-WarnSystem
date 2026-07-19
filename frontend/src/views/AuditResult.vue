@@ -131,6 +131,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { getContractList, getAuditResult } from '../api/contract.js'
+import { formatTime } from '../utils/format.js'
 
 // ── 列表状态 ──
 const contracts = ref([])
@@ -151,10 +152,6 @@ const typeMap = {
   outsourcing: '服务外包合同', employment: '劳动合同', other: '其他合同',
 }
 function typeLabel(type) { return typeMap[type] || type || '未分类' }
-function formatTime(iso) {
-  if (!iso) return '—'
-  return iso.replace('T', ' ').slice(0, 19)
-}
 
 // ── 获取已完成审核的合同列表 ──
 async function fetchList(page = pagination.page) {
