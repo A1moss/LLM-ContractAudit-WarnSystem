@@ -181,8 +181,7 @@ import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import { renderAsync } from 'docx-preview'
-import { getAuditReport, getAuditResult } from '../api/contract.js'
+import { getAuditReport, getAuditResult, getContractFile } from '../api/contract.js'
 
 const route = useRoute()
 const contractId = computed(() => route.params.contractId || '')

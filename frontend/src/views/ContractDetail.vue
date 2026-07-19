@@ -15,7 +15,7 @@
         <el-descriptions-item label="文件名"><el-tag type="primary" size="small">{{ contract.file_name }}</el-tag></el-descriptions-item>
         <el-descriptions-item label="合同类型">{{ typeLabel(contract.contract_type) }}</el-descriptions-item>
         <el-descriptions-item label="上传时间">{{ formatTime(contract.created_at) }}</el-descriptions-item>
-        <el-descriptions-item label="页数">{{ pdfTotalPages || '—' }} 页</el-descriptions-item>
+        <el-descriptions-item label="页数">{{ totalPages }} 页</el-descriptions-item>
         <el-descriptions-item label="审核状态">
           <el-tag :type="statusTag(contract.status)">{{ statusLabel(contract.status) }}</el-tag>
         </el-descriptions-item>
@@ -189,7 +189,6 @@ import { getContractDetail, getAuditResult, triggerAudit, submitFeedback, getFee
 import { formatTime } from '../utils/format.js'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import { renderAsync } from 'docx-preview'
 
 const route = useRoute()
 const router = useRouter()
@@ -264,13 +263,7 @@ const zoomFit = ref(1.0)
 const jumpPage = ref('')
 const convertingDocx = ref(false)
 const loadedFeedbacks = ref([])
-const auditing = ref(false)
 
-// ── PDF ──
-const pdfCanvasRef = ref(null)
-const pdfCurrentPage = ref(1)
-const pdfTotalPages = ref(0)
-const pdfError = ref('')
 let pdfDoc = null
 let pdfLoadingTask = null
 
