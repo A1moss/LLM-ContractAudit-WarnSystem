@@ -1,7 +1,8 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
+from sqlalchemy import func as sa_func
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -78,6 +79,35 @@ def create_feedback(
         "code": 0,
         "message": "ok",
         "data": FeedbackOut.model_validate(fb).model_dump(),
+    }
+
+
+@router.get("/stats/overview")
+def feedback_stats(
+    contract_id: int = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    query = db.query(FeedbackLog).filter(FeedbackLog.user_id == current_user.id)
+
+    if contract_id:
+        query = query.join(AuditRecord).filter(AuditRecord.contract_id == contract_id)
+
+    total = query.count()
+
+    breakdown = (
+        query.with_entities(FeedbackLog.action_type, sa_func.count(FeedbackLog.id).label("cnt"))
+        .group_by(FeedbackLog.action_type)
+        .all()
+    )
+
+    return {
+        "code": 0,
+        "message": "ok",
+        "data": {
+            "total": total,
+            "breakdown": {row.action_type: row.cnt for row in breakdown},
+        },
     }
 
 
