@@ -152,6 +152,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
 import { getContractList, deleteContract } from '../api/contract.js'
+import { formatTime } from '../utils/format.js'
 
 const router = useRouter()
 
@@ -255,12 +256,6 @@ function statusTag(status) {
   return map[status] || 'info'
 }
 
-function formatTime(ts) {
-  if (!ts) return '—'
-  const d = new Date(ts)
-  const pad = (n) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
 
 onMounted(() => {
   fetchList()

@@ -83,3 +83,11 @@ export function submitFeedback(data) {
 export function getFeedback(contractId) {
   return request.get(`/feedback/${contractId}`)
 }
+
+/**
+ * 获取合同原始文件（二进制，供 pdf.js 使用）
+ * @param {number|string} id — 合同 ID
+ */
+export function getContractFile(id) {
+  return request.get(`/contracts/${id}/file`, { responseType: 'arraybuffer' })
+}
