@@ -1,0 +1,1289 @@
+app:
+  description: 企业合同智能审核系统-轻量模式:规则引擎快速筛查
+  icon: 🤖
+  icon_background: '#1E3A5F'
+  mode: workflow
+  name: My-SmartContract-Auditor
+  use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/tongyi:0.1.32@20a5454088fa017b72490e1cbaeebff21094d11b13e41197591734d1c08cdbb5
+    version: null
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/deepseek:0.0.19@5b68617c637b62d31e7f33a9f5677b76e88f81868fb04a728e208588564b72ea
+    version: null
+kind: app
+version: 0.6.0
+workflow:
+  conversation_variables: []
+  environment_variables:
+  - description: LLM 模型名称
+    id: env-llm-model
+    name: LLM_MODEL
+    selector:
+    - env
+    - LLM_MODEL
+    value: deepseek-chat
+    value_type: string
+  - description: LLM 温度
+    id: env-temp
+    name: TEMPERATURE
+    selector:
+    - env
+    - TEMPERATURE
+    value: 0.1
+    value_type: float
+  - description: 最大 Token
+    id: env-max-tokens
+    name: MAX_TOKENS
+    selector:
+    - env
+    - MAX_TOKENS
+    value: 4096
+    value_type: integer
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .pdf
+      - .docx
+      - .doc
+      - .txt
+      allowed_file_types:
+      - document
+      allowed_file_upload_methods:
+      - local_file
+      enabled: true
+      fileUploadConfig:
+        attachment_image_file_size_limit: 2
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        file_upload_limit: 20
+        image_file_batch_limit: 10
+        image_file_size_limit: 10
+        single_chunk_attachment_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 1
+    opening_statement: '👋 欢迎使用 SmartContract Auditor 合同智能审核系统(轻量模式)。
+
+
+      请上传合同文件(PDF/DOCX/DOC/TXT)或直接粘贴合同文本。
+
+
+      🔍 12类规则引擎快速筛查 | 智能分类 | 要素抽取 | 结构化审核报告'
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions:
+    - 上传一份采购合同进行审核
+    - 帮我检查违约金条款是否合理
+    - 审核这份保密协议的合规性
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        sourceType: start
+        targetType: code
+      id: edge-start-parse
+      source: start
+      sourceHandle: source
+      target: code_parse
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: code
+        targetType: llm
+      id: edge-parse-classify
+      source: code_parse
+      sourceHandle: source
+      target: llm_classify
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: code
+      id: edge-classify-parse
+      source: llm_classify
+      sourceHandle: source
+      target: code_classify_parse
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: code
+        targetType: llm
+      id: edge-extract
+      source: code_classify_parse
+      sourceHandle: source
+      target: llm_extract
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: code
+      id: edge-extract-validate
+      source: llm_extract
+      sourceHandle: source
+      target: code_extract_validate
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: code
+        targetType: code
+      id: edge-validate-rule
+      source: code_extract_validate
+      sourceHandle: source
+      target: code_rule_engine
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: code
+        targetType: code
+      id: edge-rule-merge
+      source: code_rule_engine
+      sourceHandle: source
+      target: code_risk_merge
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: knowledge-retrieval
+        targetType: llm
+      id: edge-knowledge-compare
+      source: knowledge_templates
+      sourceHandle: source
+      target: llm_clause_compare
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: code
+      id: edge-compare-template
+      source: llm_clause_compare
+      sourceHandle: source
+      target: template_report
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: code
+        targetType: code
+      id: edge-final
+      source: template_report
+      sourceHandle: source
+      target: code_report_final
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: code
+        targetType: end
+      id: edge-answer
+      source: code_report_final
+      sourceHandle: source
+      target: end
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: knowledge-retrieval
+      id: code_risk_merge-source-1784343021866-target
+      source: code_risk_merge
+      sourceHandle: source
+      target: '1784343021866'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: knowledge-retrieval
+      id: code_risk_merge-source-1784342516583-target
+      source: code_risk_merge
+      sourceHandle: source
+      target: '1784342516583'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: knowledge-retrieval
+      id: code_extract_validate-source-knowledge_templates-target
+      source: code_extract_validate
+      sourceHandle: source
+      target: knowledge_templates
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: knowledge-retrieval
+        targetType: llm
+      id: 1784343021866-source-1784343026882-target
+      source: '1784343021866'
+      sourceHandle: source
+      target: '1784343026882'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: knowledge-retrieval
+        targetType: llm
+      id: 1784342516583-source-1784343026882-target
+      source: '1784342516583'
+      sourceHandle: source
+      target: '1784343026882'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: llm
+        targetType: code
+      id: 1784343026882-source-code_final_merge-target
+      source: '1784343026882'
+      sourceHandle: source
+      target: code_final_merge
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: code
+      id: code_risk_merge-source-code_final_merge-target
+      source: code_risk_merge
+      sourceHandle: source
+      target: code_final_merge
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: code
+      id: code_final_merge-source-template_report-target
+      source: code_final_merge
+      sourceHandle: source
+      target: template_report
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        desc: 上传合同文件或粘贴合同文本
+        selected: true
+        title: 上传合同
+        type: start
+        variables:
+        - label: 合同文本
+          max_length: 100000
+          required: false
+          type: paragraph
+          variable: contract_text
+      height: 136
+      id: start
+      position:
+        x: 80
+        y: 282
+      positionAbsolute:
+        x: 80
+        y: 282
+      selected: true
+      type: custom
+      width: 242
+    - data:
+        code: "import re, json\nfrom typing import Any\n\ndef main(contract_text:\
+          \ str) -> dict[str, Any]:\n    if not contract_text or not contract_text.strip():\n\
+          \        return {\"error\": \"合同文本为空, 请上传有效文件\", \"clean_text\": \"\", \"\
+          paragraphs_json\": \"[]\", \"word_count\": 0, \"is_large\": False}\n   \
+          \ text = re.sub(r'\\r\\n', '\\n', contract_text.strip())\n    text = re.sub(r'\\\
+          n{3,}', '\\n\\n', text)\n    text = re.sub(r' {2,}', ' ', text)\n    chapter_pat\
+          \ = re.compile(r'(第[一二三四五六七八九十百千万\\d]+章|第[一二三四五六七八九十百千万\\d]+节|第[一二三四五六七八九十百千万\\\
+          d]+条|[一二三四五六七八九十]+、|\\(\\d+\\)|（\\d+）)')\n    paragraphs = []\n    for i,\
+          \ para in enumerate(text.split('\\n')):\n        para = para.strip()\n \
+          \       if not para: continue\n        m = chapter_pat.match(para)\n   \
+          \     paragraphs.append({\"index\": i, \"text\": para, \"length\": len(para),\
+          \ \"is_heading\": bool(m), \"heading\": m.group(0) if m else None})\n  \
+          \  anonymized = text\n    anonymized = re.sub(r'(公司名称|企业名称)[：:]\\s*[^\\\
+          n]+', r'\\1：【甲方公司】', anonymized)\n    anonymized = re.sub(r'(\\d[\\d,.]*)\\\
+          s*(万元|元|美元)', r'【金额：\\1\\2】', anonymized)\n    anonymized = re.sub(r'(法定代表人|授权代表)[：:]\\\
+          s*[^\\n]+', r'\\1：【签名人】', anonymized)\n    return {\"error\": None, \"clean_text\"\
+          : anonymized, \"paragraphs_json\": json.dumps(paragraphs, ensure_ascii=False),\
+          \ \"word_count\": len(text), \"is_large\": len(text) > 50000}\n"
+        code_language: python3
+        desc: 清洗文本、提取条款结构、脱敏处理
+        outputs:
+          clean_text:
+            children: null
+            type: string
+          error:
+            children: null
+            type: string
+          is_large:
+            children: null
+            type: boolean
+          paragraphs_json:
+            children: null
+            type: string
+          word_count:
+            children: null
+            type: number
+        selected: false
+        title: 文档预处理
+        type: code
+        variables:
+        - value_selector:
+          - start
+          - contract_text
+          variable: contract_text
+      height: 79
+      id: code_parse
+      position:
+        x: 420
+        y: 282
+      positionAbsolute:
+        x: 420
+        y: 282
+      selected: false
+      type: custom
+      width: 242
+    - data:
+        context:
+          enabled: true
+          variable_selector:
+          - code_parse
+          - clean_text
+        desc: 分类为采购/销售/保密/外包/劳动五种类型
+        memory:
+          query_prompt_template: ''
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: false
+            size: 50
+        model:
+          completion_params:
+            max_tokens: 512
+          mode: chat
+          name: deepseek-chat
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: sys-prompt
+          role: system
+          text: '你是合同分类专家。判断合同属于以下哪种类型：
+
+            1. 采购合同 — 采购货物/设备/软件
+
+            2. 销售合同 — 销售产品/服务
+
+            3. 保密协议 — NDA/保密/竞业
+
+            4. 服务外包合同 — IT外包/SaaS/技术服务
+
+            5. 劳动合同 — 劳动/聘用/派遣
+
+
+            只输出JSON，不要其他内容：
+
+            {"contract_type":"类型","confidence":0.0-1.0,"reasoning":"理由100字内"}
+
+            '
+        - id: user-prompt
+          role: user
+          text: 请根据上下文中的合同内容判断其类型
+        selected: false
+        title: 合同类型分类
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 131
+      id: llm_classify
+      position:
+        x: 760
+        y: 282
+      positionAbsolute:
+        x: 760
+        y: 282
+      selected: false
+      type: custom
+      width: 242
+    - data:
+        code: "import json, re\nfrom typing import Any\n\ndef main(llm_output: str)\
+          \ -> dict[str, Any]:\n    result = {\"contract_type\": \"其他合同\", \"confidence\"\
+          : 0.0, \"reasoning\": \"\", \"need_confirm\": False}\n    try:\n       \
+          \ m = re.search(r'\\{[\\s\\S]*\\}', llm_output)\n        if m:\n       \
+          \     d = json.loads(m.group(0))\n            result[\"contract_type\"]\
+          \ = d.get(\"contract_type\", \"其他合同\")\n            result[\"confidence\"\
+          ] = float(d.get(\"confidence\", 0))\n            result[\"reasoning\"] =\
+          \ d.get(\"reasoning\", \"\")\n    except Exception:\n        for t in [\"\
+          采购合同\",\"销售合同\",\"保密协议\",\"服务外包合同\",\"劳动合同\"]:\n            if t in llm_output:\n\
+          \                result[\"contract_type\"] = t; result[\"confidence\"] =\
+          \ 0.5; break\n    if result[\"confidence\"] < 0.5:\n        result[\"contract_type\"\
+          ] = \"其他合同\"; result[\"need_confirm\"] = True\n    return result\n"
+        code_language: python3
+        desc: 解析LLM分类JSON,低置信度标记人工确认
+        outputs:
+          confidence:
+            children: null
+            type: number
+          contract_type:
+            children: null
+            type: string
+          need_confirm:
+            children: null
+            type: boolean
+          reasoning:
+            children: null
+            type: string
+        selected: false
+        title: 分类结果处理
+        type: code
+        variables:
+        - value_selector:
+          - llm_classify
+          - text
+          variable: llm_output
+      height: 95
+      id: code_classify_parse
+      position:
+        x: 1100
+        y: 282
+      positionAbsolute:
+        x: 1100
+        y: 282
+      selected: false
+      type: custom
+      width: 242
+    - data:
+        context:
+          enabled: true
+          variable_selector:
+          - code_parse
+          - clean_text
+        desc: 抽取双方信息/金额/日期/争议解决/适用法律
+        memory:
+          query_prompt_template: ''
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: false
+            size: 50
+        model:
+          completion_params: {}
+          mode: chat
+          name: deepseek-v4-flash
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: sys-prompt
+          role: system
+          text: "你是合同信息抽取专家。从合同原文中提取关键要素，只输出JSON，不要解释。\n\n输出格式：\n{\n  \"parties\"\
+            : {\n    \"party_a\": {\"name\": \"甲方公司全称\", \"role\": \"买方/卖方/出租方等\"\
+            },\n    \"party_b\": {\"name\": \"乙方公司全称\", \"role\": \"买方/卖方/承租方等\"}\n\
+            \  },\n  \"amount\": {\"value\": 总金额数字, \"currency\": \"CNY\", \"description\"\
+            : \"金额条款简述\"},\n  \"dates\": {\"signing_date\": \"YYYY-MM-DD\", \"effective_date\"\
+            : \"YYYY-MM-DD\", \"expiry_date\": \"YYYY-MM-DD\"},\n  \"dispute_resolution\"\
+            : {\"method\": \"诉讼/仲裁\", \"court\": \"管辖法院\"},\n  \"governing_law\":\
+            \ \"适用法律\",\n  \"summary\": \"100字内合同摘要\"\n}\n\n规则：从合同原文逐项查找。找到的填实际值，找不到的填null（JSON\
+            \ null不是字符串\"null\"）。"
+        - id: user-prompt
+          role: user
+          text: '参考合同分类:{{ code_classify_parse.contract_type }}
+
+            依据{{#code_parse.paragraphs_json#}}
+
+            请从上方上下文中的合同原文提取要素'
+        selected: false
+        title: 关键要素抽取
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 131
+      id: llm_extract
+      position:
+        x: 1440
+        y: 282
+      positionAbsolute:
+        x: 1440
+        y: 282
+      selected: false
+      type: custom
+      width: 242
+    - data:
+        code: "import json, re\nfrom typing import Any\n\ndef main(llm_output: str)\
+          \ -> dict[str, Any]:\n    elements = {}; issues = []\n    try:\n       \
+          \ m = re.search(r'\\{[\\s\\S]*\\}', llm_output)\n        if m: elements\
+          \ = json.loads(m.group(0))\n    except Exception:\n        issues.append(\"\
+          JSON解析失败\")\n    parties = elements.get(\"parties\", {})\n    if not parties.get(\"\
+          party_a\", {}).get(\"name\"): issues.append(\"甲方信息缺失\")\n    if not parties.get(\"\
+          party_b\", {}).get(\"name\"): issues.append(\"乙方信息缺失\")\n    dates = elements.get(\"\
+          dates\", {})\n    if not any(dates.get(k) for k in [\"signing_date\",\"\
+          effective_date\",\"expiry_date\"]):\n        issues.append(\"未识别到日期信息\"\
+          )\n    return {\"elements_json\": json.dumps(elements, ensure_ascii=False),\
+          \ \"quality\": \"poor\" if len(issues)>1 else (\"partial\" if issues else\
+          \ \"good\"), \"issues_json\": json.dumps(issues, ensure_ascii=False)}\n"
+        code_language: python3
+        desc: 解析并校验抽取结果
+        outputs:
+          elements_json:
+            children: null
+            type: string
+          issues_json:
+            children: null
+            type: string
+          quality:
+            children: null
+            type: string
+        selected: false
+        title: 要素校验
+        type: code
+        variables:
+        - value_selector:
+          - llm_extract
+          - text
+          variable: llm_output
+      height: 79
+      id: code_extract_validate
+      position:
+        x: 1780
+        y: 282
+      positionAbsolute:
+        x: 1780
+        y: 282
+      selected: false
+      type: custom
+      width: 242
+    - data:
+        code: "import re, json\nfrom typing import Any\n\nRULES = [\n    {\"id\":\"\
+          R01\",\"name\":\"违约金过高\",\"patterns\":[r'违约.*?(\\d+)%',r'(\\d+)%.*?违约'],\"\
+          base_level\":\"medium\",\"scorer\":\"score_r01\"},\n    {\"id\":\"R02\"\
+          ,\"name\":\"无限责任条款\",\"patterns\":[r'全部损失',r'一切责任',r'无限责任'],\"base_level\"\
+          :\"high\",\"scorer\":None},\n    {\"id\":\"R03\",\"name\":\"单方解约权\",\"patterns\"\
+          :[r'有权.*?单方.*?解除',r'任意.*?解除.*?合同',r'随时.*?终止'],\"base_level\":\"medium\"\
+          ,\"scorer\":None},\n    {\"id\":\"R04\",\"name\":\"管辖条款不利\",\"patterns\"\
+          :[r'管辖.*?(对方|乙方)',r'(对方|乙方).*?管辖',r'仲裁.*?(对方|乙方).*?所在地'],\"base_level\"\
+          :\"medium\",\"scorer\":None},\n    {\"id\":\"R05\",\"name\":\"保密期间不合理\"\
+          ,\"patterns\":[r'永久.*?保密',r'无限期.*?保密',r'保密.*?期限.*?(\\d+)年'],\"base_level\"\
+          :\"medium\",\"scorer\":\"score_r05\"},\n    {\"id\":\"R06\",\"name\":\"\
+          知识产权归属不清\",\"patterns\":[r'知识产权.*?归属.*?(乙方|默认)',r'知识产权.*?默认.*?归'],\"base_level\"\
+          :\"high\",\"scorer\":None},\n    {\"id\":\"R07\",\"name\":\"付款条件不公平\",\"\
+          patterns\":[r'预付.*?(\\d+)%',r'(\\d+)%.*?预付',r'验收后.*?付款',r'预付款.*?比例.*?(\\\
+          d+)%'],\"base_level\":\"medium\",\"scorer\":\"score_r07\"},\n    {\"id\"\
+          :\"R10\",\"name\":\"竞业限制过宽\",\"patterns\":[r'竞业.*?限制.*?(\\d+)年',r'竞业.*?范围.*?全国'],\"\
+          base_level\":\"medium\",\"scorer\":\"score_r10\"},\n    {\"id\":\"R11\"\
+          ,\"name\":\"自动续约陷阱\",\"patterns\":[r'期满.*?自动.*?续约',r'自动.*?续期'],\"base_level\"\
+          :\"medium\",\"scorer\":\"score_r11\"},\n]\nWHITELIST = [\n    (r'违约金.*?不超过.*?(\\\
+          d+)%', lambda m: int(m.group(1)) <= 10),\n    (r'不承担.*?间接.*?损失', None),\n\
+          \    (r'不可抗力.*?包括', None),\n]\ndef check_wl(text):\n    for p, cond in WHITELIST:\n\
+          \        m = re.search(p, text)\n        if m and (cond is None or cond(m)):\
+          \ return True\n    return False\ndef score_r01(m, t):\n    try: r=int(m.group(1));\
+          \ return \"high\" if r>=20 else (\"medium\" if r>=10 else \"low\")\n   \
+          \ except: return \"medium\"\ndef score_r05(m, t): return \"high\" if ('永久'\
+          \ in t or '无限期' in t) else (\"high\" if int(m.group(1))>5 else \"medium\"\
+          )\ndef score_r07(m, t): return \"high\" if '验收后' in t else (\"high\" if\
+          \ int(m.group(1))>50 else \"medium\")\ndef score_r10(m, t): return \"high\"\
+          \ if int(m.group(1))>2 else \"medium\"\ndef score_r11(m, t): return \"low\"\
+          \ if re.search(r'提前.*?通知', t) else \"medium\"\n\ndef main(clean_text: str,\
+          \ paragraphs_json: str) -> dict[str, Any]:\n    paragraphs = json.loads(paragraphs_json)\
+          \ if paragraphs_json else []\n    findings = []; stats = {\"total\":0,\"\
+          high\":0,\"medium\":0,\"low\":0}\n    for rule in RULES:\n        seen_paras\
+          \ = set()\n        for para in paragraphs:\n            pt = para.get(\"\
+          text\",\"\")\n            pi = para.get(\"index\",0)\n            for pat\
+          \ in rule[\"patterns\"]:\n                for m in re.finditer(pat, pt):\n\
+          \                    matched = m.group(0)\n                    if check_wl(matched):\
+          \ continue\n                    if pi in seen_paras: continue  # 同一规则同一段落只保留一条\n\
+          \                    seen_paras.add(pi)\n                    level = rule[\"\
+          base_level\"]\n                    if rule[\"scorer\"]:\n              \
+          \          fn = globals().get(rule[\"scorer\"])\n                      \
+          \  if fn:\n                            try:\n                          \
+          \      r = fn(m, pt)\n                                if isinstance(r, str):\
+          \ level = r\n                            except: pass\n                \
+          \    findings.append({\"risk_id\":rule[\"id\"],\"risk_name\":rule[\"name\"\
+          ],\"risk_level\":level,\"clause_text\":pt[:300],\"clause_index\":pi,\"matched_text\"\
+          :matched,\"detection_method\":\"rule\",\"confidence\":0.9 if level!=\"low\"\
+          \ else 0.7})\n                    stats[\"total\"]+=1; stats[level]+=1;\
+          \ break\n    # R08 验收标准缺失\n    if re.search(r'(交付|验收|完工|提交)', clean_text)\
+          \ and not re.search(r'(验收标准|验收条件|验收程序)', clean_text):\n        findings.append({\"\
+          risk_id\":\"R08\",\"risk_name\":\"验收标准缺失\",\"risk_level\":\"medium\",\"\
+          clause_text\":\"全文未定义验收标准\",\"clause_index\":-1,\"matched_text\":\"缺失:验收标准\"\
+          ,\"detection_method\":\"rule\",\"confidence\":0.85})\n        stats[\"total\"\
+          ]+=1; stats[\"medium\"]+=1\n    # R09 不可抗力缺失\n    if not re.search(r'不可抗力',\
+          \ clean_text):\n        findings.append({\"risk_id\":\"R09\",\"risk_name\"\
+          :\"不可抗力条款缺失\",\"risk_level\":\"medium\",\"clause_text\":\"全文未涉及不可抗力\",\"\
+          clause_index\":-1,\"matched_text\":\"缺失:不可抗力条款\",\"detection_method\":\"\
+          rule\",\"confidence\":0.9})\n        stats[\"total\"]+=1; stats[\"medium\"\
+          ]+=1\n    # R12 数据隐私缺失\n    if re.search(r'(数据|个人信息|隐私|用户信息)', clean_text)\
+          \ and not re.search(r'(数据保护|隐私保护|数据安全|信息安全)', clean_text):\n        findings.append({\"\
+          risk_id\":\"R12\",\"risk_name\":\"数据隐私条款缺失\",\"risk_level\":\"high\",\"\
+          clause_text\":\"涉及数据但未定义保护条款\",\"clause_index\":-1,\"matched_text\":\"缺失:数据保护条款\"\
+          ,\"detection_method\":\"rule\",\"confidence\":0.85})\n        stats[\"total\"\
+          ]+=1; stats[\"high\"]+=1\n    return {\"findings_json\": json.dumps(findings,\
+          \ ensure_ascii=False), \"count\": len(findings), \"stats_json\": json.dumps(stats,\
+          \ ensure_ascii=False)}\n"
+        code_language: python3
+        desc: 本地12类风险规则检测,零API成本,含白名单过滤和全文缺失检测
+        outputs:
+          count:
+            children: null
+            type: number
+          findings_json:
+            children: null
+            type: string
+          stats_json:
+            children: null
+            type: string
+        selected: false
+        title: 规则引擎(12类风险)
+        type: code
+        variables:
+        - value_selector:
+          - code_parse
+          - clean_text
+          variable: clean_text
+        - value_selector:
+          - code_parse
+          - paragraphs_json
+          variable: paragraphs_json
+      height: 95
+      id: code_rule_engine
+      position:
+        x: 2015.5645756979616
+        y: 78.57204576884291
+      positionAbsolute:
+        x: 2015.5645756979616
+        y: 78.57204576884291
+      selected: false
+      type: custom
+      width: 242
+    - data:
+        code: "import json\nfrom typing import Any\n\ndef main(findings_json: str)\
+          \ -> dict[str, Any]:\n    all_risks = []\n    rule_findings = json.loads(findings_json)\
+          \ if findings_json else []\n    for r in rule_findings: r[\"source\"] =\
+          \ \"rule_engine\"\n    all_risks.extend(rule_findings)\n    # 根据检出风险数和等级估算分数\n\
+          \    high = sum(1 for r in all_risks if r.get(\"risk_level\")==\"high\"\
+          )\n    medium = sum(1 for r in all_risks if r.get(\"risk_level\")==\"medium\"\
+          )\n    overall_score = 50\n    if high > 0: overall_score = 70 + min(high*10,\
+          \ 25)\n    elif medium > 0: overall_score = 40 + min(medium*5, 25)\n   \
+          \ else: overall_score = 20\n    # 去重\n    deduped = []\n    for risk in\
+          \ all_risks:\n        dup = False\n        for i, seen in enumerate(deduped):\n\
+          \            if risk.get(\"risk_id\") == seen.get(\"risk_id\"):\n      \
+          \          t1 = risk.get(\"clause_text\",\"\")[:100]\n                t2\
+          \ = seen.get(\"clause_text\",\"\")[:100]\n                if t1 and t2:\n\
+          \                    sim = len(set(t1)&set(t2))/max(len(set(t1)|set(t2)),1)\n\
+          \                    if sim > 0.7:\n                        if float(risk.get(\"\
+          confidence\",0)) > float(seen.get(\"confidence\",0)):\n                \
+          \            deduped[i] = risk\n                        dup = True\n   \
+          \                     break\n        if not dup: deduped.append(risk)\n\
+          \    # 三阶置信度过滤\n    filtered = []\n    fs = {\"discarded\":0,\"downgraded\"\
+          :0,\"passed\":0}\n    for risk in deduped:\n        conf = float(risk.get(\"\
+          confidence\", 0.5))\n        if conf < 0.5:\n            fs[\"discarded\"\
+          ] += 1\n            continue\n        elif conf < 0.7:\n            risk[\"\
+          low_confidence\"] = True\n            risk[\"note\"] = \"低置信度,建议人工复核\"\n\
+          \            rl = risk.get(\"risk_level\", \"low\")\n            risk[\"\
+          risk_level\"] = \"low\" if rl in (\"medium\",\"low\") else \"medium\"\n\
+          \            filtered.append(risk)\n            fs[\"downgraded\"] += 1\n\
+          \        else:\n            risk[\"low_confidence\"] = False\n         \
+          \   filtered.append(risk)\n            fs[\"passed\"] += 1\n    order =\
+          \ {\"high\":0,\"medium\":1,\"low\":2}\n    filtered.sort(key=lambda r: order.get(r.get(\"\
+          risk_level\",\"low\"),3))\n    st = {\"total\":len(filtered),\"high\":sum(1\
+          \ for r in filtered if r.get(\"risk_level\")==\"high\"),\"medium\":sum(1\
+          \ for r in filtered if r.get(\"risk_level\")==\"medium\"),\"low\":sum(1\
+          \ for r in filtered if r.get(\"risk_level\")==\"low\")}\n    return {\"\
+          risks_json\":json.dumps(filtered,ensure_ascii=False),\"count\":len(filtered),\"\
+          overall_score\":overall_score,\"stats_json\":json.dumps(st,ensure_ascii=False),\"\
+          filter_json\":json.dumps(fs,ensure_ascii=False)}\n"
+        code_language: python3
+        desc: 规则引擎结果去重、三阶置信度过滤、风险评分
+        outputs:
+          count:
+            children: null
+            type: number
+          filter_json:
+            children: null
+            type: string
+          overall_score:
+            children: null
+            type: number
+          risks_json:
+            children: null
+            type: string
+          stats_json:
+            children: null
+            type: string
+        selected: false
+        title: 风险融合与过滤
+        type: code
+        variables:
+        - value_selector:
+          - code_rule_engine
+          - findings_json
+          variable: findings_json
+      height: 95
+      id: code_risk_merge
+      position:
+        x: 2299.5521556161148
+        y: 67.71806244416533
+      positionAbsolute:
+        x: 2299.5521556161148
+        y: 67.71806244416533
+      selected: false
+      type: custom
+      width: 242
+    - data:
+        dataset_ids:
+        - z2VltB4g0Rka+5TbgFzJ2A9dkN+IgRoY9wouTXgZn3sXSklP0xt8MNbwOmj1fMBJ
+        desc: 检索对应合同类型的标准条款模板
+        multiple_retrieval_config:
+          reranking_enable: true
+          reranking_mode: reranking_model
+          reranking_model:
+            model: gte-rerank
+            provider: langgenius/tongyi/tongyi
+          score_threshold: 0.5
+          top_k: 10
+        query_attachment_selector: []
+        query_variable_selector: []
+        retrieval_mode: multiple
+        selected: false
+        title: RAG检索-标准条款模板
+        type: knowledge-retrieval
+      height: 117
+      id: knowledge_templates
+      position:
+        x: 2198.23992848413
+        y: 349.2598533234298
+      positionAbsolute:
+        x: 2198.23992848413
+        y: 349.2598533234298
+      selected: false
+      type: custom
+      width: 242
+    - data:
+        context:
+          enabled: true
+          variable_selector:
+          - knowledge_templates
+          - result
+        desc: 语义级条款对齐+缺失检测+补全建议
+        memory:
+          query_prompt_template: ''
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: false
+            size: 50
+        model:
+          completion_params:
+            max_tokens: 4096
+          mode: chat
+          name: deepseek-v4-flash
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: sys-prompt
+          role: system
+          text: '# 标准条款比对
+
+            将上传合同与标准模板逐条比对。合同类型:{{ code_classify_parse.contract_type }}
+
+
+            比对流程:1.结构对齐-标题关键词归一化(如"违约责任"="违约条款"="违约处理")
+
+            2.语义对齐-评估条款与标准条款的语义覆盖度
+
+            3.状态判定:>0.75已覆盖/0.5-0.75部分偏离/<0.5缺失
+
+            4.补全建议:缺失条款从模板生成定制化补全文本
+
+
+            标准模板:{{ knowledge_templates.result }}
+
+
+            输出JSON:{"clauses":[{"template_title":"标准条款名","priority":"required/recommended/prohibited","status":"covered/partial/missing","matched_text":"匹配到的合同条款或null","similarity":0-1,"deviation":"偏离说明或null","completion":"补全建议或null","risk":"缺失风险说明"}],"summary":{"total":0,"covered":0,"partial":0,"missing":0,"coverage_rate":0},"missing_critical":["强制必选但缺失的条款"]}
+
+            '
+        - id: user-prompt
+          role: user
+          text: '请比对以下合同:
+
+            合同文本:{{ code_parse.clean_text[:10000] }}
+
+            合同类型:{{ code_classify_parse.contract_type }}
+
+            '
+        selected: false
+        title: 标准条款比对
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 115
+      id: llm_clause_compare
+      position:
+        x: 2606.8373581300575
+        y: 366.1321235444996
+      positionAbsolute:
+        x: 2606.8373581300575
+        y: 366.1321235444996
+      selected: false
+      type: custom
+      width: 242
+    - data:
+        context:
+          enabled: true
+          variable_selector:
+          - code_parse
+          - clean_text
+        desc: 基于三库知识检索结果对规则引擎检出风险进行深度复核并补充遗漏
+        model:
+          completion_params:
+            max_tokens: 4096
+            temperature: 0.1
+          mode: chat
+          name: deepseek-v4-flash
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: sys-prompt
+          role: system
+          text: '你是资深合同法律师。基于以下三个知识源的检索结果，对规则引擎预检出的风险进行深度复核：
+
+
+            ## 知识源
+
+            - 法律法规模板：对照《民法典》合同编条文判断合规性
+
+
+            - 标准条款模板：对照行业标准条款判断偏离度
+
+
+            ## 任务
+
+            1. 逐条复核规则引擎预检风险：验证原文是否存在、风险等级是否合理、置信度是否需要调整
+
+            2. 基于知识源补充遗漏：识别规则引擎未覆盖的潜在风险（模糊条款、隐含风险、行业特有风险）
+
+            3. 给出修改建议：可执行的具体方案，引用法律或案例依据
+
+
+            ## 输出JSON（严格格式）
+
+            {"review_summary":"200字内复核概述","confirmed_risks":[{"risk_id":"...","risk_name":"...","risk_level":"high/medium/low","clause_text":"原文","reason":"复核理由含法条/案例依据","suggestion":"修改建议","confidence":0.0-1.0,"detection_method":"rag_llm"}],"supplement_risks":[{"risk_id":"R1x","risk_name":"...","risk_level":"high/medium/low","clause_text":"相关原文","reason":"为什么规则引擎遗漏","suggestion":"修改建议","confidence":0.0-1.0,"detection_method":"rag_llm"}],"overall_risk_score":0-100}
+
+            '
+        - id: user-prompt
+          role: user
+          text: '合同类型:{{ code_classify_parse.contract_type }}
+
+
+            规则引擎预检结果:
+
+            {{ code_risk_merge.risks_json }}
+
+
+            法律法规检索:
+
+            {{ 1784342516583.result }}
+
+
+标准条款模板检索:
+
+            {{ 1784343021866.result }}
+
+
+            请进行深度复核，确认已有风险并补充遗漏风险。
+
+            '
+        selected: false
+        title: RAG增强风险分析
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 131
+      id: '1784343026882'
+      position:
+        x: 2914.869400515354
+        y: 136.18981728787583
+      positionAbsolute:
+        x: 2914.869400515354
+        y: 136.18981728787583
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        code: "import json\nfrom typing import Any\n\ndef parse_json(text):\n    if\
+          \ not text: return {}\n    try: return json.loads(text) if isinstance(text,\
+          \ str) else text\n    except:\n        import re\n        m = re.search(r'\\\
+          {[\\s\\S]*\\}', str(text))\n        return json.loads(m.group(0)) if m else\
+          \ {}\n\ndef main(rule_risks_json: str, rule_stats_json: str, rule_score:\
+          \ float, rag_text: str) -> dict[str, Any]:\n    # 解析规则引擎结果\n    rule_risks\
+          \ = json.loads(rule_risks_json) if rule_risks_json else []\n    for r in\
+          \ rule_risks: r[\"source\"] = \"rule_engine\"\n    all_risks = list(rule_risks)\n\
+          \    overall_score = float(rule_score)\n    # 解析RAG复核结果\n    rag = parse_json(rag_text)\n\
+          \    confirmed = rag.get(\"confirmed_risks\", [])\n    for r in confirmed:\
+          \ r[\"source\"] = \"rag_llm\"\n    supplement = rag.get(\"supplement_risks\"\
+          , [])\n    for r in supplement: r[\"source\"] = \"rag_llm\"\n    all_risks.extend(confirmed)\n\
+          \    all_risks.extend(supplement)\n    if rag.get(\"overall_risk_score\"\
+          ):\n        overall_score = max(overall_score, float(rag[\"overall_risk_score\"\
+          ]))\n    # 去重（规则+RAG交叉去重）\n    deduped = []\n    for risk in all_risks:\n\
+          \        dup = False\n        for i, seen in enumerate(deduped):\n     \
+          \       if risk.get(\"risk_id\") == seen.get(\"risk_id\"):\n           \
+          \     t1 = risk.get(\"clause_text\",\"\")[:100]\n                t2 = seen.get(\"\
+          clause_text\",\"\")[:100]\n                if t1 and t2:\n             \
+          \       sim = len(set(t1)&set(t2))/max(len(set(t1)|set(t2)),1)\n       \
+          \             if sim > 0.7:\n                        # 保留置信度更高的\n      \
+          \                  if float(risk.get(\"confidence\",0)) > float(seen.get(\"\
+          confidence\",0)):\n                            deduped[i] = risk\n     \
+          \                   dup = True\n                        break\n        if\
+          \ not dup:\n            deduped.append(risk)\n    # 三阶置信度过滤\n    filtered\
+          \ = []\n    fs = {\"discarded\":0,\"downgraded\":0,\"passed\":0}\n    for\
+          \ risk in deduped:\n        conf = float(risk.get(\"confidence\", 0.5))\n\
+          \        if conf < 0.5:\n            fs[\"discarded\"] += 1\n          \
+          \  continue\n        elif conf < 0.7:\n            risk[\"low_confidence\"\
+          ] = True\n            risk[\"note\"] = \"低置信度,建议人工复核\"\n            rl =\
+          \ risk.get(\"risk_level\", \"low\")\n            risk[\"risk_level\"] =\
+          \ \"low\" if rl in (\"medium\",\"low\") else \"medium\"\n            filtered.append(risk)\n\
+          \            fs[\"downgraded\"] += 1\n        else:\n            risk[\"\
+          low_confidence\"] = False\n            filtered.append(risk)\n         \
+          \   fs[\"passed\"] += 1\n    order = {\"high\":0,\"medium\":1,\"low\":2}\n\
+          \    filtered.sort(key=lambda r: order.get(r.get(\"risk_level\",\"low\"\
+          ),3))\n    st = {\"total\":len(filtered),\"high\":sum(1 for r in filtered\
+          \ if r.get(\"risk_level\")==\"high\"),\"medium\":sum(1 for r in filtered\
+          \ if r.get(\"risk_level\")==\"medium\"),\"low\":sum(1 for r in filtered\
+          \ if r.get(\"risk_level\")==\"low\")}\n    return {\"risks_json\":json.dumps(filtered,ensure_ascii=False),\"\
+          count\":len(filtered),\"overall_score\":overall_score,\"stats_json\":json.dumps(st,ensure_ascii=False),\"\
+          filter_json\":json.dumps(fs,ensure_ascii=False)}"
+        code_language: python3
+        desc: 合并规则引擎与RAG复核结果,交叉去重,置信度过滤
+        outputs:
+          count:
+            children: null
+            type: number
+          filter_json:
+            children: null
+            type: string
+          overall_score:
+            children: null
+            type: number
+          risks_json:
+            children: null
+            type: string
+          stats_json:
+            children: null
+            type: string
+        selected: false
+        title: 最终风险融合
+        type: code
+        variables:
+        - value_selector:
+          - code_risk_merge
+          - risks_json
+          variable: rule_risks_json
+        - value_selector:
+          - code_risk_merge
+          - stats_json
+          variable: rule_stats_json
+        - value_selector:
+          - code_risk_merge
+          - overall_score
+          variable: rule_score
+        - value_selector:
+          - '1784343026882'
+          - text
+          variable: rag_text
+      height: 95
+      id: code_final_merge
+      position:
+        x: 3191.1879293595894
+        y: 90.12528289733405
+      positionAbsolute:
+        x: 3191.1879293595894
+        y: 90.12528289733405
+      selected: false
+      type: custom
+      width: 242
+    - data:
+        code: "import json\nfrom datetime import datetime\nfrom typing import Any\n\
+          \ndef main(contract_type: str, confidence: float, need_confirm: bool, quality:\
+          \ str, word_count: int, elements_json: str, overall_score: float, stats_json:\
+          \ str, filter_json: str, count: int, risks_json: str, compare_text: str,\
+          \ findings_json: str) -> dict[str, Any]:\n    ts = datetime.now().strftime(\"\
+          %Y-%m-%d %H:%M:%S\")\n    confirm_note = \"⚠️ 分类置信度较低,建议人工确认合同类型\\n\\n\"\
+          \ if need_confirm else \"\"\n    if overall_score >= 70: level_note = \"\
+          \U0001F534 **高风险合同** — 建议重点协商修改\"\n    elif overall_score >= 40: level_note\
+          \ = \"\U0001F7E1 **中等风险合同** — 建议审慎评估\"\n    else: level_note = \"\U0001F7E2\
+          \ **低风险合同** — 建议人工复核后推进\"\n\n    report = f\"\"\"# \U0001F4CB SmartContract\
+          \ Auditor 合同审核报告\n\n**报告时间**:{ts} | **审核模式**:轻量模式(规则引擎) | **合同类型**:{contract_type}(置信度{confidence})\n\
+          \n---\n\n## 一、合同基本信息\n\n| 项目 | 内容 |\n|------|------|\n| 合同类型 | {contract_type}\
+          \ |\n| 分类置信度 | {confidence} |\n| 要素抽取质量 | {quality} |\n| 文本篇幅 | {word_count}字\
+          \ |\n\n{confirm_note}\n### 关键要素\n```json\n{elements_json}\n```\n\n---\n\n\
+          ## 二、风险评估总览\n\n### 综合风险评分:{overall_score}/100\n\n{level_note}\n\n### 风险分布\
+          \ {stats_json}\n### 置信度过滤 {filter_json}\n### 检出{count}条风险\n\n---\n\n## 三、风险条款逐项分析\n\
+          ```json\n{risks_json}\n```\n\n---\n\n## 四、条款完整性检查\n```json\n{compare_text}\n\
+          ```\n\n---\n\n## 五、修改建议汇总\n1. ⚠️ 高风险条款:签署前必须解决\n2. \U0001F4CB 中风险条款:建议协商修改方案\n\
+          3. \U0001F4A1 低风险条款:后续版本优化\n**谈判顺序**:先违约责任和知识产权→再付款条件和保密→最后协商细节\n\n---\n\
+          \n## 六、附录\n### 审核标准\n风险等级:高(>10万元损失/违反强制性法律)|中(争议/商业风险)|低(表述不精确)\n风险类型:R01-R12共12类\
+          \ | 检测方法:规则引擎\n\n### 规则引擎原始检出\n```json\n{findings_json}\n```\n\n> ⚠️ **免责声明**:本报告由AI自动生成,仅供参考。AI审核无法替代专业法律判断。所有标注均经置信度过滤,建议法务人员最终复核。\n\
+          \n---\n\U0001F4C5 {ts} | Powered by SmartContract Auditor v1.0\"\"\"\n \
+          \   return {\"report\": report}\n"
+        code_language: python3
+        desc: 六章结构化报告(Markdown格式)
+        outputs:
+          report:
+            children: null
+            type: string
+        selected: false
+        title: 组装审核报告
+        type: code
+        variables:
+        - value_selector:
+          - code_classify_parse
+          - contract_type
+          variable: contract_type
+        - value_selector:
+          - code_classify_parse
+          - confidence
+          variable: confidence
+        - value_selector:
+          - code_classify_parse
+          - need_confirm
+          variable: need_confirm
+        - value_selector:
+          - code_extract_validate
+          - quality
+          variable: quality
+        - value_selector:
+          - code_parse
+          - word_count
+          variable: word_count
+        - value_selector:
+          - code_extract_validate
+          - elements_json
+          variable: elements_json
+        - value_selector:
+          - code_final_merge
+          - overall_score
+          variable: overall_score
+        - value_selector:
+          - code_final_merge
+          - stats_json
+          variable: stats_json
+        - value_selector:
+          - code_final_merge
+          - filter_json
+          variable: filter_json
+        - value_selector:
+          - code_final_merge
+          - count
+          variable: count
+        - value_selector:
+          - code_final_merge
+          - risks_json
+          variable: risks_json
+        - value_selector:
+          - llm_clause_compare
+          - text
+          variable: compare_text
+        - value_selector:
+          - code_rule_engine
+          - findings_json
+          variable: findings_json
+      height: 79
+      id: template_report
+      position:
+        x: 3563.8119968187993
+        y: 236.80701831478677
+      positionAbsolute:
+        x: 3563.8119968187993
+        y: 236.80701831478677
+      selected: false
+      type: custom
+      width: 242
+    - data:
+        code: "import json\nfrom typing import Any\n\ndef main(report_text: str, risks_json:\
+          \ str, compare_text: str) -> dict[str, Any]:\n    chapters = [\"一、合同基本信息\"\
+          ,\"二、风险评估总览\",\"三、风险条款逐项分析\",\"四、条款完整性检查\",\"五、修改建议汇总\",\"六、附录\"]\n    missing\
+          \ = [c for c in chapters if c not in report_text]\n    return {\"report\"\
+          : report_text, \"status\": \"partial\" if missing else \"complete\", \"\
+          missing_chapters\": json.dumps(missing, ensure_ascii=False), \"has_risks\"\
+          : bool(risks_json and len(risks_json) > 10), \"has_compare\": bool(compare_text\
+          \ and len(compare_text) > 10)}\n"
+        code_language: python3
+        desc: 校验报告六章结构完整性
+        outputs:
+          has_compare:
+            children: null
+            type: boolean
+          has_risks:
+            children: null
+            type: boolean
+          missing_chapters:
+            children: null
+            type: string
+          report:
+            children: null
+            type: string
+          status:
+            children: null
+            type: string
+        selected: false
+        title: 报告校验
+        type: code
+        variables:
+        - value_selector:
+          - template_report
+          - report
+          variable: report_text
+        - value_selector:
+          - code_final_merge
+          - risks_json
+          variable: risks_json
+        - value_selector:
+          - llm_clause_compare
+          - text
+          variable: compare_text
+      height: 79
+      id: code_report_final
+      position:
+        x: 3551.9911547985475
+        y: 373.12262612872905
+      positionAbsolute:
+        x: 3551.9911547985475
+        y: 373.12262612872905
+      selected: false
+      type: custom
+      width: 242
+    - data:
+        outputs:
+        - value_selector:
+          - code_report_final
+          - report
+          value_type: string
+          variable: report
+        selected: false
+        title: 直接回复
+        type: end
+      height: 88
+      id: end
+      position:
+        x: 3568.5805824594026
+        y: 489.18137629076523
+      positionAbsolute:
+        x: 3568.5805824594026
+        y: 489.18137629076523
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        dataset_ids:
+        - 8Uf62D12zeq+h1GCSuD4cGMkuqFkf0dtT7p5infMxF7hQjPtWSsc8SceHeMgItdz
+        multiple_retrieval_config:
+          reranking_enable: true
+          reranking_mode: reranking_model
+          reranking_model:
+            model: gte-rerank
+            provider: langgenius/tongyi/tongyi
+          top_k: 4
+        query_attachment_selector: []
+        query_variable_selector: []
+        retrieval_mode: multiple
+        selected: false
+        title: 法律法规库
+        type: knowledge-retrieval
+      height: 89
+      id: '1784342516583'
+      position:
+        x: 2606.8373581300575
+        y: -34.82124971529086
+      positionAbsolute:
+        x: 2606.8373581300575
+        y: -34.82124971529086
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        dataset_ids:
+        - z2VltB4g0Rka+5TbgFzJ2A9dkN+IgRoY9wouTXgZn3sXSklP0xt8MNbwOmj1fMBJ
+        multiple_retrieval_config:
+          reranking_enable: true
+          reranking_mode: reranking_model
+          reranking_model:
+            model: gte-rerank
+            provider: langgenius/tongyi/tongyi
+          top_k: 4
+        query_attachment_selector: []
+        query_variable_selector:
+        - code_parse
+        - clean_text
+        retrieval_mode: multiple
+        selected: false
+        title: 标准条款模板
+        type: knowledge-retrieval
+      height: 89
+      id: '1784343021866'
+      position:
+        x: 2557.453371479894
+        y: 195.80907002125286
+      positionAbsolute:
+        x: 2557.453371479894
+        y: 195.80907002125286
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    viewport:
+      x: 206.8800449067661
+      y: -147.46957730938038
+      zoom: 1.624504792712471
+  rag_pipeline_variables: []

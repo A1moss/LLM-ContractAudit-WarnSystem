@@ -1,11 +1,6 @@
 <template>
   <div class="page-container">
-    <!-- 加载状态 -->
-    <div v-if="loading" class="loading-state">
-      <el-skeleton :rows="8" animated />
-    </div>
-
-    <!-- 错误状态 -->
+    <div v-if="loading" class="loading-state"><el-skeleton :rows="8" animated /></div>
     <div v-else-if="error" class="error-state">
       <el-result icon="error" title="加载失败" :sub-title="error">
         <template #extra>
@@ -15,22 +10,17 @@
       </el-result>
     </div>
 
-    <!-- 正常内容 -->
     <template v-else-if="contract">
-      <!-- 顶部：合同元信息 -->
       <el-descriptions title="合同详情" :column="5" border class="meta-descriptions">
-        <el-descriptions-item label="文件名">
-          <el-tag type="primary" size="small">{{ contract.file_name }}</el-tag>
-        </el-descriptions-item>
+        <el-descriptions-item label="文件名"><el-tag type="primary" size="small">{{ contract.file_name }}</el-tag></el-descriptions-item>
         <el-descriptions-item label="合同类型">{{ typeLabel(contract.contract_type) }}</el-descriptions-item>
         <el-descriptions-item label="上传时间">{{ formatTime(contract.created_at) }}</el-descriptions-item>
-        <el-descriptions-item label="页数">{{ totalPages }} 页</el-descriptions-item>
+        <el-descriptions-item label="页数">{{ pdfTotalPages || '—' }} 页</el-descriptions-item>
         <el-descriptions-item label="审核状态">
           <el-tag :type="statusTag(contract.status)">{{ statusLabel(contract.status) }}</el-tag>
         </el-descriptions-item>
       </el-descriptions>
 
-      <!-- 主体：左侧 tabs + 右侧 PDF -->
       <el-row :gutter="20" class="detail-row">
         <el-col :span="14">
           <el-tabs v-model="activeTab" type="border-card">
@@ -40,48 +30,28 @@
                 <el-empty v-else description="暂无解析文本" />
               </div>
             </el-tab-pane>
-
             <el-tab-pane label="风险详情" name="audit">
               <div class="tab-content">
                 <div v-if="contract.status === 'parsed' && riskItems.length === 0" class="audit-placeholder">
                   <el-empty description="尚未审核此合同">
-                    <el-button type="primary" :loading="auditing" @click="handleTriggerAudit">
-                      开始审核
-                    </el-button>
+                    <el-button type="primary" :loading="auditing" @click="handleTriggerAudit">开始审核</el-button>
                   </el-empty>
                 </div>
 
                 <div v-else-if="contract.status === 'auditing'" class="audit-placeholder">
                   <el-result icon="info" title="审核中" sub-title="AI 正在分析合同条款，请稍候...">
-                    <template #extra>
-                      <el-button :loading="true" type="primary">审核进行中</el-button>
-                    </template>
+                    <template #extra><el-button :loading="true" type="primary">审核进行中</el-button></template>
                   </el-result>
                 </div>
 
                 <template v-else-if="riskItems.length > 0">
-                  <el-alert
-                    :title="`共检测到 ${riskSummary.total} 条风险，其中高风险 ${riskSummary.high} 条、中风险 ${riskSummary.mid} 条、低风险 ${riskSummary.low} 条`"
-                    type="warning" show-icon :closable="false" class="audit-alert"
-                  />
+                  <el-alert :title="`共检测到 ${riskSummary.total} 条风险，高风险 ${riskSummary.high}、中风险 ${riskSummary.mid}、低风险 ${riskSummary.low}`" type="warning" show-icon :closable="false" class="audit-alert" />
                   <el-table :data="riskItems" stripe size="small" max-height="400">
-                    <el-table-column prop="level" label="等级" width="80">
-                      <template #default="{ row }">
-                        <el-tag :type="levelTag(row.level)" size="small">{{ row.level }}</el-tag>
-                      </template>
-                    </el-table-column>
+                    <el-table-column prop="level" label="等级" width="80"><template #default="{row}"><el-tag :type="levelTag(row.level)" size="small">{{ row.level }}</el-tag></template></el-table-column>
                     <el-table-column prop="category" label="风险类别" width="130" />
                     <el-table-column prop="clause" label="涉及条款" min-width="180" show-overflow-tooltip />
                     <el-table-column prop="suggestion" label="建议" min-width="200" show-overflow-tooltip />
-                    <el-table-column prop="confidence" label="置信度" width="100">
-                      <template #default="{ row }">
-                        <el-progress
-                          :percentage="Math.round((row.confidence || 0) * 100)"
-                          :color="row.confidence >= 0.7 ? '#67C23A' : row.confidence >= 0.5 ? '#E6A23C' : '#F56C6C'"
-                          :stroke-width="6"
-                        />
-                      </template>
-                    </el-table-column>
+                    <el-table-column prop="confidence" label="置信度" width="100"><template #default="{row}"><el-progress :percentage="Math.round((row.confidence||0)*100)" :color="row.confidence>=0.7?'#67C23A':row.confidence>=0.5?'#E6A23C':'#F56C6C'" :stroke-width="6" /></template></el-table-column>
                   </el-table>
                   <el-button type="primary" size="small" class="audit-full-link" @click="goToAuditResult">
                     全屏查看结果
@@ -100,19 +70,11 @@
                 <el-empty v-else description="审核完成，未检测到风险" />
               </div>
             </el-tab-pane>
-
-            <el-tab-pane label="条款比对" name="compare">
-              <div class="tab-content">
-                <el-empty description="标准条款比对结果将在审核完成后生成" />
-              </div>
-            </el-tab-pane>
-
+            <el-tab-pane label="条款比对" name="compare"><div class="tab-content"><el-empty description="标准条款比对结果将在审核完成后生成" /></div></el-tab-pane>
             <el-tab-pane label="审核报告" name="report">
               <div class="tab-content">
                 <el-empty v-if="contract.status !== 'completed'" description="审核完成后将自动生成报告">
-                  <el-button v-if="contract.status === 'parsed'" type="primary" :loading="auditing" @click="handleTriggerAudit">
-                    开始审核
-                  </el-button>
+                  <el-button v-if="contract.status === 'parsed'" type="primary" :loading="auditing" @click="handleTriggerAudit">开始审核</el-button>
                 </el-empty>
                 <template v-else-if="riskItems.length > 0">
                   <el-descriptions :column="2" border size="small" class="report-desc">
@@ -121,9 +83,7 @@
                     <el-descriptions-item label="中风险">{{ riskSummary.mid }} 条</el-descriptions-item>
                     <el-descriptions-item label="低风险">{{ riskSummary.low }} 条</el-descriptions-item>
                   </el-descriptions>
-                  <el-button type="primary" class="report-btn" @click="goToAuditReport">
-                    查看完整审核报告
-                  </el-button>
+                  <el-button type="primary" class="report-btn" @click="goToAuditReport">查看完整审核报告</el-button>
                 </template>
                 <el-empty v-else description="审核完成，未检测到风险" />
               </div>
@@ -229,6 +189,7 @@ import { getContractDetail, getAuditResult, triggerAudit, submitFeedback, getFee
 import { formatTime } from '../utils/format.js'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import { renderAsync } from 'docx-preview'
 
 const route = useRoute()
 const router = useRouter()
@@ -303,6 +264,13 @@ const zoomFit = ref(1.0)
 const jumpPage = ref('')
 const convertingDocx = ref(false)
 const loadedFeedbacks = ref([])
+const auditing = ref(false)
+
+// ── PDF ──
+const pdfCanvasRef = ref(null)
+const pdfCurrentPage = ref(1)
+const pdfTotalPages = ref(0)
+const pdfError = ref('')
 let pdfDoc = null
 let pdfLoadingTask = null
 
@@ -440,10 +408,10 @@ async function fetchAuditResult() {
 }
 
 const riskSummary = computed(() => {
-  const high = riskItems.value.filter(r => r.level === '高风险').length
-  const mid = riskItems.value.filter(r => r.level === '中风险').length
-  const low = riskItems.value.filter(r => r.level === '低风险').length
-  return { total: riskItems.value.length, high, mid, low }
+  const h=riskItems.value.filter(r=>r.level==='高风险').length
+  const m=riskItems.value.filter(r=>r.level==='中风险').length
+  const l=riskItems.value.filter(r=>r.level==='低风险').length
+  return {total:riskItems.value.length,high:h,mid:m,low:l}
 })
 
 function levelTag(level) {

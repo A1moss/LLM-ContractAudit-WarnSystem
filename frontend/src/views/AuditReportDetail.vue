@@ -181,7 +181,8 @@ import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import { getAuditReport, getAuditResult, getContractFile } from '../api/contract.js'
+import { renderAsync } from 'docx-preview'
+import { getAuditReport, getAuditResult } from '../api/contract.js'
 
 const route = useRoute()
 const contractId = computed(() => route.params.contractId || '')
@@ -191,6 +192,23 @@ const riskItems = ref([])
 const riskTypes = ref([])
 const loading = ref(true)
 const error = ref('')
+
+// ── 文件格式检测 ──
+const isPdf = ref(null)
+const DOCX_W = 602
+let cachedFileData = null
+
+async function fetchAndDetect(id) {
+  const token = localStorage.getItem('token')
+  const res = await fetch(`/api/contracts/${id}/file`,{headers:token?{Authorization:`Bearer ${token}`}:{}})
+  if (!res.ok) throw new Error(`服务器返回 ${res.status}`)
+  const buf = await res.arrayBuffer()
+  const head = new Uint8Array(buf.slice(0, 4))
+  if (head[0]===0x25 && head[1]===0x50 && head[2]===0x44 && head[3]===0x46) { isPdf.value=true }
+  else if (head[0]===0x50 && head[1]===0x4B) { isPdf.value=false }
+  else { isPdf.value = true }
+  cachedFileData = buf
+}
 
 // ── 风险等级映射 ──
 const LEVEL_MAP = { high: '高风险', medium: '中风险', low: '低风险' }
@@ -407,6 +425,7 @@ function handleJump() {
   goToSpread(spread)
   jumpPage.value = ''
 }
+function goToPage(pageNum) { if (pageNum < 1 || pageNum > totalPages.value) return; renderPage(pageNum) }
 
 onMounted(async () => {
   await fetchReport()
@@ -463,9 +482,14 @@ onUnmounted(() => {
   font-size: 13px;
 }
 
-.pdf-card {
-  margin-top: 20px;
-}
+.pdf-card { margin-top:20px }
+.pdf-header { display:flex; justify-content:space-between; align-items:center }
+.pdf-controls { display:flex; align-items:center; margin-bottom:8px }
+.page-indicator { min-width:80px; text-align:center }
+.pdf-preview { text-align:center }
+.pdf-loading { padding:50px; color:#909399 }
+.pdf-canvas { border:1px solid #ddd; max-width:100% }
+.pdf-error { padding:50px; color:#999 }
 
 .pdf-header {
   display: flex;

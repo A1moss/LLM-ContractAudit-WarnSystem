@@ -1,0 +1,76 @@
+services:
+  dify-db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: dify
+      POSTGRES_PASSWORD: dify
+      POSTGRES_USER: dify
+    ports:
+      - "5432:5432"
+    volumes:
+      - dify_db_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  dify-redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    volumes:
+      - dify_redis_data:/data
+    restart: unless-stopped
+
+  dify-api:
+    image: langgenius/dify-api:1.2.0
+    ports:
+      - "5001:5001"
+    environment:
+      MODE: api
+      EDITION: SELF_HOSTED
+      INIT_PASSWORD: password
+      SECRET_KEY: dify-secret-key-change-in-production
+      DB_USERNAME: dify
+      DB_PASSWORD: dify
+      DB_HOST: dify-db
+      DB_PORT: 5432
+      DB_DATABASE: dify
+      REDIS_HOST: dify-redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+    depends_on:
+      - dify-db
+      - dify-redis
+    restart: unless-stopped
+
+  dify-worker:
+    image: langgenius/dify-api:1.2.0
+    environment:
+      MODE: worker
+      EDITION: SELF_HOSTED
+      SECRET_KEY: dify-secret-key-change-in-production
+      DB_USERNAME: dify
+      DB_PASSWORD: dify
+      DB_HOST: dify-db
+      DB_PORT: 5432
+      DB_DATABASE: dify
+      REDIS_HOST: dify-redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+    depends_on:
+      - dify-db
+      - dify-redis
+    restart: unless-stopped
+
+  dify-web:
+    image: langgenius/dify-web:1.2.0
+    ports:
+      - "3000:3000"
+    environment:
+      CONSOLE_API_URL: http://localhost:5001
+      APP_API_URL: http://localhost:5001
+    depends_on:
+      - dify-api
+    restart: unless-stopped
+
+volumes:
+  dify_db_data:
+  dify_redis_data:

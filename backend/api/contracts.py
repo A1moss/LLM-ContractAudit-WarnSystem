@@ -15,6 +15,7 @@ from ai.classifier import classify_contract
 from ai.extractor import extract_elements
 from ai.auditor import run_rules, audit_with_llm
 from ai.corex import run_review
+from ai.dify_client import audit_contract as dify_audit
 from models.audit_record import AuditRecord
 from services.docx_converter import docx_to_pdf
 from models.audit_report import AuditReport
@@ -256,6 +257,16 @@ def trigger_audit(
 
     # 2. LLM auditor (precise mode only)
     if c.audit_mode == "precise":
+        # Try Dify workflow first
+        try:
+            dify_risks = dify_audit(full_text)
+            if dify_risks:
+                for r in dify_risks:
+                    r["detection_method"] = "dify"
+                all_risks.extend(dify_risks)
+        except Exception as e:
+            logger.warning("Dify audit unavailable, fallback to LLM: %s", e)
+
         try:
             llm_results = audit_with_llm(full_text)
             for r in llm_results:
