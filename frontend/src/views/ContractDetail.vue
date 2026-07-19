@@ -72,14 +72,7 @@
             </el-tab-pane>
             <el-tab-pane label="条款比对" name="compare">
               <div class="tab-content">
-                <div v-if="comparing" style="text-align:center;padding:40px">
-                  <el-icon class="is-loading" :size="32"><Loading /></el-icon>
-                  <p style="margin-top:12px;color:#909399">AI 正在进行条款比对，请稍候...</p>
-                </div>
-                <el-empty v-else-if="!clauseComparison && contract.status === 'completed'" description="点击按钮生成条款比对结果">
-                  <el-button type="primary" :loading="comparing" @click="fetchClauseComparison">生成条款比对</el-button>
-                </el-empty>
-                <el-empty v-else-if="!clauseComparison && contract.status !== 'completed'" description="审核完成后可生成条款比对结果" />
+                <el-empty v-if="!clauseComparison" description="暂无条款比对结果" />
                 <template v-else>
                   <el-alert :title="`条款覆盖率 ${Math.round(clauseComparison.summary.coverage_rate * 100)}%，缺失 ${clauseComparison.summary.missing} 条关键条款`" :type="clauseComparison.summary.missing > 0 ? 'warning' : 'success'" show-icon :closable="false" class="audit-alert" />
                   <el-tag v-for="c in clauseComparison.missing_critical" :key="c" type="danger" size="small" style="margin:4px">缺失: {{ c }}</el-tag>
@@ -460,6 +453,7 @@ async function handleTriggerAudit() {
     await triggerAudit(route.params.id)
     contract.value.status = 'auditing'
     await fetchAuditResult()
+    await fetchClauseComparison()
     await fetchDetail()
     ElMessage.success('审核完成')
   } catch (e) {
@@ -499,6 +493,7 @@ function goToAuditReport() { router.push(`/audit/report/${route.params.id}`) }
 onMounted(() => {
   fetchDetail()
   fetchAuditResult()
+  fetchClauseComparison()
 })
 </script>
 

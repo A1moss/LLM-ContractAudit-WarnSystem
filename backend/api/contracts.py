@@ -1,3 +1,4 @@
+import logging
 import os
 import uuid
 import mimetypes
@@ -146,40 +147,6 @@ def list_contracts(
     }
 
 
-@router.get("/{contract_id}")
-def get_contract(
-    contract_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    c = (
-        db.query(Contract)
-        .filter(Contract.id == contract_id, Contract.user_id == current_user.id)
-        .first()
-    )
-    if not c:
-        raise HTTPException(status_code=404, detail="contract not found")
-    return {
-        "code": 0,
-        "message": "ok",
-        "data": {
-            "id": c.id,
-            "user_id": c.user_id,
-            "file_name": c.file_name,
-            "stored_path": c.stored_path,
-            "contract_type": c.contract_type,
-            "type_confidence": c.type_confidence,
-            "status": c.status,
-            "audit_mode": c.audit_mode,
-            "template_version": c.template_version,
-            "parsed_text": c.parsed_text,
-            "extracted_elements": c.extracted_elements,
-            "created_at": _iso(c.created_at),
-            "updated_at": _iso(c.updated_at),
-        },
-    }
-
-
 @router.delete("/{contract_id}")
 def delete_contract(
     contract_id: int,
@@ -223,7 +190,7 @@ def get_contract_file(
             file_path = docx_to_pdf(file_path)
         except Exception as e:
             # Fallback: serve the original .docx if conversion fails
-            print(f"WARNING: docx-to-pdf conversion failed: {e}")
+            logger.warning("docx-to-pdf conversion failed: %s", e)
 
     mime_type = 'application/pdf' if file_path.endswith('.pdf') else None
     if mime_type is None:
@@ -465,6 +432,37 @@ def compare_contract_clauses(
     }
 
 
+@router.get("/{contract_id}/clause-comparison")
+def get_clause_comparison(
+    contract_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """读取条款比对结果；无缓存时当场生成。"""
+    report = db.query(AuditReport).filter(AuditReport.contract_id == contract_id).order_by(AuditReport.created_at.desc()).first()
+    if report and report.missing_clauses:
+        data = report.missing_clauses
+        if isinstance(data, str):
+            data = json.loads(data)
+        if isinstance(data, dict) and data.get("clauses"):
+            return {"code": 0, "message": "ok", "data": data}
+
+    c = db.query(Contract).filter(Contract.id == contract_id, Contract.user_id == current_user.id).first()
+    if not c or not c.parsed_text:
+        return {"code": 0, "message": "ok", "data": None}
+
+    try:
+        from ai.matcher import compare_clauses
+        result = compare_clauses(c.parsed_text, c.contract_type or "采购合同")
+        if report:
+            report.missing_clauses = result
+            db.commit()
+        return {"code": 0, "message": "ok", "data": result}
+    except Exception as e:
+        logger.warning("条款比对失败: %s", e)
+        return {"code": 0, "message": "ok", "data": None}
+
+
 @router.post("/{contract_id}/clause-comparison")
 def trigger_clause_comparison(
     contract_id: int,
@@ -503,10 +501,31 @@ def trigger_clause_comparison(
                 f"<td>{cl.get('deviation','') or ''}</td><td>{cl.get('completion','') or ''}</td></tr>"
             )
         if compare_rows:
-            report.report_html += (
+            report.report_html = (report.report_html or "") + (
                 f"<h3>条款比对</h3>"
                 f"<table border='1'><tr><th>条款</th><th>状态</th><th>偏离说明</th><th>补全建议</th></tr>{compare_rows}</table>"
             )
         db.commit()
 
     return {"code": 0, "message": "ok", "data": result}
+
+
+@router.get("/{contract_id}")
+def get_contract(
+    contract_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    c = db.query(Contract).filter(Contract.id == contract_id, Contract.user_id == current_user.id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="contract not found")
+    return {
+        "code": 0, "message": "ok",
+        "data": {
+            "id": c.id, "user_id": c.user_id, "file_name": c.file_name, "stored_path": c.stored_path,
+            "contract_type": c.contract_type, "type_confidence": c.type_confidence, "status": c.status,
+            "audit_mode": c.audit_mode, "template_version": c.template_version,
+            "parsed_text": c.parsed_text, "extracted_elements": c.extracted_elements,
+            "created_at": _iso(c.created_at), "updated_at": _iso(c.updated_at),
+        },
+    }

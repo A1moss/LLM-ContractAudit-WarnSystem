@@ -71,7 +71,7 @@ export function getAuditReport(id) {
  * @param {number|string} id — 合同 ID
  */
 export function getClauseComparison(id) {
-  return request.post(`/contracts/${id}/clause-comparison`)
+  return request.get(`/contracts/${id}/clause-comparison`)
 }
 
 // ====== 反馈标注 ======
