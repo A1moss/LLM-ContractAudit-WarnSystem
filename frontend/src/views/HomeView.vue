@@ -94,7 +94,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import axios from 'axios'
+import request from '../utils/request.js'
 import * as echarts from 'echarts'
 
 const router = useRouter()
@@ -104,8 +104,8 @@ const barChartRef = ref(null)
 
 async function checkBackend() {
   try {
-    const res = await axios.get('/api/health')
-    backendStatus.value = '✅ 后端连通！' + JSON.stringify(res.data)
+    const res = await request.get('/health')
+    backendStatus.value = '✅ 后端连通！' + JSON.stringify(res)
   } catch (e) {
     backendStatus.value = '❌ 后端未启动，请确认 uvicorn 在运行'
   }

@@ -132,7 +132,6 @@ import { Warning, ArrowLeft, ArrowRight, Loading, ZoomIn, ZoomOut } from '@eleme
 import FeedbackPanel from '../components/FeedbackPanel.vue'
 import { ElMessage } from 'element-plus'
 import { getContractDetail, getAuditResult, triggerAudit, submitFeedback, getFeedback } from '../api/contract.js'
-import { useFeedback } from '../composables/useFeedback.js'
 import { formatTime } from '../utils/format.js'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -141,9 +140,75 @@ import { renderAsync } from 'docx-preview'
 const route = useRoute()
 const router = useRouter()
 
+// ── 合同 ID ──
+const contractId = computed(() => route.params.id)
+
+// ── 反馈标注 ──
+const feedbackRef = ref(null)
+
+// ── 数据状态 ──
 const loading = ref(true)
 const error = ref('')
 const contract = ref(null)
+
+// ── 合同类型映射 ──
+const typeMap = {
+  purchase: '采购合同',
+  sales: '销售合同',
+  nda: '保密协议 (NDA)',
+  outsourcing: '服务外包合同',
+  employment: '劳动合同',
+  other: '其他合同',
+}
+
+function typeLabel(type) {
+  return typeMap[type] || type || '未分类'
+}
+
+// ── 状态映射 ──
+function statusLabel(status) {
+  const map = { uploaded: '已上传', parsed: '已解析', auditing: '审核中', completed: '审核完成' }
+  return map[status] || status || '未知'
+}
+
+function statusTag(status) {
+  if (status === 'completed') return 'success'
+  if (status === 'auditing' || status === 'parsing') return 'warning'
+  return 'info'
+}
+
+// ── HTML 转义（防 XSS） ──
+function escapeHtml(text) {
+  const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
+  return text.replace(/[&<>"']/g, ch => map[ch])
+}
+
+// ── 渲染文本（段落换行，保留空行） ──
+const renderedText = computed(() => {
+  const text = contract.value?.parsed_text || ''
+  return text
+    .split('\n')
+    .map(p => (p.trim() ? `<p>${escapeHtml(p)}</p>` : '<p><br></p>'))
+    .join('')
+})
+
+// ── 获取合同详情 ──
+async function fetchDetail() {
+  loading.value = true
+  error.value = ''
+  try {
+    const res = await getContractDetail(route.params.id)
+    contract.value = res.data
+    fetchFeedback()
+  } catch (e) {
+    error.value = '无法加载合同详情，请确认合同 ID 有效且后端已启动'
+    console.warn('合同详情加载失败:', e)
+  } finally {
+    loading.value = false
+  }
+}
+
+// ── Tab 状态 ──
 const activeTab = ref('text')
 const isPdf = ref(null)
 let cachedFileData = null
@@ -259,18 +324,32 @@ async function renderPdfPage(n) {
   c.width = sv.width; c.height = sv.height
   await p.render({canvasContext:c.getContext('2d'),viewport:sv}).promise
 }
-function goToPdfPage(n) { if (n < 1 || n > pdfTotalPages.value) return; renderPdfPage(n) }
 
-function goToAuditResult() { router.push(`/audit/result/${route.params.id}`) }
-function goToAuditReport() { router.push(`/audit/report/${route.params.id}`) }
+function goToPage(p) {
+  if (p < 1 || p > totalPages.value) return
+  renderPage(p)
+}
 
-onMounted(async () => { await fetchDetail(); fetchAuditResult() })
-watch(contract, async c => {
-  if (!c) return
-  await nextTick()
-  cachedFileData = null; isPdf.value = null
-  try { await fetchAndDetect(c.id) } catch { isPdf.value = false }
-  if (isPdf.value) loadPdf(); else loadDocx()
+// ── 生命周期 ──
+onMounted(() => {
+  fetchDetail()
+  fetchAuditResult()
+  loadPdf()
+})
+
+// ── 导航到风险详情/报告页（列表页）──
+function goToAuditResult() {
+  router.push(`/audit/result/${route.params.id}`)
+}
+
+function goToAuditReport() {
+  router.push(`/audit/report/${route.params.id}`)
+}
+
+// 路由参数变化时重新拉数据（组件复用场景）
+watch(() => route.params.id, () => {
+  fetchDetail()
+  fetchAuditResult()
 })
 watch(() => contract.value?.id, cid => { if (cid) fetchFeedback() })
 watch(() => route.params.id, () => { pdfLoadingTask?.destroy(); pdfLoadingTask = null; pdfDoc = null; cachedFileData = null; fetchDetail(); fetchAuditResult() })
