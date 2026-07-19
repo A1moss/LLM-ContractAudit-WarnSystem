@@ -1,6 +1,7 @@
 import os
 import uuid
 import mimetypes
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, status
 from fastapi.responses import FileResponse
@@ -19,6 +20,8 @@ from ai.dify_client import audit_contract as dify_audit
 from models.audit_record import AuditRecord
 from services.docx_converter import docx_to_pdf
 from models.audit_report import AuditReport
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/contracts", tags=["contracts"])
 
