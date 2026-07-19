@@ -198,7 +198,6 @@ import { Warning, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import FeedbackPanel from '../components/FeedbackPanel.vue'
 import { ElMessage } from 'element-plus'
 import { getContractDetail, getAuditResult, triggerAudit, submitFeedback, getFeedback } from '../api/contract.js'
-import { useFeedback } from '../composables/useFeedback.js'
 import { formatTime } from '../utils/format.js'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -210,7 +209,7 @@ const router = useRouter()
 const contractId = computed(() => route.params.id)
 
 // ── 反馈标注 ──
-const { feedbackRef, loadFeedback } = useFeedback(contractId)
+const feedbackRef = ref(null)
 
 // ── 数据状态 ──
 const loading = ref(true)
@@ -239,7 +238,7 @@ function statusLabel(status) {
 
 function statusTag(status) {
   if (status === 'completed') return 'success'
-  if (status === 'auditing') return 'warning'
+  if (status === 'auditing' || status === 'parsing') return 'warning'
   return 'info'
 }
 
@@ -433,7 +432,6 @@ onMounted(() => {
   fetchDetail()
   fetchAuditResult()
   loadPdf()
-  loadFeedback()
 })
 
 // ── 导航到风险详情/报告页（列表页）──
