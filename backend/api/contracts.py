@@ -175,7 +175,7 @@ def delete_contract(
     )
     if not c:
         raise HTTPException(status_code=404, detail="contract not found")
-    db.delete(c)
+    c.status = "deleted"
     db.commit()
     return {"code": 0, "message": "ok", "data": None}
 
