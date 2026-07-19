@@ -15,7 +15,7 @@ from ai.classifier import classify_contract
 from ai.extractor import extract_elements
 from ai.auditor import run_rules, audit_with_llm
 from ai.corex import run_review
-from ai.dify_client import audit_contract as dify_audit
+from ai.rag import search_knowledge
 from models.audit_record import AuditRecord
 from services.docx_converter import docx_to_pdf
 from models.audit_report import AuditReport
@@ -257,18 +257,17 @@ def trigger_audit(
 
     # 2. LLM auditor (precise mode only)
     if c.audit_mode == "precise":
-        # Try Dify workflow first
+        # RAG-enhanced LLM audit
         try:
-            dify_risks = dify_audit(full_text)
-            if dify_risks:
-                for r in dify_risks:
-                    r["detection_method"] = "dify"
-                all_risks.extend(dify_risks)
+            rag_ctx = search_knowledge(full_text, "laws", 3)
+            if not rag_ctx:
+                rag_ctx = search_knowledge(full_text, "standard_clauses", 3)
         except Exception as e:
-            logger.warning("Dify audit unavailable, fallback to LLM: %s", e)
+            logger.warning("RAG search failed: %s", e)
+            rag_ctx = None
 
         try:
-            llm_results = audit_with_llm(full_text)
+            llm_results = audit_with_llm(full_text, rag_ctx if rag_ctx else None)
             for r in llm_results:
                 r["detection_method"] = "rag"
             all_risks.extend(llm_results)
