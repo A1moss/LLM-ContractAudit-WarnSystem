@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { submitFeedback, getFeedbackList } from '../api/contract.js'
+import { submitFeedback, getFeedback } from '../api/contract.js'
 
 /**
  * 反馈标注逻辑 — ContractDetail / AuditResultDetail 共用
@@ -22,7 +22,7 @@ export function useFeedback(contractId) {
     const id = contractId.value
     if (!id) return
     try {
-      const res = await getFeedbackList(id)
+      const res = await getFeedback(id)
       feedbackRef.value?.restore(res.data?.items || [])
     } catch {
       // 静默，加载失败不影响使用

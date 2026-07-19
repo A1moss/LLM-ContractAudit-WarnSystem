@@ -198,6 +198,7 @@ import { Warning, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import FeedbackPanel from '../components/FeedbackPanel.vue'
 import { ElMessage } from 'element-plus'
 import { getContractDetail, getAuditResult, triggerAudit, submitFeedback, getFeedback } from '../api/contract.js'
+import { useFeedback } from '../composables/useFeedback.js'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
@@ -208,7 +209,7 @@ const router = useRouter()
 const contractId = computed(() => route.params.id)
 
 // ── 反馈标注 ──
-const { feedbackRef, onFeedback, loadFeedback } = useFeedback(contractId)
+const { feedbackRef, loadFeedback } = useFeedback(contractId)
 
 // ── 数据状态 ──
 const loading = ref(true)
@@ -285,7 +286,6 @@ const currentPage = ref(1)
 const totalPages = ref(0)
 const pdfError = ref('')
 const pdfCanvasRef = ref(null)
-const feedbackRef = ref(null)
 const loadedFeedbacks = ref([])
 let pdfDoc = null
 let pdfLoadingTask = null
