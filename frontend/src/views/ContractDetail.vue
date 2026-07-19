@@ -100,7 +100,7 @@
                 <el-button size="small" @click="resetDocxZoom">适配窗口</el-button>
               </div>
               <div class="docx-viewer">
-                <div ref="docxContainerRef" :style="{ width: CONTENT_W + 'px', zoom: docxZoom }"></div>
+                <div ref="docxContainerRef" :style="{ width: DOCX_W + 'px', zoom: docxZoom }"></div>
               </div>
             </template>
 
@@ -132,6 +132,7 @@ import { Warning, ArrowLeft, ArrowRight, Loading, ZoomIn, ZoomOut } from '@eleme
 import FeedbackPanel from '../components/FeedbackPanel.vue'
 import { ElMessage } from 'element-plus'
 import { getContractDetail, getAuditResult, triggerAudit, submitFeedback, getFeedback } from '../api/contract.js'
+import { useFeedback } from '../composables/useFeedback.js'
 import { formatTime } from '../utils/format.js'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -140,90 +141,16 @@ import { renderAsync } from 'docx-preview'
 const route = useRoute()
 const router = useRouter()
 
-// ── 合同 ID ──
-const contractId = computed(() => route.params.id)
-
-// ── 反馈标注 ──
-const feedbackRef = ref(null)
-
-// ── 数据状态 ──
+// ── state ──
 const loading = ref(true)
 const error = ref('')
 const contract = ref(null)
-
-// ── 合同类型映射 ──
-const typeMap = {
-  purchase: '采购合同',
-  sales: '销售合同',
-  nda: '保密协议 (NDA)',
-  outsourcing: '服务外包合同',
-  employment: '劳动合同',
-  other: '其他合同',
-}
-
-function typeLabel(type) {
-  return typeMap[type] || type || '未分类'
-}
-
-// ── 状态映射 ──
-function statusLabel(status) {
-  const map = { uploaded: '已上传', parsed: '已解析', auditing: '审核中', completed: '审核完成' }
-  return map[status] || status || '未知'
-}
-
-function statusTag(status) {
-  if (status === 'completed') return 'success'
-  if (status === 'auditing' || status === 'parsing') return 'warning'
-  return 'info'
-}
-
-// ── HTML 转义（防 XSS） ──
-function escapeHtml(text) {
-  const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
-  return text.replace(/[&<>"']/g, ch => map[ch])
-}
-
-// ── 渲染文本（段落换行，保留空行） ──
-const renderedText = computed(() => {
-  const text = contract.value?.parsed_text || ''
-  return text
-    .split('\n')
-    .map(p => (p.trim() ? `<p>${escapeHtml(p)}</p>` : '<p><br></p>'))
-    .join('')
-})
-
-// ── 获取合同详情 ──
-async function fetchDetail() {
-  loading.value = true
-  error.value = ''
-  try {
-    const res = await getContractDetail(route.params.id)
-    contract.value = res.data
-    fetchFeedback()
-  } catch (e) {
-    error.value = '无法加载合同详情，请确认合同 ID 有效且后端已启动'
-    console.warn('合同详情加载失败:', e)
-  } finally {
-    loading.value = false
-  }
-}
-
-// ── Tab 状态 ──
 const activeTab = ref('text')
 const isPdf = ref(null)
 let cachedFileData = null
+const DOCX_W = 602
 
-async function fetchAndDetect(id) {
-  const token = localStorage.getItem('token')
-  const res = await fetch(`/api/contracts/${id}/file`,{headers:token?{Authorization:`Bearer ${token}`}:{}})
-  if (!res.ok) throw new Error(`服务器返回 ${res.status}`)
-  const buf = await res.arrayBuffer()
-  const head = new Uint8Array(buf.slice(0, 4))
-  if (head[0]===0x25 && head[1]===0x50 && head[2]===0x44 && head[3]===0x46) { isPdf.value=true }
-  else if (head[0]===0x50 && head[1]===0x4B) { isPdf.value=false }
-  else { isPdf.value = (contract.value?.file_name||'').toLowerCase().endsWith('.pdf') }
-  cachedFileData = buf
-}
+// ── feedback ──
 const { feedbackRef, loadFeedback } = useFeedback(computed(() => route.params.id))
 const loadedFeedbacks = ref([])
 const auditing = ref(false)
@@ -236,7 +163,13 @@ const pdfError = ref('')
 let pdfDoc = null
 let pdfLoadingTask = null
 
-// ── 风险 ──
+// ── DOCX ──
+const docxContainerRef = ref(null)
+const docxLoading = ref(false)
+const docxError = ref('')
+const docxZoom = ref(1)
+
+// ── risk ──
 const riskItems = ref([])
 const levelMap = { high:'高风险', medium:'中风险', low:'低风险' }
 const riskSummary = computed(() => {
@@ -246,6 +179,7 @@ const riskSummary = computed(() => {
   return {total:riskItems.value.length,high:h,mid:m,low:l}
 })
 
+// ── helpers ──
 const typeMap = {purchase:'采购合同',sales:'销售合同',nda:'保密协议 (NDA)',outsourcing:'服务外包合同',employment:'劳动合同',other:'其他合同'}
 function typeLabel(t){return typeMap[t]||t||'未分类'}
 function statusLabel(s){const m={uploaded:'已上传',parsed:'已解析',auditing:'审核中',completed:'审核完成'};return m[s]||s||'未知'}
@@ -253,6 +187,19 @@ function statusTag(s){return s==='completed'?'success':s==='auditing'?'warning':
 function levelTag(l){return l==='高风险'?'danger':l==='中风险'?'warning':'success'}
 function escapeHtml(t){return t.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c])}
 const renderedText = computed(()=>(contract.value?.parsed_text||'').split('\n').map(p=>p.trim()?`<p>${escapeHtml(p)}</p>`:'<p><br></p>').join(''))
+
+// ── format detection ──
+async function fetchAndDetect(id) {
+  const token = localStorage.getItem('token')
+  const res = await fetch(`/api/contracts/${id}/file`,{headers:token?{Authorization:`Bearer ${token}`}:{}})
+  if (!res.ok) throw new Error(`服务器返回 ${res.status}`)
+  const buf = await res.arrayBuffer()
+  const head = new Uint8Array(buf.slice(0, 4))
+  if (head[0]===0x25 && head[1]===0x50 && head[2]===0x44 && head[3]===0x46) { isPdf.value=true }
+  else if (head[0]===0x50 && head[1]===0x4B) { isPdf.value=false }
+  else { isPdf.value = (contract.value?.file_name||'').toLowerCase().endsWith('.pdf') }
+  cachedFileData = buf
+}
 
 // ── API ──
 async function fetchDetail(){loading.value=true;error.value='';try{contract.value=(await getContractDetail(route.params.id)).data}catch(e){error.value='无法加载合同详情';console.warn(e)}finally{loading.value=false}}
@@ -262,98 +209,54 @@ async function handleTriggerAudit(){auditing.value=true;try{await triggerAudit(r
 async function onFeedback(p){try{await submitFeedback(p);ElMessage.success('反馈已保存');fetchFeedback()}catch(e){ElMessage.error('反馈提交失败：'+(e.response?.data?.detail||e.message))}}
 function onFeedbackUndo(p){console.log('[FeedbackPanel] 撤销:',p);ElMessage.info('已撤销（本地状态）')}
 
-// ── DOCX ──
-const CONTENT_W = 602
-const docxContainerRef = ref(null)
-const docxLoading = ref(false)
-const docxError = ref('')
-const docxZoom = ref(1)
-
-function applyZoom(z) {
-  docxZoom.value = z
-  if (docxContainerRef.value) docxContainerRef.value.style.zoom = z
-}
-
+// ── DOCX render ──
+function applyZoom(z){docxZoom.value=z;if(docxContainerRef.value)docxContainerRef.value.style.zoom=z}
 async function loadDocx() {
   if (isPdf.value !== false) return
-  docxLoading.value = true; docxError.value = ''
+  docxLoading.value=true;docxError.value=''
   try {
-    await renderAsync(
-      new Blob([cachedFileData],{type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}),
-      docxContainerRef.value,
-      undefined,
-      {className:'docx-page'}
-    )
-    // auto-fit — leave 16px for scrollbar
-    const vw = (docxContainerRef.value?.parentElement?.clientWidth || 0) - 16
-    applyZoom(vw > 0 ? Math.round(Math.max(0.3, vw / CONTENT_W) * 10) / 10 : 0.8)
-  } catch (e) {
-    docxError.value = 'DOCX 解析失败：' + (e.message || '未知错误')
-  } finally { docxLoading.value = false }
+    await renderAsync(new Blob([cachedFileData],{type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}), docxContainerRef.value, undefined, {className:'docx-page'})
+    const vw = (docxContainerRef.value?.parentElement?.clientWidth||0)-16
+    applyZoom(vw>0?Math.round(Math.max(.3,vw/DOCX_W)*10)/10:.8)
+  }catch(e){docxError.value='DOCX 解析失败：'+(e.message||'未知错误')}
+  finally{docxLoading.value=false}
 }
+function zoomDocx(d){applyZoom(Math.round(Math.max(.3,Math.min(2,docxZoom.value+d))*100)/100)}
+function resetDocxZoom(){const vw=(docxContainerRef.value?.parentElement?.clientWidth||0)-16;applyZoom(vw>0?Math.round(Math.max(.3,vw/DOCX_W)*10)/10:.8)}
 
-function zoomDocx(delta) {
-  applyZoom(Math.round(Math.max(0.3, Math.min(2, docxZoom.value + delta)) * 100) / 100)
-}
-
-function resetDocxZoom() {
-  const vw = (docxContainerRef.value?.parentElement?.clientWidth || 0) - 16
-  applyZoom(vw > 0 ? Math.round(Math.max(0.3, vw / CONTENT_W) * 10) / 10 : 0.8)
-}
-
-// ── PDF ──
+// ── PDF render ──
 async function loadPdf() {
-  if (isPdf.value !== true || !cachedFileData) return
-  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
-  pdfError.value = ''
-  try {
-    pdfLoadingTask = pdfjsLib.getDocument({data: cachedFileData.slice()})
-    pdfDoc = await pdfLoadingTask.promise
-    pdfTotalPages.value = pdfDoc.numPages
-    await nextTick()
-    renderPdfPage(1)
-  } catch(e) { pdfError.value = 'PDF 加载失败：' + (e.message || '文件格式异常'); console.warn(e) }
+  if (isPdf.value!==true||!cachedFileData) return
+  pdfjsLib.GlobalWorkerOptions.workerSrc=pdfjsWorker;pdfError.value=''
+  try{pdfLoadingTask=pdfjsLib.getDocument({data:cachedFileData.slice()});pdfDoc=await pdfLoadingTask.promise;pdfTotalPages.value=pdfDoc.numPages;await nextTick();renderPdfPage(1)}
+  catch(e){pdfError.value='PDF 加载失败：'+(e.message||'文件格式异常');console.warn(e)}
 }
-async function renderPdfPage(n) {
-  if (!pdfDoc) return; pdfCurrentPage.value = n
-  const c = pdfCanvasRef.value; if (!c) return
-  const p = await pdfDoc.getPage(n)
-  const v = p.getViewport({scale:1})
-  const s = Math.min((c.parentElement.clientWidth - 2) / v.width, 1.5)
-  const sv = p.getViewport({scale:s})
-  c.width = sv.width; c.height = sv.height
+async function renderPdfPage(n){
+  if(!pdfDoc)return;pdfCurrentPage.value=n
+  const c=pdfCanvasRef.value;if(!c)return
+  const p=await pdfDoc.getPage(n);const v=p.getViewport({scale:1})
+  const s=Math.min((c.parentElement.clientWidth-2)/v.width,1.5)
+  const sv=p.getViewport({scale:s})
+  c.width=sv.width;c.height=sv.height
   await p.render({canvasContext:c.getContext('2d'),viewport:sv}).promise
 }
+function goToPdfPage(n){if(n<1||n>pdfTotalPages.value)return;renderPdfPage(n)}
 
-function goToPage(p) {
-  if (p < 1 || p > totalPages.value) return
-  renderPage(p)
-}
+// ── navigation ──
+function goToAuditResult(){router.push(`/audit/result/${route.params.id}`)}
+function goToAuditReport(){router.push(`/audit/report/${route.params.id}`)}
 
-// ── 生命周期 ──
-onMounted(() => {
-  fetchDetail()
-  fetchAuditResult()
-  loadPdf()
-})
-
-// ── 导航到风险详情/报告页（列表页）──
-function goToAuditResult() {
-  router.push(`/audit/result/${route.params.id}`)
-}
-
-function goToAuditReport() {
-  router.push(`/audit/report/${route.params.id}`)
-}
-
-// 路由参数变化时重新拉数据（组件复用场景）
-watch(() => route.params.id, () => {
-  fetchDetail()
-  fetchAuditResult()
+// ── lifecycle ──
+onMounted(async () => { await fetchDetail(); fetchAuditResult() })
+watch(contract, async c => {
+  if (!c) return; await nextTick()
+  cachedFileData=null;isPdf.value=null
+  try{await fetchAndDetect(c.id)}catch{isPdf.value=false}
+  if(isPdf.value)loadPdf();else loadDocx()
 })
 watch(() => contract.value?.id, cid => { if (cid) fetchFeedback() })
-watch(() => route.params.id, () => { pdfLoadingTask?.destroy(); pdfLoadingTask = null; pdfDoc = null; cachedFileData = null; fetchDetail(); fetchAuditResult() })
-onUnmounted(() => { pdfLoadingTask?.destroy(); pdfDoc = null; pdfLoadingTask = null })
+watch(() => route.params.id, () => { pdfLoadingTask?.destroy(); pdfLoadingTask=null;pdfDoc=null;cachedFileData=null; fetchDetail(); fetchAuditResult() })
+onUnmounted(() => { pdfLoadingTask?.destroy(); pdfDoc=null;pdfLoadingTask=null })
 </script>
 
 <style scoped>
