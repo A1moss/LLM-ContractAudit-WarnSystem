@@ -102,45 +102,71 @@
         </div>
       </el-card>
 
-      <!-- PDF 预览 -->
+      <!-- 合同原文预览 -->
       <el-card shadow="hover" class="pdf-card">
         <template #header>
           <div class="pdf-header">
             <span>合同原文预览</span>
-            <div v-if="!pdfError && totalPages > 0" class="pdf-controls">
-              <el-button-group>
-                <el-button size="small" :disabled="currentPage <= 1" @click="goToPage(currentPage - 1)">
-                  <el-icon><ArrowLeft /></el-icon>
-                </el-button>
-                <el-button size="small" disabled class="page-indicator">
-                  {{ currentPage }} / {{ totalPages }}
-                </el-button>
-                <el-button size="small" :disabled="currentPage >= totalPages" @click="goToPage(currentPage + 1)">
-                  <el-icon><ArrowRight /></el-icon>
-                </el-button>
-              </el-button-group>
-              <el-input-number
-                v-model="jumpPage"
-                :min="1"
-                :max="totalPages"
-                size="small"
-                controls-position="right"
-                style="width: 120px; margin-left: 8px;"
-                @change="goToPage(jumpPage)"
-              />
+            <div class="pdf-toolbar">
+              <el-tag v-if="convertingDocx" size="small" type="warning">加载中...</el-tag>
             </div>
           </div>
         </template>
-        <div class="pdf-preview">
-          <div v-if="pdfLoading" class="pdf-loading">
-            <el-icon class="is-loading" :size="32"><Loading /></el-icon>
-            <p>正在加载合同原文...</p>
+
+        <!-- 加载中 -->
+        <div v-if="convertingDocx" class="converting-state">
+          <el-icon class="is-loading" :size="24"><Loading /></el-icon>
+          <p>正在加载预览</p>
+          <p class="converting-hint">首次加载需要 5-10 秒</p>
+        </div>
+
+        <!-- PDF 模式：双页并排 -->
+        <template v-else-if="pdfReady">
+          <div class="spread-viewer">
+            <div class="spread-container">
+              <!-- 左页 -->
+              <div class="page-slot">
+                <canvas ref="leftCanvasRef" class="pdf-canvas"></canvas>
+                <span class="page-num">{{ leftPageNum }}</span>
+              </div>
+              <!-- 右页 -->
+              <div class="page-slot">
+                <canvas ref="rightCanvasRef" class="pdf-canvas"></canvas>
+                <span class="page-num">{{ rightPageNum }}</span>
+              </div>
+            </div>
           </div>
-          <canvas v-show="!pdfError && !pdfLoading" ref="pdfCanvasRef" class="pdf-canvas"></canvas>
-          <div v-if="pdfError" class="pdf-error">
-            <el-icon :size="40"><Warning /></el-icon>
-            <p>PDF 加载失败：{{ pdfError }}</p>
+
+          <div class="page-nav">
+            <el-button size="small" :disabled="currentSpread <= 1" @click="goToSpread(1)">
+              <el-icon><ArrowLeft /></el-icon><el-icon><ArrowLeft /></el-icon>
+            </el-button>
+            <el-button size="small" :disabled="currentSpread <= 1" @click="prevSpread">
+              <el-icon><ArrowLeft /></el-icon>
+            </el-button>
+
+            <span class="spread-label">{{ leftPageNum }}/{{ rightPageNum }}</span>
+
+            <el-button size="small" :disabled="currentSpread >= totalSpreads" @click="nextSpread">
+              <el-icon><ArrowRight /></el-icon>
+            </el-button>
+            <el-button size="small" :disabled="currentSpread >= totalSpreads" @click="goToSpread(totalSpreads)">
+              <el-icon><ArrowRight /></el-icon><el-icon><ArrowRight /></el-icon>
+            </el-button>
+
+            <span class="page-jump">
+              <span class="jump-label">跳至</span>
+              <el-input v-model="jumpPage" size="small" class="jump-input" @keyup.enter="handleJump" />
+              <span class="jump-label">页</span>
+              <el-button size="small" @click="handleJump">GO</el-button>
+            </span>
           </div>
+        </template>
+
+        <!-- 错误 -->
+        <div v-else class="pdf-error-box">
+          <el-icon :size="32"><Warning /></el-icon>
+          <p>{{ pdfError || '无法加载合同内容' }}</p>
         </div>
       </el-card>
     </template>
@@ -151,6 +177,7 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { Warning, ArrowLeft, ArrowRight, SuccessFilled, Loading } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -216,7 +243,7 @@ watch(contractId, async (newId, oldId) => {
     await fetchReport()
     await nextTick()
     initCharts()
-    renderPdf()
+    loadPdf()
   }
 })
 
@@ -277,77 +304,115 @@ function disposeCharts() {
   barChartInstance = null
 }
 
-// ── PDF ──
-const pdfCanvasRef = ref(null)
-const currentPage = ref(1)
+// ── PDF 双页并排 ──
+const leftCanvasRef = ref(null)
+const rightCanvasRef = ref(null)
+const currentSpread = ref(1)
 const totalPages = ref(0)
-const jumpPage = ref(1)
+const pdfReady = ref(false)
 const pdfError = ref('')
-const pdfLoading = ref(false)
+const convertingDocx = ref(false)
+const zoomFit = ref(1.0)
+const jumpPage = ref('')
 let pdfLoadingTask = null
 let pdfDoc = null
 
-async function renderPdf() {
+const totalSpreads = computed(() => Math.ceil(totalPages.value / 2))
+const leftPageNum = computed(() => (currentSpread.value - 1) * 2 + 1)
+const rightPageNum = computed(() => Math.min(leftPageNum.value + 1, totalPages.value))
+
+async function loadPdf() {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
   const id = contractId.value
   if (!id) return
 
-  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
-  pdfLoading.value = true
-  pdfError.value = ''
-  currentPage.value = 1
-  jumpPage.value = 1
-
+  let fileData = null
+  convertingDocx.value = true
   try {
-    // Fetch the contract file as binary via auth'd API
-    const arrayBuffer = await getContractFile(id)
-    pdfLoadingTask = pdfjsLib.getDocument({ data: arrayBuffer.slice() })
-    pdfDoc = await pdfLoadingTask.promise
-    totalPages.value = pdfDoc.numPages
-    await renderPage(1)
-  } catch (e) {
-    pdfError.value = e.message || 'PDF 加载失败'
-    console.warn('PDF 加载失败:', e)
-  } finally {
-    pdfLoading.value = false
+    fileData = await getContractFile(id)
+  } catch {
+    console.warn('合同文件 API 加载失败')
   }
+
+  if (fileData) {
+    try {
+      pdfLoadingTask = pdfjsLib.getDocument({ data: new Uint8Array(fileData) })
+      pdfDoc = await pdfLoadingTask.promise
+      totalPages.value = pdfDoc.numPages
+      // 每个 page-slot 可用宽度 = 卡片宽度 / 2 - 间隙
+      convertingDocx.value = false
+      pdfReady.value = true
+      await nextTick()
+      renderSpread(currentSpread.value)
+      return
+    } catch (e) {
+      convertingDocx.value = false
+      pdfError.value = 'PDF 加载失败，请确认文件格式正确'
+      console.warn('PDF 渲染失败:', e.message)
+      return
+    }
+  }
+  convertingDocx.value = false
+  pdfError.value = '后端服务未启动，无法加载文件'
 }
 
-async function renderPage(pageNum) {
+async function renderPageToCanvas(pageNum, canvas) {
+  if (!pdfDoc || !canvas || pageNum > totalPages.value) return
+  const page = await pdfDoc.getPage(pageNum)
+  const vp = page.getViewport({ scale: 1.0 })
+  // 按 canvas 父容器宽度适配
+  const slotW = canvas.parentElement?.clientWidth || 400
+  const scale = (slotW - 16) / vp.width
+  const svp = page.getViewport({ scale })
+  canvas.width = svp.width
+  canvas.height = svp.height
+  const ctx = canvas.getContext('2d')
+  await page.render({ canvasContext: ctx, viewport: svp }).promise
+}
+
+async function renderSpread(spreadNum) {
   if (!pdfDoc) return
-  const canvas = pdfCanvasRef.value
-  if (!canvas) return
-
-  try {
-    const page = await pdfDoc.getPage(pageNum)
-    currentPage.value = pageNum
-    jumpPage.value = pageNum
-
-    const viewport = page.getViewport({ scale: 1.0 })
-    const maxWidth = 600
-    const containerWidth = Math.min(canvas.parentElement.clientWidth - 2, maxWidth)
-    const scale = containerWidth / viewport.width
-    const scaledViewport = page.getViewport({ scale })
-
-    canvas.width = scaledViewport.width
-    canvas.height = scaledViewport.height
-
-    const ctx = canvas.getContext('2d')
-    await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise
-  } catch (e) {
-    console.warn('PDF 页面渲染失败:', e)
-  }
+  const leftPage = (spreadNum - 1) * 2 + 1
+  const rightPage = leftPage + 1
+  currentSpread.value = spreadNum
+  await Promise.all([
+    renderPageToCanvas(leftPage, leftCanvasRef.value),
+    rightPage <= totalPages.value ? renderPageToCanvas(rightPage, rightCanvasRef.value) : clearCanvas(rightCanvasRef.value),
+  ])
 }
 
-function goToPage(pageNum) {
-  if (pageNum < 1 || pageNum > totalPages.value) return
-  renderPage(pageNum)
+function clearCanvas(canvas) {
+  if (!canvas) return
+  const ctx = canvas.getContext('2d')
+  ctx?.clearRect(0, 0, canvas.width, canvas.height)
+  canvas.width = 0
+  canvas.height = 0
+}
+
+function goToSpread(num) {
+  if (num >= 1 && num <= totalSpreads.value) renderSpread(num)
+}
+
+function prevSpread() { goToSpread(currentSpread.value - 1) }
+function nextSpread() { goToSpread(currentSpread.value + 1) }
+
+function handleJump() {
+  const n = parseInt(jumpPage.value, 10)
+  if (isNaN(n) || n < 1 || n > totalPages.value) {
+    ElMessage.warning(`请输入 1-${totalPages.value} 之间的页码`)
+    return
+  }
+  // 输入任意页码 → 跳到包含该页的 spread
+  const spread = Math.ceil(n / 2)
+  goToSpread(spread)
+  jumpPage.value = ''
 }
 
 onMounted(async () => {
   await fetchReport()
   await nextTick()
   initCharts()
-  renderPdf()
+  loadPdf()
 })
 
 onUnmounted(() => {
@@ -406,34 +471,112 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 36px;
 }
 
-.pdf-controls {
+.pdf-toolbar {
   display: flex;
   align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
-.page-indicator {
-  min-width: 80px;
+/* 双页并排 */
+.spread-viewer {
+  background: #f5f7fa;
+  border-radius: 4px;
+  padding: 16px 8px;
+}
+
+.spread-container {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.page-slot {
+  flex: 1;
+  min-width: 0;
   text-align: center;
+  position: relative;
 }
 
-.pdf-preview {
-  text-align: center;
+.page-slot .pdf-canvas {
+  border: 1px solid #dcdfe6;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
 }
 
-.pdf-loading {
-  padding: 50px;
+.page-num {
+  display: block;
+  font-size: 12px;
   color: #909399;
+  margin-top: 4px;
 }
 
-.pdf-canvas {
-  border: 1px solid #ddd;
-  max-width: 100%;
+.converting-state {
+  padding: 60px 20px;
+  text-align: center;
+  color: #606266;
+  min-height: 400px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: #fafafa;
+  border-radius: 4px;
+  border: 1px solid #ebeef5;
 }
 
-.pdf-error {
-  padding: 50px;
+.converting-state .is-loading { animation: rotating 2s linear infinite; }
+
+.converting-hint { font-size: 12px; color: #909399; }
+
+@keyframes rotating {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.pdf-error-box {
+  padding: 40px;
+  text-align: center;
   color: #999;
 }
+
+.pdf-error-box p { margin-top: 8px; }
+
+.page-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.spread-label {
+  font-size: 14px;
+  color: #303133;
+  font-weight: 500;
+  min-width: 60px;
+  text-align: center;
+}
+
+.page-ellipsis {
+  color: #909399;
+  padding: 0 4px;
+  user-select: none;
+}
+
+.page-jump {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+}
+
+.jump-label { font-size: 13px; color: #909399; white-space: nowrap; }
+.jump-input { width: 56px; }
 </style>

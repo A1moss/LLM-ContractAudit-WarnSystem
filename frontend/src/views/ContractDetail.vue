@@ -43,7 +43,6 @@
 
             <el-tab-pane label="风险详情" name="audit">
               <div class="tab-content">
-                <!-- 审核未触发 -->
                 <div v-if="contract.status === 'parsed' && riskItems.length === 0" class="audit-placeholder">
                   <el-empty description="尚未审核此合同">
                     <el-button type="primary" :loading="auditing" @click="handleTriggerAudit">
@@ -52,7 +51,6 @@
                   </el-empty>
                 </div>
 
-                <!-- 审核中 -->
                 <div v-else-if="contract.status === 'auditing'" class="audit-placeholder">
                   <el-result icon="info" title="审核中" sub-title="AI 正在分析合同条款，请稍候...">
                     <template #extra>
@@ -61,7 +59,6 @@
                   </el-result>
                 </div>
 
-                <!-- 审核完成：展示风险列表 -->
                 <template v-else-if="riskItems.length > 0">
                   <el-alert
                     :title="`共检测到 ${riskSummary.total} 条风险，其中高风险 ${riskSummary.high} 条、中风险 ${riskSummary.mid} 条、低风险 ${riskSummary.low} 条`"
@@ -90,7 +87,6 @@
                     全屏查看结果
                   </el-button>
 
-                  <!-- 反馈标注面板 -->
                   <FeedbackPanel
                     ref="feedbackRef"
                     :risk-items="riskItems"
@@ -101,7 +97,6 @@
                   />
                 </template>
 
-                <!-- 审核完成但无风险 -->
                 <el-empty v-else description="审核完成，未检测到风险" />
               </div>
             </el-tab-pane>
@@ -136,53 +131,86 @@
           </el-tabs>
         </el-col>
 
-        <!-- 右侧 PDF 预览面板 -->
+        <!-- 右侧预览面板 -->
         <el-col :span="10" class="detail-right">
           <el-card shadow="hover">
             <template #header>
               <div class="pdf-header">
                 <span>合同原文</span>
-                <el-tag size="small">第 {{ currentPage }} / {{ totalPages }} 页</el-tag>
+                <div class="pdf-toolbar">
+                  <template v-if="pdfReady">
+                    <el-button size="small" @click="zoomReset">重新适配</el-button>
+                    <el-tag size="small">第 {{ currentPage }} / {{ totalPages }} 页</el-tag>
+                  </template>
+                  <el-tag v-else-if="convertingDocx" size="small" type="warning">转换中...</el-tag>
+                </div>
               </div>
             </template>
 
-            <!-- PDF 渲染区 -->
-            <div v-if="!pdfError" class="pdf-viewer">
-              <canvas ref="pdfCanvasRef" class="pdf-canvas"></canvas>
-            </div>
-            <div v-if="pdfError" class="pdf-error">
-              <el-icon :size="32"><Warning /></el-icon>
-              <p>{{ pdfError }}</p>
+            <!-- PDF 转换中 -->
+            <div v-if="convertingDocx" class="converting-state">
+              <el-icon class="is-loading" :size="24"><Loading /></el-icon>
+              <p>正在加载预览</p>
+              <p class="converting-hint">首次加载需要 5-10 秒</p>
             </div>
 
-            <!-- 页码跳转按钮组 -->
-            <div v-if="!pdfError" class="page-nav">
-              <el-button size="small" :disabled="currentPage <= 1" @click="goToPage(currentPage - 1)">
-                <el-icon><ArrowLeft /></el-icon>
-              </el-button>
-              <span class="page-buttons">
-                <el-button
-                  v-for="p in totalPages"
-                  :key="p"
-                  :type="p === currentPage ? 'primary' : 'default'"
-                  size="small"
-                  @click="goToPage(p)"
-                >
-                  {{ p }}
+            <!-- PDF 模式 -->
+            <template v-else-if="pdfReady">
+              <div class="pdf-viewer">
+                <div class="pdf-scroll-container" ref="pdfScrollRef">
+                  <canvas ref="pdfCanvasRef" class="pdf-canvas"></canvas>
+                </div>
+              </div>
+
+              <!-- 页码导航（省略号风格） -->
+              <div class="page-nav">
+                <el-button size="small" :disabled="currentPage <= 1" @click="goToPage(1)">首页</el-button>
+                <el-button size="small" :disabled="currentPage <= 1" @click="goToPage(currentPage - 1)">
+                  <el-icon><ArrowLeft /></el-icon>
                 </el-button>
-              </span>
-              <el-button size="small" :disabled="currentPage >= totalPages" @click="goToPage(currentPage + 1)">
-                <el-icon><ArrowRight /></el-icon>
-              </el-button>
-            </div>
 
-            <!-- 侧栏文本展示（当前页条款摘要） -->
-            <div v-if="!pdfError" class="text-sidebar">
-              <el-divider class="sidebar-divider" />
-              <span class="sidebar-label">当前页条款摘要</span>
-              <p class="sidebar-text">
-                {{ pageSummary }}
-              </p>
+                <template v-for="p in pageEllipsisRange" :key="p">
+                  <span v-if="p === '...'" class="page-ellipsis">...</span>
+                  <el-button
+                    v-else
+                    size="small"
+                    :type="p === currentPage ? 'primary' : 'default'"
+                    @click="goToPage(p)"
+                  >
+                    {{ p }}
+                  </el-button>
+                </template>
+
+                <el-button size="small" :disabled="currentPage >= totalPages" @click="goToPage(currentPage + 1)">
+                  <el-icon><ArrowRight /></el-icon>
+                </el-button>
+                <el-button size="small" :disabled="currentPage >= totalPages" @click="goToPage(totalPages)">末页</el-button>
+
+                <span class="page-jump">
+                  <span class="jump-label">跳至</span>
+                  <el-input
+                    v-model="jumpPage"
+                    size="small"
+                    class="jump-input"
+                    @keyup.enter="handleJump"
+                  />
+                  <span class="jump-label">页</span>
+                  <el-button size="small" @click="handleJump">GO</el-button>
+                </span>
+              </div>
+
+              <!-- 侧栏条款摘要 -->
+              <div class="text-sidebar">
+                <el-divider class="sidebar-divider" />
+                <span class="sidebar-label">当前页条款摘要</span>
+                <p class="sidebar-text">{{ pageSummary }}</p>
+              </div>
+            </template>
+
+            <!-- 加载失败 -->
+            <div v-else class="pdf-error">
+              <el-icon :size="32"><Warning /></el-icon>
+              <p>{{ pdfError || '无法加载合同内容' }}</p>
             </div>
           </el-card>
         </el-col>
@@ -192,12 +220,12 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Warning, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
+import { Warning, ArrowLeft, ArrowRight, Loading } from '@element-plus/icons-vue'
 import FeedbackPanel from '../components/FeedbackPanel.vue'
 import { ElMessage } from 'element-plus'
-import { getContractDetail, getAuditResult, triggerAudit, submitFeedback, getFeedback } from '../api/contract.js'
+import { getContractDetail, getAuditResult, triggerAudit, submitFeedback, getFeedback, getContractFile } from '../api/contract.js'
 import { formatTime } from '../utils/format.js'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -205,56 +233,42 @@ import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 const route = useRoute()
 const router = useRouter()
 
-// ── 合同 ID ──
-const contractId = computed(() => route.params.id)
-
-// ── 反馈标注 ──
 const feedbackRef = ref(null)
 
 // ── 数据状态 ──
 const loading = ref(true)
 const error = ref('')
 const contract = ref(null)
+const contractId = computed(() => route.params.id)
 
 // ── 合同类型映射 ──
 const typeMap = {
-  purchase: '采购合同',
-  sales: '销售合同',
-  nda: '保密协议 (NDA)',
-  outsourcing: '服务外包合同',
-  employment: '劳动合同',
-  other: '其他合同',
+  purchase: '采购合同', sales: '销售合同', nda: '保密协议 (NDA)',
+  outsourcing: '服务外包合同', employment: '劳动合同', other: '其他合同',
 }
-
-function typeLabel(type) {
-  return typeMap[type] || type || '未分类'
-}
+function typeLabel(type) { return typeMap[type] || type || '未分类' }
 
 // ── 状态映射 ──
 function statusLabel(status) {
   const map = { uploaded: '已上传', parsed: '已解析', auditing: '审核中', completed: '审核完成' }
   return map[status] || status || '未知'
 }
-
 function statusTag(status) {
   if (status === 'completed') return 'success'
   if (status === 'auditing' || status === 'parsing') return 'warning'
   return 'info'
 }
 
-// ── HTML 转义（防 XSS） ──
+// ── HTML 转义 ──
 function escapeHtml(text) {
   const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
   return text.replace(/[&<>"']/g, ch => map[ch])
 }
 
-// ── 渲染文本（段落换行，保留空行） ──
+// ── 渲染文本 ──
 const renderedText = computed(() => {
   const text = contract.value?.parsed_text || ''
-  return text
-    .split('\n')
-    .map(p => (p.trim() ? `<p>${escapeHtml(p)}</p>` : '<p><br></p>'))
-    .join('')
+  return text.split('\n').map(p => (p.trim() ? `<p>${escapeHtml(p)}</p>` : '<p><br></p>')).join('')
 })
 
 // ── 获取合同详情 ──
@@ -265,6 +279,7 @@ async function fetchDetail() {
     const res = await getContractDetail(route.params.id)
     contract.value = res.data
     fetchFeedback()
+    loadPdf()
   } catch (e) {
     error.value = '无法加载合同详情，请确认合同 ID 有效且后端已启动'
     console.warn('合同详情加载失败:', e)
@@ -279,12 +294,123 @@ const activeTab = ref('text')
 // ── PDF 状态 ──
 const currentPage = ref(1)
 const totalPages = ref(0)
+const pdfReady = ref(false)
 const pdfError = ref('')
 const pdfCanvasRef = ref(null)
+const pdfScrollRef = ref(null)
+const zoomLevel = ref(1.0)
+const zoomFit = ref(1.0)
+const jumpPage = ref('')
+const convertingDocx = ref(false)
 const loadedFeedbacks = ref([])
 let pdfDoc = null
 let pdfLoadingTask = null
 
+// ── loadPdf：自动转换 + 自动适配 ──
+async function loadPdf() {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
+  const cid = route.params.id
+
+  let fileData = null
+  if (cid) {
+    try {
+      convertingDocx.value = true
+      fileData = await getContractFile(cid)
+    } catch {
+      console.warn('合同文件 API 加载失败')
+    }
+  }
+
+  if (fileData) {
+    try {
+      pdfLoadingTask = pdfjsLib.getDocument({ data: new Uint8Array(fileData) })
+      pdfDoc = await pdfLoadingTask.promise
+      totalPages.value = pdfDoc.numPages
+      const firstPage = await pdfDoc.getPage(1)
+      const vp = firstPage.getViewport({ scale: 1.0 })
+      zoomFit.value = +(380 / vp.width).toFixed(2)
+      zoomLevel.value = zoomFit.value
+      // 必须先关掉 convertingDocx，否则模板 v-if="convertingDocx" 会挡住 canvas
+      convertingDocx.value = false
+      pdfReady.value = true
+      await nextTick()
+      renderPage(currentPage.value)
+    } catch (e) {
+      convertingDocx.value = false
+      pdfError.value = 'PDF 加载失败，请确认文件格式正确'
+      console.warn('PDF 渲染失败:', e.message)
+    }
+  } else {
+    convertingDocx.value = false
+    pdfError.value = '后端服务未启动，无法加载文件'
+  }
+}
+
+async function renderPage(num) {
+  if (!pdfDoc || !pdfCanvasRef.value) return
+  try {
+    const page = await pdfDoc.getPage(num)
+    const vp = page.getViewport({ scale: zoomLevel.value })
+    const canvas = pdfCanvasRef.value
+    canvas.width = vp.width
+    canvas.height = vp.height
+    const ctx = canvas.getContext('2d')
+    await page.render({ canvasContext: ctx, viewport: vp }).promise
+    currentPage.value = num
+  } catch (e) {
+    console.warn('页面渲染失败:', e.message)
+  }
+}
+
+function goToPage(num) {
+  if (num >= 1 && num <= totalPages.value) {
+    renderPage(num)
+    pdfScrollRef.value?.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+}
+
+function handleJump() {
+  const n = parseInt(jumpPage.value, 10)
+  if (isNaN(n) || n < 1 || n > totalPages.value) {
+    ElMessage.warning(`请输入 1-${totalPages.value} 之间的页码`)
+    return
+  }
+  goToPage(n)
+  jumpPage.value = ''
+}
+
+function zoomReset() {
+  zoomLevel.value = zoomFit.value
+  renderPage(currentPage.value)
+  pdfScrollRef.value?.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+// ── 页码省略号范围 ──
+const pageEllipsisRange = computed(() => {
+  const total = totalPages.value
+  const cur = currentPage.value
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1)
+  }
+  const range = []
+  // Always show first page
+  range.push(1)
+  // Ellipsis if gap > 1
+  if (cur > 3) range.push('...')
+  // Pages around current
+  const start = Math.max(2, cur - 1)
+  const end = Math.min(total - 1, cur + 1)
+  for (let i = start; i <= end; i++) {
+    if (i !== 1 && i !== total) range.push(i)
+  }
+  // Ellipsis if gap > 1
+  if (cur < total - 2) range.push('...')
+  // Always show last page
+  range.push(total)
+  return [...new Set(range)]
+})
+
+// ── 页码摘要 ──
 const pageSummary = ref('点击页码浏览各页合同条款')
 const pageSummaries = {
   1: '保密协议定义条款：明确保密信息的范围，包括技术资料、商业计划、客户信息、财务数据等，采用概括+列举的定义方式。',
@@ -292,11 +418,12 @@ const pageSummaries = {
   3: '保密期限条款：保密义务有效期 5 年，自保密信息披露之日起计算。',
   4: '违约责任与争议解决：违约责任条款约定赔偿计算方式，争议提交甲方所在地法院管辖。',
 }
+watch(currentPage, (p) => {
+  pageSummary.value = pageSummaries[p] || '本页无摘要信息'
+})
 
-// ── 风险详情（从 API 获取）──
+// ── 风险详情 ──
 const riskItems = ref([])
-
-// 风险等级映射：API 英文 → 前端中文
 const levelMap = { high: '高风险', medium: '中风险', low: '低风险' }
 
 async function fetchAuditResult() {
@@ -305,25 +432,13 @@ async function fetchAuditResult() {
   try {
     const res = await getAuditResult(id)
     riskItems.value = (res.data?.items || []).map(r => ({
-      id: r.id,
-      risk_level: r.risk_level,
-      risk_type: r.risk_type,
-      clause_text: r.clause_text,
-      level: levelMap[r.risk_level] || r.risk_level,
-      category: r.risk_type,
-      clause: r.clause_text,
-      suggestion: r.suggestion,
-      reason: r.reason,
-      confidence: r.confidence,
-      detection_method: r.detection_method,
+      id: r.id, risk_level: r.risk_level, risk_type: r.risk_type, clause_text: r.clause_text,
+      level: levelMap[r.risk_level] || r.risk_level, category: r.risk_type, clause: r.clause_text,
+      suggestion: r.suggestion, reason: r.reason, confidence: r.confidence, detection_method: r.detection_method,
     }))
-  } catch {
-    // 无风险详情时静默，保持空列表
-    riskItems.value = []
-  }
+  } catch { riskItems.value = [] }
 }
 
-// ── 风险详情汇总 ──
 const riskSummary = computed(() => {
   const high = riskItems.value.filter(r => r.level === '高风险').length
   const mid = riskItems.value.filter(r => r.level === '中风险').length
@@ -337,128 +452,52 @@ function levelTag(level) {
   return 'success'
 }
 
-// ── 触发审核 ──
 const auditing = ref(false)
 async function handleTriggerAudit() {
   auditing.value = true
   try {
     await triggerAudit(route.params.id)
     contract.value.status = 'auditing'
-    // 审核完成后拉结果
     await fetchAuditResult()
     await fetchDetail()
     ElMessage.success('审核完成')
   } catch (e) {
     ElMessage.error('审核触发失败')
-  } finally {
-    auditing.value = false
-  }
+  } finally { auditing.value = false }
 }
 
-// ── 加载已有反馈 ──
 async function fetchFeedback() {
   const cid = contract.value?.id
   if (!cid) return
   try {
     const res = await getFeedback(cid)
     loadedFeedbacks.value = res.data?.items || []
-  } catch {
-    loadedFeedbacks.value = []
-  }
+  } catch { loadedFeedbacks.value = [] }
 }
 
-// ── 反馈标注回调 ──
 async function onFeedback(payload) {
   try {
     await submitFeedback(payload)
     ElMessage.success('反馈已保存')
-    // 刷新反馈列表确保状态同步
     fetchFeedback()
   } catch (e) {
     ElMessage.error('反馈提交失败：' + (e.response?.data?.detail || e.message))
   }
 }
 
-// ── 撤销反馈回调 ──
 function onFeedbackUndo(payload) {
-  // TODO: 等 C 角色实现 DELETE /api/feedback/{id} 后对接
   console.log('[FeedbackPanel] 撤销反馈:', payload)
   ElMessage.info('已撤销（本地状态）')
 }
 
-// ── pdf.js ──
-async function loadPdf() {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
-  try {
-    pdfLoadingTask = pdfjsLib.getDocument({ url: '/test.pdf' })
-    pdfDoc = await pdfLoadingTask.promise
-    totalPages.value = pdfDoc.numPages
-    renderPage(currentPage.value)
-  } catch (e) {
-    pdfError.value = 'PDF 加载失败：' + e.message + '（请确保 frontend/public/test.pdf 存在）'
-    console.warn('PDF 加载失败:', e.message)
-  }
-}
-
-async function renderPage(pageNum) {
-  if (!pdfDoc) return
-  currentPage.value = pageNum
-
-  pageSummary.value = pageSummaries[pageNum] || `第 ${pageNum} 页（暂无条款摘要）`
-
-  const page = await pdfDoc.getPage(pageNum)
-  const canvas = pdfCanvasRef.value
-  if (!canvas) return
-
-  const viewport = page.getViewport({ scale: 1.0 })
-  const containerWidth = canvas.parentElement.clientWidth - 2
-  const scale = Math.min(containerWidth / viewport.width, 1.5)
-  const scaledViewport = page.getViewport({ scale })
-
-  canvas.width = scaledViewport.width
-  canvas.height = scaledViewport.height
-
-  const ctx = canvas.getContext('2d')
-  await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise
-}
-
-function goToPage(p) {
-  if (p < 1 || p > totalPages.value) return
-  renderPage(p)
-}
+// ── 跳转 ──
+function goToAuditResult() { router.push(`/audit/result/${route.params.id}`) }
+function goToAuditReport() { router.push(`/audit/report/${route.params.id}`) }
 
 // ── 生命周期 ──
 onMounted(() => {
   fetchDetail()
   fetchAuditResult()
-  loadPdf()
-})
-
-// ── 导航到风险详情/报告页（列表页）──
-function goToAuditResult() {
-  router.push(`/audit/result/${route.params.id}`)
-}
-
-function goToAuditReport() {
-  router.push(`/audit/report/${route.params.id}`)
-}
-
-// 路由参数变化时重新拉数据（组件复用场景）
-watch(() => route.params.id, () => {
-  fetchDetail()
-  fetchAuditResult()
-})
-
-// 合同数据就绪后加载反馈
-watch(() => contract.value?.id, (cid) => {
-  if (cid) fetchFeedback()
-})
-
-onUnmounted(() => {
-  // pdfjs-dist v6: destroy() 在 PDFDocumentLoadingTask 上，不在 PDFDocumentProxy
-  pdfLoadingTask?.destroy()
-  pdfDoc = null
-  pdfLoadingTask = null
 })
 </script>
 
@@ -469,19 +508,10 @@ onUnmounted(() => {
   margin: 0 auto;
 }
 
-.loading-state {
-  padding: 40px 0;
-}
+.loading-state { padding: 40px 0; }
+.error-state { padding: 60px 0; }
+.meta-descriptions { margin-bottom: 20px; }
 
-.error-state {
-  padding: 60px 0;
-}
-
-.meta-descriptions {
-  margin-bottom: 20px;
-}
-
-/* 左右两列固定等高：CSS 变量统一基准，避免 calc 漂移 */
 .detail-row {
   --row-height: calc(100vh - 200px);
   height: var(--row-height);
@@ -494,25 +524,11 @@ onUnmounted(() => {
   overflow-y: auto;
 }
 
-.audit-alert {
-  margin-bottom: 16px;
-}
-
-.audit-placeholder {
-  padding: 60px 0;
-}
-
-.audit-full-link {
-  margin-top: 12px;
-}
-
-.report-desc {
-  margin-bottom: 16px;
-}
-
-.report-btn {
-  margin-top: 8px;
-}
+.audit-alert { margin-bottom: 16px; }
+.audit-placeholder { padding: 60px 0; }
+.audit-full-link { margin-top: 12px; }
+.report-desc { margin-bottom: 16px; }
+.report-btn { margin-top: 8px; }
 
 .tab-content {
   height: calc(var(--row-height) - 55px);
@@ -523,31 +539,68 @@ onUnmounted(() => {
   color: #303133;
 }
 
-.tab-content h4 {
-  margin: 0 0 12px 0;
-}
-
-.tab-content h5 {
-  margin: 16px 0 8px 0;
-}
+.tab-content h4 { margin: 0 0 12px 0; }
+.tab-content h5 { margin: 16px 0 8px 0; }
 
 .pdf-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 36px;
 }
 
-.pdf-viewer {
-  text-align: center;
-  min-height: 200px;
+.pdf-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pdf-viewer { text-align: center; }
+
+.pdf-scroll-container {
+  height: 520px;
+  overflow: auto;
   background: #f5f7fa;
   border-radius: 4px;
   padding: 4px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
 }
 
-.pdf-canvas {
-  border: 1px solid #e4e7ed;
-  width: 100%;
+.pdf-canvas { border: 1px solid #e4e7ed; }
+
+/* 转换中 */
+.converting-state {
+  padding: 60px 20px;
+  text-align: center;
+  color: #606266;
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: #fafafa;
+  border-radius: 4px;
+  border: 1px solid #ebeef5;
+}
+
+.converting-state .is-loading {
+  animation: rotating 2s linear infinite;
+}
+
+.converting-hint {
+  font-size: 12px;
+  color: #909399;
+}
+
+@keyframes rotating {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .pdf-error {
@@ -556,34 +609,41 @@ onUnmounted(() => {
   color: #999;
 }
 
-.pdf-error p {
-  margin-top: 8px;
-}
+.pdf-error p { margin-top: 8px; }
 
+/* 页码导航 */
 .page-nav {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 4px;
   margin-top: 12px;
   flex-wrap: wrap;
 }
 
-.page-buttons {
-  display: flex;
-  gap: 4px;
-  max-width: 260px;
-  overflow-x: auto;
-  padding: 2px 0;
-}
-
-.text-sidebar {
+.page-ellipsis {
+  color: #909399;
   padding: 0 4px;
+  user-select: none;
 }
 
-.sidebar-divider {
-  margin: 12px 0;
+.page-jump {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
 }
+
+.jump-label {
+  font-size: 13px;
+  color: #909399;
+  white-space: nowrap;
+}
+
+.jump-input { width: 56px; }
+
+.text-sidebar { padding: 0 4px; }
+.sidebar-divider { margin: 12px 0; }
 
 .sidebar-label {
   font-size: 13px;

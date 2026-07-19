@@ -16,6 +16,7 @@ from ai.extractor import extract_elements
 from ai.auditor import run_rules, audit_with_llm
 from ai.corex import run_review
 from models.audit_record import AuditRecord
+from services.docx_converter import docx_to_pdf
 from models.audit_report import AuditReport
 
 router = APIRouter(prefix="/contracts", tags=["contracts"])
@@ -159,6 +160,7 @@ def get_contract(
             "id": c.id,
             "user_id": c.user_id,
             "file_name": c.file_name,
+            "stored_path": c.stored_path,
             "contract_type": c.contract_type,
             "type_confidence": c.type_confidence,
             "status": c.status,
@@ -196,7 +198,7 @@ def get_contract_file(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Serve the original contract file for PDF preview."""
+    """Serve the original contract file. .docx files are converted to PDF on-the-fly."""
     c = (
         db.query(Contract)
         .filter(Contract.id == contract_id, Contract.user_id == current_user.id)
@@ -207,9 +209,22 @@ def get_contract_file(
     if not c.stored_path or not os.path.isfile(c.stored_path):
         raise HTTPException(status_code=404, detail="file not found on disk")
 
-    mime_type, _ = mimetypes.guess_type(c.file_name)
+    file_path = c.stored_path
+
+    # .docx -> PDF conversion (preserves original pagination & fonts)
+    if (c.file_name and c.file_name.lower().endswith('.docx')) or (c.stored_path and c.stored_path.lower().endswith('.docx')):
+        try:
+            file_path = docx_to_pdf(file_path)
+        except Exception as e:
+            # Fallback: serve the original .docx if conversion fails
+            print(f"WARNING: docx-to-pdf conversion failed: {e}")
+
+    mime_type = 'application/pdf' if file_path.endswith('.pdf') else None
+    if mime_type is None:
+        mime_type, _ = mimetypes.guess_type(c.file_name)
+
     return FileResponse(
-        path=c.stored_path,
+        path=file_path,
         media_type=mime_type or "application/octet-stream",
         filename=c.file_name,
     )
