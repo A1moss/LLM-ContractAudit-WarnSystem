@@ -17,6 +17,8 @@ from ai.extractor import extract_elements
 from ai.auditor import run_rules, audit_with_llm
 from ai.corex import run_review
 from ai.rag import search_knowledge
+from ai.reporter import generate_report, compute_heatmap
+from ai.matcher import compare_clauses
 from models.audit_record import AuditRecord
 from services.docx_converter import docx_to_pdf
 from models.audit_report import AuditReport
@@ -427,6 +429,22 @@ def get_audit_report(
     )
     if not report:
         raise HTTPException(status_code=404, detail="no audit report found")
+
+@router.post("/{contract_id}/compare")
+def compare_contract_clauses(
+    contract_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Compare contract against standard clause templates"""
+    c = db.query(Contract).filter(Contract.id == contract_id, Contract.user_id == current_user.id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="contract not found")
+    if not c.parsed_text:
+        raise HTTPException(status_code=400, detail="contract has no parsed text")
+    
+    result = compare_clauses(c.parsed_text, c.contract_type or "other")
+    return {"code": 0, "message": "ok", "data": result}
 
     return {
         "code": 0,

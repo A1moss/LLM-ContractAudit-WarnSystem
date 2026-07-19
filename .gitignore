@@ -226,6 +226,7 @@ data/*.docx
 data/*.pdf
 data/models/
 chroma_data/
+mysql_data/
 .DS_Store
 Thumbs.db
 .vscode/
