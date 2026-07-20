@@ -106,5 +106,13 @@ export function getHeatmapData(id) {
  * @param {number|string} id — 合同 ID
  */
 export function compareContractClauses(id) {
-  return request.post(`/contracts/${id}/compare`)
+  return request.get(`/contracts/${id}/clause-comparison`)
+}
+
+/**
+ * 重新生成条款比对（强制刷新）
+ * @param {number|string} id — 合同 ID
+ */
+export function retriggerClauseComparison(id) {
+  return request.post(`/contracts/${id}/clause-comparison`)
 }

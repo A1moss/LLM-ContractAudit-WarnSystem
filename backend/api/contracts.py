@@ -351,7 +351,6 @@ def trigger_audit(
 
     # Save each risk as AuditRecord
     records = []
-    missing_clauses = []
     for r in all_risks:
         record = AuditRecord(
             contract_id=contract_id,
@@ -369,13 +368,6 @@ def trigger_audit(
         )
         db.add(record)
         records.append(record)
-
-        if r.get("risk_type") in ("R08", "R09", "R10", "CLAUSE_MISSING"):
-            missing_clauses.append({
-                "risk_type": r["risk_type"],
-                "clause": r.get("name", r["risk_type"]),
-                "suggestion": r.get("suggestion"),
-            })
 
     db.commit()
     for record in records:
@@ -448,7 +440,7 @@ def trigger_audit(
         mid_risk_count=mid,
         low_risk_count=low,
         risk_heatmap_data={"high": high, "mid": mid, "low": low},
-        missing_clauses=missing_clauses if missing_clauses else None,
+        missing_clauses=compare_result,  # full {clauses, summary, missing_critical} from matcher
     )
     db.add(report)
 
@@ -732,18 +724,80 @@ window.addEventListener('DOMContentLoaded', function() {{
 </html>"""
 
 
-@router.post("/{contract_id}/compare")
-def compare_contract_clauses(
+@router.get("/{contract_id}/clause-comparison")
+def get_clause_comparison(
     contract_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Compare contract against standard clause templates"""
-    c = db.query(Contract).filter(Contract.id == contract_id, Contract.user_id == current_user.id).first()
+    """读取条款比对结果；有缓存直接返回，无缓存当场生成并缓存。"""
+    report = (
+        db.query(AuditReport)
+        .filter(AuditReport.contract_id == contract_id)
+        .order_by(AuditReport.created_at.desc())
+        .first()
+    )
+    # 命中缓存：AuditReport.missing_clauses 存了完整的 compare_clauses 结果
+    if report and report.missing_clauses:
+        data = report.missing_clauses
+        if isinstance(data, str):
+            import json
+            data = json.loads(data)
+        if isinstance(data, dict) and data.get("clauses"):
+            return {"code": 0, "message": "ok", "data": data}
+
+    # 缓存未命中：当场生成
+    c = (
+        db.query(Contract)
+        .filter(Contract.id == contract_id, Contract.user_id == current_user.id)
+        .first()
+    )
+    if not c or not c.parsed_text:
+        return {"code": 0, "message": "ok", "data": None}
+
+    try:
+        result = compare_clauses(c.parsed_text, c.contract_type or "采购合同")
+        if report:
+            report.missing_clauses = result
+            db.commit()
+        return {"code": 0, "message": "ok", "data": result}
+    except Exception as e:
+        logger.warning("条款比对失败: %s", e)
+        return {"code": 0, "message": "ok", "data": None}
+
+
+@router.post("/{contract_id}/clause-comparison")
+def trigger_clause_comparison(
+    contract_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """独立触发条款比对：审核完成后前端单独请求，不阻塞审核流程。"""
+    c = (
+        db.query(Contract)
+        .filter(Contract.id == contract_id, Contract.user_id == current_user.id)
+        .first()
+    )
     if not c:
         raise HTTPException(status_code=404, detail="contract not found")
     if not c.parsed_text:
-        raise HTTPException(status_code=400, detail="contract has no parsed text")
+        raise HTTPException(status_code=400, detail="no parsed text")
 
-    result = compare_clauses(c.parsed_text, c.contract_type or "other")
+    try:
+        result = compare_clauses(c.parsed_text, c.contract_type or "采购合同")
+    except Exception as e:
+        logger.warning("条款比对失败: %s", e)
+        return {"code": 0, "message": "ok", "data": None}
+
+    # 缓存到 AuditReport.missing_clauses，下次 GET 直接返回
+    report = (
+        db.query(AuditReport)
+        .filter(AuditReport.contract_id == contract_id)
+        .order_by(AuditReport.created_at.desc())
+        .first()
+    )
+    if report:
+        report.missing_clauses = result
+        db.commit()
+
     return {"code": 0, "message": "ok", "data": result}

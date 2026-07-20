@@ -136,7 +136,7 @@
                     </el-table-column>
                   </el-table>
 
-                  <el-button size="small" style="margin-top:12px" @click="fetchCompare">刷新比对结果</el-button>
+                  <el-button size="small" style="margin-top:12px" @click="refreshCompare">刷新比对结果</el-button>
                 </template>
 
                 <el-empty v-else description="合同解析完成后即可进行条款比对">
@@ -258,7 +258,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Warning, ArrowLeft, ArrowRight, Loading } from '@element-plus/icons-vue'
 import FeedbackPanel from '../components/FeedbackPanel.vue'
 import { ElMessage } from 'element-plus'
-import { getContractDetail, getAuditResult, triggerAudit, submitFeedback, getFeedback, getContractFile, compareContractClauses } from '../api/contract.js'
+import { getContractDetail, getAuditResult, triggerAudit, submitFeedback, getFeedback, getContractFile, compareContractClauses, retriggerClauseComparison } from '../api/contract.js'
 import { formatTime } from '../utils/format.js'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -524,6 +524,22 @@ async function fetchCompare() {
     compareResult.value = res.data
   } catch (e) {
     compareError.value = e.response?.data?.detail || '条款比对失败，请确认合同已解析'
+  } finally {
+    compareLoading.value = false
+  }
+}
+
+async function refreshCompare() {
+  const cid = contract.value?.id
+  if (!cid) return
+  compareLoading.value = true
+  compareError.value = ''
+  try {
+    const res = await retriggerClauseComparison(cid)
+    compareResult.value = res.data
+    ElMessage.success('条款比对已刷新')
+  } catch (e) {
+    compareError.value = e.response?.data?.detail || '条款比对失败'
   } finally {
     compareLoading.value = false
   }
