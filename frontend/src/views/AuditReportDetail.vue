@@ -20,13 +20,22 @@
         <el-button @click="$router.push('/audit/report')">
           <el-icon><ArrowLeft /></el-icon>返回审核报告列表
         </el-button>
-        <el-button
-          type="primary"
-          size="small"
-          @click="$router.push(`/audit/result/${contractId}`)"
-        >
-          查看审核结果
-        </el-button>
+        <div class="nav-actions">
+          <el-button
+            type="primary"
+            size="small"
+            @click="exportPdf"
+            :loading="pdfExporting"
+          >
+            <el-icon><Document /></el-icon>导出 PDF
+          </el-button>
+          <el-button
+            size="small"
+            @click="$router.push(`/audit/result/${contractId}`)"
+          >
+            查看审核结果
+          </el-button>
+        </div>
       </div>
 
       <!-- 报告总览 -->
@@ -57,6 +66,23 @@
           </el-card>
         </el-col>
       </el-row>
+
+      <!-- 风险热力图 -->
+      <el-card shadow="hover" class="heatmap-card">
+        <template #header>
+          <div class="card-header-row">
+            <span>风险热力图 — 段落 × 风险类型密度矩阵</span>
+            <el-tag v-if="heatmapData && heatmapData.maxDensity" size="small" type="info">
+              最高密度 {{ heatmapData.maxDensity }}
+            </el-tag>
+          </div>
+        </template>
+        <HeatmapChart
+          :data="heatmapData"
+          :loading="heatmapLoading"
+          :height="280"
+        />
+      </el-card>
 
       <!-- 风险明细表 -->
       <el-card shadow="hover" class="risk-table-card">
@@ -176,12 +202,13 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { Warning, ArrowLeft, ArrowRight, SuccessFilled, Loading } from '@element-plus/icons-vue'
+import { Warning, ArrowLeft, ArrowRight, SuccessFilled, Loading, Document } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import { getAuditReport, getAuditResult, getContractFile } from '../api/contract.js'
+import { getAuditReport, getAuditResult, getContractFile, getHeatmapData } from '../api/contract.js'
+import HeatmapChart from '../components/HeatmapChart.vue'
 
 const route = useRoute()
 const contractId = computed(() => route.params.contractId || '')
@@ -189,6 +216,9 @@ const contractId = computed(() => route.params.contractId || '')
 const report = ref(null)
 const riskItems = ref([])
 const riskTypes = ref([])
+const heatmapData = ref(null)
+const heatmapLoading = ref(false)
+const pdfExporting = ref(false)
 const loading = ref(true)
 const error = ref('')
 
@@ -225,6 +255,24 @@ async function fetchReport() {
     loading.value = false
     return
   }
+
+// ── PDF 导出 ──
+function exportPdf() {
+  const id = contractId.value
+  if (!id) return
+  pdfExporting.value = true
+  const token = localStorage.getItem('token')
+  const url = `/api/contracts/${id}/report/pdf`
+  // Open printable version in a new window — browser handles PDF via print dialog
+  const w = window.open(url, '_blank')
+  if (w) {
+    // The page auto-triggers window.print()
+    setTimeout(() => { pdfExporting.value = false }, 1500)
+  } else {
+    ElMessage.warning('浏览器阻止了弹窗，请允许弹窗后重试')
+    pdfExporting.value = false
+  }
+}
   try {
     const [reportRes, resultRes] = await Promise.all([
       getAuditReport(id),
@@ -238,6 +286,17 @@ async function fetchReport() {
       countByType[r.risk_type] = (countByType[r.risk_type] || 0) + 1
     })
     riskTypes.value = Object.entries(countByType).map(([type, count]) => ({ type, count }))
+
+    // Load heatmap data
+    heatmapLoading.value = true
+    try {
+      const heatRes = await getHeatmapData(id)
+      heatmapData.value = heatRes.data
+    } catch {
+      heatmapData.value = null
+    } finally {
+      heatmapLoading.value = false
+    }
   } catch (e) {
     error.value = '加载审核报告失败'
     console.warn('报告加载失败:', e)
@@ -457,6 +516,12 @@ onUnmounted(() => {
   margin-bottom: 16px;
 }
 
+.nav-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .report-summary {
   margin-bottom: 20px;
 }
@@ -468,6 +533,16 @@ onUnmounted(() => {
 
 .risk-table-card {
   margin-top: 20px;
+}
+
+.heatmap-card {
+  margin-top: 20px;
+}
+
+.card-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .no-risks {

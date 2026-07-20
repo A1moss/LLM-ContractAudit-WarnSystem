@@ -255,3 +255,41 @@ def compare_clauses(contract_text: str, contract_type: str) -> dict:
         },
         "missing_critical": missing_critical,
     }
+
+
+def detect_missing(contract_text: str, contract_type: str) -> list[dict]:
+    """快捷方法：只返回缺失或偏离的条款列表，用于集成到审核流水线。
+
+    返回格式与 audit_records 兼容，可直接合并到风险列表中。
+
+    Args:
+        contract_text: 合同全文
+        contract_type: 合同类型
+
+    Returns:
+        [{"risk_type": "CLAUSE_MISSING", "level": "high/medium", "name": "条款名",
+          "clause_text": "...", "reason": "...", "suggestion": "...", "detection_method": "matcher"}, ...]
+    """
+    result = compare_clauses(contract_text, contract_type)
+    findings = []
+
+    for clause in result.get("clauses", []):
+        status = clause.get("status", "covered")
+        if status == "covered":
+            continue
+
+        level = "high" if clause.get("priority") == "required" else "medium"
+        finding = {
+            "risk_type": "CLAUSE_MISSING",
+            "level": level,
+            "name": f"条款缺失: {clause['template_title']}",
+            "clause_text": clause.get("matched_text") or f"未找到'{clause['template_title']}'对应条款",
+            "reason": f"标准模板要求的'{clause['template_title']}'条款{'完全缺失' if status == 'missing' else '覆盖不完整'}（相似度 {clause.get('similarity', 0):.0%}）",
+            "suggestion": clause.get("completion", f"建议补充'{clause['template_title']}'条款"),
+            "detection_method": "matcher",
+            "confidence": 0.85 if status == "missing" else 0.6,
+        }
+        findings.append(finding)
+
+    logger.info(f"[Matcher] 缺失检测完成: 缺失={len([f for f in findings if f['level']=='high'])}, 偏离={len([f for f in findings if f['level']=='medium'])}")
+    return findings

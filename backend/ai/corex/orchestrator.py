@@ -3,8 +3,10 @@ from ai.corex.agents import (
     LEGAL_AGENT_PROMPT, COMPLIANCE_AGENT_PROMPT,
     FINANCE_AGENT_PROMPT, SELF_QA_AGENT_PROMPT,
 )
+from ai.auditor.stance import build_stance
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
 
@@ -53,32 +55,62 @@ def _call_agent(name: str, system_prompt: str, context: str, prev_output: str = 
         return [{"error": str(e), "agent_source": name, "failed": True}]
 
 
-def run_review(full_text: str, initial_risks: list[dict] = None) -> dict:
+def run_review(full_text: str, initial_risks: list[dict] = None, our_role: str = "neutral") -> dict:
     truncated = full_text[:4000]
     context = f"请审核以下合同：\n\n{truncated}"
     agent_logs = {}
     all_risks = list(initial_risks) if initial_risks else []
     failed = []
 
+    # Build dynamic stance
+    stance = build_stance(our_role)
+
     if initial_risks:
         context += f"\n\n前置规则引擎和RAG已标注的初始风险（供参考）：\n{json.dumps(initial_risks, ensure_ascii=False, indent=2)}"
 
-    legal = _call_agent("法务Agent", LEGAL_AGENT_PROMPT, context)
+    def _call_with_stance(name, base_prompt, ctx, prev=""):
+        return _call_agent(name, stance + "\n\n" + base_prompt, ctx, prev)
+
+    # 法务/合规/财务并行调用
+    agents = [
+        ("法务Agent", LEGAL_AGENT_PROMPT),
+        ("合规Agent", COMPLIANCE_AGENT_PROMPT),
+        ("财务Agent", FINANCE_AGENT_PROMPT),
+    ]
+    agent_results = {}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {
+            executor.submit(_call_with_stance, name, prompt, context): name
+            for name, prompt in agents
+        }
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                agent_results[name] = future.result()
+            except Exception as e:
+                logger.error(f"[Corex] {name} 并行调用异常: {e}")
+                agent_results[name] = [{"error": str(e), "agent_source": name, "failed": True}]
+
+    legal = agent_results.get("法务Agent", [])
+    compliance = agent_results.get("合规Agent", [])
+    finance = agent_results.get("财务Agent", [])
+
     agent_logs["legal"] = {"count": len(legal), "risks": legal}
     if any(r.get("failed") for r in legal): failed.append("法务Agent")
     else: all_risks.extend(legal)
 
-    compliance = _call_agent("合规Agent", COMPLIANCE_AGENT_PROMPT, context, json.dumps(legal, ensure_ascii=False, indent=2))
     agent_logs["compliance"] = {"count": len(compliance), "risks": compliance}
     if any(r.get("failed") for r in compliance): failed.append("合规Agent")
     else: all_risks.extend(compliance)
 
-    finance = _call_agent("财务Agent", FINANCE_AGENT_PROMPT, context, json.dumps({"legal": legal, "compliance": compliance}, ensure_ascii=False, indent=2))
     agent_logs["finance"] = {"count": len(finance), "risks": finance}
     if any(r.get("failed") for r in finance): failed.append("财务Agent")
     else: all_risks.extend(finance)
 
-    qa = _call_agent("Self-QA", SELF_QA_AGENT_PROMPT, context, json.dumps({"legal": legal, "compliance": compliance, "finance": finance}, ensure_ascii=False, indent=2))
+    # Self-QA 等待前三者完成后串行执行
+    qa = _call_with_stance("Self-QA", SELF_QA_AGENT_PROMPT, context,
+                     json.dumps({"legal": legal, "compliance": compliance, "finance": finance},
+                               ensure_ascii=False, indent=2))
     agent_logs["self_qa"] = {"count": len(qa), "risks": qa}
     if any(r.get("failed") for r in qa): failed.append("Self-QA")
 

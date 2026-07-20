@@ -1,6 +1,6 @@
 <template>
   <div class="page-container">
-    <!-- 顶部：欢迎语 + 退出按钮 -->
+    <!-- 顶部：欢迎语 -->
     <div class="page-header">
       <div>
         <h2>欢迎回来，{{ username }}</h2>
@@ -23,37 +23,29 @@
     <el-row :gutter="20" class="stat-row">
       <el-col :span="6">
         <el-card shadow="hover">
-          <el-statistic title="今日审核" :value="12">
-            <template #suffix>
-              <span class="stat-suffix suffix-green">份</span>
-            </template>
+          <el-statistic title="合同总数" :value="stats.totalContracts">
+            <template #suffix><span class="stat-suffix suffix-green">份</span></template>
           </el-statistic>
         </el-card>
       </el-col>
       <el-col :span="6">
         <el-card shadow="hover">
-          <el-statistic title="待处理" :value="5">
-            <template #suffix>
-              <span class="stat-suffix suffix-orange">份</span>
-            </template>
+          <el-statistic title="待处理" :value="stats.pendingCount">
+            <template #suffix><span class="stat-suffix suffix-orange">份</span></template>
           </el-statistic>
         </el-card>
       </el-col>
       <el-col :span="6">
         <el-card shadow="hover">
-          <el-statistic title="本月风险" :value="38">
-            <template #suffix>
-              <span class="stat-suffix suffix-red">条</span>
-            </template>
+          <el-statistic title="检出风险" :value="stats.totalRisks">
+            <template #suffix><span class="stat-suffix suffix-red">条</span></template>
           </el-statistic>
         </el-card>
       </el-col>
       <el-col :span="6">
         <el-card shadow="hover">
-          <el-statistic title="通过率" :value="92.3">
-            <template #suffix>
-              <span class="stat-suffix suffix-blue">%</span>
-            </template>
+          <el-statistic title="审核完成" :value="stats.completedCount">
+            <template #suffix><span class="stat-suffix suffix-blue">份</span></template>
           </el-statistic>
         </el-card>
       </el-col>
@@ -62,23 +54,46 @@
     <!-- 最近合同列表 -->
     <el-card shadow="hover" class="section-card">
       <template #header>
-        <span>最近合同</span>
+        <div class="card-header-row">
+          <span>最近合同</span>
+          <el-button size="small" text @click="fetchData">刷新</el-button>
+        </div>
       </template>
-      <el-table :data="recentContracts" stripe>
-        <el-table-column prop="filename" label="文件名" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="type" label="类型" width="120" />
-        <el-table-column prop="status" label="状态" width="100">
+
+      <div v-if="loading" class="loading-state">
+        <el-skeleton :rows="4" animated />
+      </div>
+
+      <el-table v-else-if="recentContracts.length > 0" :data="recentContracts" stripe>
+        <el-table-column prop="file_name" label="文件名" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-tag :type="statusTag(row.status)" size="small">{{ row.status }}</el-tag>
+            <el-link type="primary" :underline="false" @click="$router.push(`/contracts/${row.id}`)">{{ row.file_name }}</el-link>
           </template>
         </el-table-column>
-        <el-table-column prop="riskLevel" label="风险等级" width="100">
+        <el-table-column label="类型" width="120">
+          <template #default="{ row }">{{ typeLabel(row.contract_type) }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="riskTag(row.riskLevel)" size="small">{{ row.riskLevel }}</el-tag>
+            <el-tag :type="statusTag(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="uploadTime" label="上传时间" width="160" />
+        <el-table-column label="风险评分" width="100" align="center">
+          <template #default="{ row }">
+            <template v-if="row._score !== undefined">
+              <el-tag :type="scoreTag(row._score)" size="small">{{ row._score }}</el-tag>
+            </template>
+            <span v-else style="color:#c0c4cc">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="created_at" label="上传时间" width="160">
+          <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+        </el-table-column>
       </el-table>
+
+      <el-empty v-else description="暂无合同，请先上传">
+        <el-button type="primary" @click="$router.push('/contracts/upload')">上传合同</el-button>
+      </el-empty>
     </el-card>
 
     <!-- 近 7 天审核量柱状图 -->
@@ -86,70 +101,158 @@
       <template #header>
         <span>近 7 天审核量</span>
       </template>
-      <div ref="barChartRef" class="chart-container"></div>
+      <div v-if="loading" class="loading-state">
+        <el-skeleton :rows="3" animated />
+      </div>
+      <div v-else ref="barChartRef" class="chart-container"></div>
     </el-card>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import request from '../utils/request.js'
+import { getContractList } from '../api/contract.js'
+import { formatTime } from '../utils/format.js'
 import * as echarts from 'echarts'
 
-const router = useRouter()
-const username = ref('用户')
+const username = ref(localStorage.getItem('username') || '用户')
 const backendStatus = ref('未检测')
 const barChartRef = ref(null)
+const loading = ref(true)
 
+// ── 统计 ──
+const stats = reactive({
+  totalContracts: 0,
+  pendingCount: 0,
+  totalRisks: 0,
+  completedCount: 0,
+})
+
+// ── 最近合同 ──
+const recentContracts = ref([])
+
+const TYPE_MAP = {
+  purchase: '采购合同', sales: '销售合同', nda: '保密协议',
+  outsourcing: '服务外包合同', employment: '劳动合同', other: '其他合同',
+}
+function typeLabel(type) { return TYPE_MAP[type] || type || '未分类' }
+
+function statusLabel(s) {
+  const map = { uploaded: '已上传', parsed: '已解析', auditing: '审核中', completed: '已完成', deleted: '已删除' }
+  return map[s] || s || '未知'
+}
+function statusTag(s) {
+  if (s === 'completed') return 'success'
+  if (s === 'auditing') return 'warning'
+  return 'info'
+}
+function scoreTag(score) {
+  if (score >= 60) return 'danger'
+  if (score >= 30) return 'warning'
+  return 'success'
+}
+
+// ── 后端连通性 ──
 async function checkBackend() {
   try {
     const res = await request.get('/health')
-    backendStatus.value = '✅ 后端连通！' + JSON.stringify(res)
+    backendStatus.value = '✅ 后端连通 — ' + JSON.stringify(res)
   } catch (e) {
     backendStatus.value = '❌ 后端未启动，请确认 uvicorn 在运行'
   }
 }
 
-// ── 最近合同（写死数据） ──
-const recentContracts = [
-  { filename: '2026年度采购框架协议.pdf', type: '采购合同', status: '审核完成', riskLevel: '高风险', uploadTime: '2026-07-17 14:30' },
-  { filename: '员工保密协议-李四.docx', type: '保密协议', status: '审核完成', riskLevel: '中风险', uploadTime: '2026-07-17 11:20' },
-  { filename: '软件开发外包合同-v2.pdf', type: '服务合同', status: '审核中', riskLevel: '—', uploadTime: '2026-07-17 09:15' },
-  { filename: '办公室租赁合同.pdf', type: '租赁合同', status: '待审核', riskLevel: '—', uploadTime: '2026-07-16 16:45' },
-  { filename: '战略合作协议-XX科技.docx', type: '合作协议', status: '审核完成', riskLevel: '低风险', uploadTime: '2026-07-16 10:00' },
-]
+// ── 加载数据 ──
+async function fetchData() {
+  loading.value = true
+  try {
+    const res = await getContractList({ page: 1, page_size: 5, status: '' })
+    const items = res.data?.items || []
+    const total = res.data?.total || 0
 
-function statusTag(status) {
-  if (status === '审核完成') return 'success'
-  if (status === '审核中') return 'warning'
-  return 'info'
+    // 计数统计
+    let pending = 0
+    let completed = 0
+    let risks = 0
+    for (const c of items) {
+      if (c.status === 'parsed' || c.status === 'uploaded') pending++
+      if (c.status === 'completed') completed++
+    }
+
+    // 尝试取报告拿评分 + 累计风险数
+    const enriched = await Promise.all(
+      items.map(async (c) => {
+        try {
+          const reportRes = await request.get(`/contracts/${c.id}/audit-report`)
+          const rd = reportRes.data || {}
+          const score = rd.risk_score ?? 0
+          risks += (rd.high_risk_count || 0) + (rd.mid_risk_count || 0) + (rd.low_risk_count || 0)
+          return { ...c, _score: score }
+        } catch {
+          return { ...c, _score: undefined }
+        }
+      })
+    )
+
+    recentContracts.value = enriched
+    stats.totalContracts = total
+    stats.pendingCount = pending
+    stats.completedCount = completed
+    stats.totalRisks = risks
+  } catch (e) {
+    console.warn('首页数据加载失败:', e)
+    recentContracts.value = []
+  } finally {
+    loading.value = false
+    await nextTick()
+    initBarChart()
+  }
 }
 
-function riskTag(level) {
-  if (level === '高风险') return 'danger'
-  if (level === '中风险') return 'warning'
-  if (level === '低风险') return 'success'
-  return 'info'
-}
-
-// ── ECharts 柱状图 ──
+// ── 近 7 天审核量（从 contract 列表推算） ──
 let chartInstance = null
 
-function initBarChart() {
+async function initBarChart() {
+  if (!barChartRef.value) return
+
+  // 生成近 7 天日期标签
+  const days = []
+  const now = new Date()
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now)
+    d.setDate(d.getDate() - i)
+    days.push(`${d.getMonth() + 1}/${d.getDate()}`)
+  }
+
+  // 从 API 获取更多合同来算每日审核量
+  let countByDay = new Array(7).fill(0)
+  try {
+    const res = await getContractList({ page: 1, page_size: 100 })
+    const items = res.data?.items || []
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    for (const c of items) {
+      if (!c.created_at) continue
+      const dt = new Date(c.created_at)
+      if (isNaN(dt.getTime())) continue
+      const diffDays = Math.floor((today - dt) / (1000 * 60 * 60 * 24))
+      const idx = 6 - diffDays
+      if (idx >= 0 && idx < 7) countByDay[idx]++
+    }
+  } catch { /* fallback to zeros */ }
+
+  chartInstance?.dispose()
   chartInstance = echarts.init(barChartRef.value)
   chartInstance.setOption({
     tooltip: { trigger: 'axis' },
     grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-    xAxis: {
-      type: 'category',
-      data: ['07/11', '07/12', '07/13', '07/14', '07/15', '07/16', '07/17'],
-    },
+    xAxis: { type: 'category', data: days },
     yAxis: { type: 'value', name: '审核数', minInterval: 1 },
     series: [{
       name: '审核量',
       type: 'bar',
-      data: [3, 5, 2, 8, 4, 6, 7],
+      data: countByDay,
       itemStyle: { color: '#409EFF' },
       barWidth: '50%',
     }],
@@ -162,8 +265,7 @@ function handleResize() {
 }
 
 onMounted(() => {
-  username.value = localStorage.getItem('username') || '用户'
-  initBarChart()
+  fetchData()
 })
 
 onUnmounted(() => {
@@ -187,9 +289,7 @@ onUnmounted(() => {
   margin-bottom: 16px;
 }
 
-.page-header h2 {
-  margin: 0;
-}
+.page-header h2 { margin: 0; }
 
 .page-subtitle {
   margin: 4px 0 0 0;
@@ -197,9 +297,7 @@ onUnmounted(() => {
   font-size: 14px;
 }
 
-.section-card {
-  margin-bottom: 20px;
-}
+.section-card { margin-bottom: 20px; }
 
 .backend-row {
   display: flex;
@@ -207,33 +305,23 @@ onUnmounted(() => {
   gap: 12px;
 }
 
-.backend-label {
-  color: #606266;
+.backend-label { color: #606266; }
+
+.stat-row { margin-bottom: 20px; }
+
+.stat-suffix { font-size: 14px; }
+.suffix-green { color: #67C23A; }
+.suffix-orange { color: #E6A23C; }
+.suffix-red { color: #F56C6C; }
+.suffix-blue { color: #409EFF; }
+
+.card-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
-.stat-row {
-  margin-bottom: 20px;
-}
-
-.stat-suffix {
-  font-size: 14px;
-}
-
-.suffix-green {
-  color: #67C23A;
-}
-
-.suffix-orange {
-  color: #E6A23C;
-}
-
-.suffix-red {
-  color: #F56C6C;
-}
-
-.suffix-blue {
-  color: #409EFF;
-}
+.loading-state { padding: 20px 0; }
 
 .chart-container {
   width: 100%;

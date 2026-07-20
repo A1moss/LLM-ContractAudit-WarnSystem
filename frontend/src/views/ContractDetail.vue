@@ -70,7 +70,80 @@
                 <el-empty v-else description="审核完成，未检测到风险" />
               </div>
             </el-tab-pane>
-            <el-tab-pane label="条款比对" name="compare"><div class="tab-content"><el-empty description="标准条款比对结果将在审核完成后生成" /></div></el-tab-pane>
+            <el-tab-pane label="条款比对" name="compare">
+              <div class="tab-content">
+                <div v-if="compareLoading" style="padding:40px 0"><el-skeleton :rows="6" animated /></div>
+
+                <div v-else-if="compareError" style="text-align:center;padding:40px 0">
+                  <el-result icon="error" title="比对失败" :sub-title="compareError">
+                    <template #extra><el-button @click="fetchCompare">重试</el-button></template>
+                  </el-result>
+                </div>
+
+                <template v-else-if="compareResult">
+                  <!-- 比对摘要 -->
+                  <el-alert
+                    :title="`模板条款总数 ${compareResult.summary?.total || 0}：已覆盖 ${compareResult.summary?.covered || 0}、部分偏离 ${compareResult.summary?.partial || 0}、缺失 ${compareResult.summary?.missing || 0}，覆盖率 ${((compareResult.summary?.coverage_rate || 0) * 100).toFixed(1)}%`"
+                    :type="(compareResult.summary?.coverage_rate || 0) >= 0.7 ? 'success' : 'warning'"
+                    show-icon :closable="false"
+                    style="margin-bottom:12px"
+                  />
+
+                  <!-- 缺失关键条款警告 -->
+                  <el-alert
+                    v-if="compareResult.missing_critical?.length > 0"
+                    type="error"
+                    title="关键条款缺失"
+                    :description="compareResult.missing_critical.join('、')"
+                    show-icon :closable="false"
+                    style="margin-bottom:12px"
+                  />
+
+                  <!-- 条款明细表 -->
+                  <el-table :data="compareResult.clauses || []" stripe size="small" max-height="380">
+                    <el-table-column prop="template_title" label="标准条款" min-width="140" />
+                    <el-table-column prop="priority" label="优先级" width="80">
+                      <template #default="{ row }">
+                        <el-tag :type="row.priority === 'required' ? 'danger' : 'warning'" size="small">
+                          {{ row.priority === 'required' ? '必选' : '推荐' }}
+                        </el-tag>
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="状态" width="90">
+                      <template #default="{ row }">
+                        <el-tag
+                          :type="row.status === 'covered' ? 'success' : row.status === 'partial' ? 'warning' : 'danger'"
+                          size="small"
+                        >{{ {covered:'已覆盖',partial:'偏离',missing:'缺失'}[row.status] || row.status }}</el-tag>
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="相似度" width="90">
+                      <template #default="{ row }">
+                        <el-progress :percentage="Math.round((row.similarity || 0) * 100)" :stroke-width="6" :color="row.similarity >= 0.75 ? '#67C23A' : row.similarity >= 0.5 ? '#E6A23C' : '#F56C6C'" />
+                      </template>
+                    </el-table-column>
+                    <el-table-column prop="matched_text" label="匹配原文" min-width="180" show-overflow-tooltip>
+                      <template #default="{ row }">
+                        <span v-if="row.matched_text">{{ row.matched_text }}</span>
+                        <span v-else style="color:#c0c4cc">—</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column prop="completion" label="补全建议" min-width="200" show-overflow-tooltip>
+                      <template #default="{ row }">
+                        <span v-if="row.completion">{{ row.completion }}</span>
+                        <span v-else style="color:#c0c4cc">—</span>
+                      </template>
+                    </el-table-column>
+                  </el-table>
+
+                  <el-button size="small" style="margin-top:12px" @click="fetchCompare">刷新比对结果</el-button>
+                </template>
+
+                <el-empty v-else description="合同解析完成后即可进行条款比对">
+                  <el-button type="primary" @click="fetchCompare">开始比对</el-button>
+                </el-empty>
+              </div>
+            </el-tab-pane>
             <el-tab-pane label="审核报告" name="report">
               <div class="tab-content">
                 <el-empty v-if="contract.status !== 'completed'" description="审核完成后将自动生成报告">
@@ -185,7 +258,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Warning, ArrowLeft, ArrowRight, Loading } from '@element-plus/icons-vue'
 import FeedbackPanel from '../components/FeedbackPanel.vue'
 import { ElMessage } from 'element-plus'
-import { getContractDetail, getAuditResult, triggerAudit, submitFeedback, getFeedback, getContractFile } from '../api/contract.js'
+import { getContractDetail, getAuditResult, triggerAudit, submitFeedback, getFeedback, getContractFile, compareContractClauses } from '../api/contract.js'
 import { formatTime } from '../utils/format.js'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -263,6 +336,11 @@ const zoomFit = ref(1.0)
 const jumpPage = ref('')
 const convertingDocx = ref(false)
 const loadedFeedbacks = ref([])
+
+// ── 条款比对状态 ──
+const compareResult = ref(null)
+const compareLoading = ref(false)
+const compareError = ref('')
 
 let pdfDoc = null
 let pdfLoadingTask = null
@@ -436,6 +514,21 @@ async function fetchFeedback() {
   } catch { loadedFeedbacks.value = [] }
 }
 
+async function fetchCompare() {
+  const cid = contract.value?.id
+  if (!cid) return
+  compareLoading.value = true
+  compareError.value = ''
+  try {
+    const res = await compareContractClauses(cid)
+    compareResult.value = res.data
+  } catch (e) {
+    compareError.value = e.response?.data?.detail || '条款比对失败，请确认合同已解析'
+  } finally {
+    compareLoading.value = false
+  }
+}
+
 async function onFeedback(payload) {
   try {
     await submitFeedback(payload)
@@ -459,6 +552,13 @@ function goToAuditReport() { router.push(`/audit/report/${route.params.id}`) }
 onMounted(() => {
   fetchDetail()
   fetchAuditResult()
+})
+
+// Auto-fetch compare when user switches to compare tab
+watch(activeTab, (tab) => {
+  if (tab === 'compare' && !compareResult.value && !compareLoading.value) {
+    fetchCompare()
+  }
 })
 </script>
 

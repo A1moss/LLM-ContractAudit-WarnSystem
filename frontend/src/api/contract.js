@@ -11,6 +11,7 @@ export function uploadContract(file, params = {}) {
   if (params.name) formData.append('name', params.name)
   if (params.contract_type) formData.append('contract_type', params.contract_type)
   if (params.audit_mode) formData.append('audit_mode', params.audit_mode)
+  if (params.our_role) formData.append('our_role', params.our_role)
 
   return request.post('/contracts/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
@@ -90,4 +91,20 @@ export function getFeedback(contractId) {
  */
 export function getContractFile(id) {
   return request.get(`/contracts/${id}/file`, { responseType: 'arraybuffer' })
+}
+
+/**
+ * 获取合同风险热力图数据
+ * @param {number|string} id — 合同 ID
+ */
+export function getHeatmapData(id) {
+  return request.get(`/contracts/${id}/heatmap`)
+}
+
+/**
+ * 条款比对：对比合同原文与标准条款模板
+ * @param {number|string} id — 合同 ID
+ */
+export function compareContractClauses(id) {
+  return request.post(`/contracts/${id}/compare`)
 }

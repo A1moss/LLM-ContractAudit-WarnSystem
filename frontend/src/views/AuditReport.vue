@@ -84,6 +84,9 @@
               <div class="report-detail-header">
                 <span>{{ selectedContract.file_name }} — 审核报告</span>
                 <div class="report-detail-actions">
+                  <el-button size="small" type="success" :loading="pdfExporting" @click="exportPdfFor(selectedContract.id)">
+                    <el-icon><Document /></el-icon>导出 PDF
+                  </el-button>
                   <el-button size="small" @click="$router.push(`/audit/report/${selectedContract.id}`)">
                     全屏查看
                   </el-button>
@@ -122,6 +125,21 @@
                 </el-col>
               </el-row>
 
+              <!-- 风险热力图 -->
+              <div class="heatmap-section">
+                <h4 class="detail-subtitle">
+                  风险热力图
+                  <el-tag v-if="heatmapData && heatmapData.maxDensity" size="small" type="info" style="margin-left:8px">
+                    最高密度 {{ heatmapData.maxDensity }}
+                  </el-tag>
+                </h4>
+                <HeatmapChart
+                  :data="heatmapData"
+                  :loading="heatmapLoading"
+                  :height="240"
+                />
+              </div>
+
               <!-- 风险明细列表 -->
               <h4 class="detail-subtitle">风险明细</h4>
               <el-table :data="riskItems" size="small" border max-height="300">
@@ -148,9 +166,11 @@
 <script setup>
 import { ref, reactive, nextTick, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Document } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
-import { getContractList, getAuditResult, getAuditReport } from '../api/contract.js'
+import { getContractList, getAuditResult, getAuditReport, getHeatmapData } from '../api/contract.js'
 import { formatTime } from '../utils/format.js'
+import HeatmapChart from '../components/HeatmapChart.vue'
 
 // ── 列表状态 ──
 const contracts = ref([])
@@ -167,6 +187,9 @@ const selectedContract = ref(null)
 const reportData = ref(null)
 const riskItems = ref([])
 const reportLoading = ref(false)
+const heatmapData = ref(null)
+const heatmapLoading = ref(false)
+const pdfExporting = ref(false)
 
 // ── 图表 ──
 const pieChartRef = ref(null)
@@ -216,11 +239,26 @@ async function fetchList(page = pagination.page) {
   }
 }
 
+// ── PDF 导出 ──
+function exportPdfFor(contractId) {
+  if (!contractId) return
+  pdfExporting.value = true
+  const url = `/api/contracts/${contractId}/report/pdf`
+  const w = window.open(url, '_blank')
+  if (w) {
+    setTimeout(() => { pdfExporting.value = false }, 1500)
+  } else {
+    ElMessage.warning('浏览器阻止了弹窗，请允许弹窗后重试')
+    pdfExporting.value = false
+  }
+}
+
 // ── 清除报告详情 ──
 function clearReport() {
   selectedContract.value = null
   reportData.value = null
   riskItems.value = []
+  heatmapData.value = null
   disposeCharts()
 }
 
@@ -249,6 +287,18 @@ async function handleSelect(row) {
       clause: r.clause_text,
       suggestion: r.suggestion,
     }))
+
+    // Load heatmap
+    heatmapLoading.value = true
+    try {
+      const heatRes = await getHeatmapData(row.id)
+      if (seq !== selectSeq) return
+      heatmapData.value = heatRes.data
+    } catch {
+      heatmapData.value = null
+    } finally {
+      if (seq === selectSeq) heatmapLoading.value = false
+    }
 
     await nextTick()
     initCharts()
@@ -377,5 +427,9 @@ onUnmounted(() => disposeCharts())
   margin: 16px 0 8px;
   font-size: 15px;
   color: #303133;
+}
+
+.heatmap-section {
+  margin-top: 12px;
 }
 </style>

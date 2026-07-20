@@ -20,6 +20,9 @@ def _ensure_columns():
         if "stored_path" not in existing:
             db.execute("ALTER TABLE contracts ADD COLUMN stored_path VARCHAR(500)")
             db.commit()
+        if "our_role" not in existing:
+            db.execute("ALTER TABLE contracts ADD COLUMN our_role VARCHAR(10)")
+            db.commit()
         db.close()
     except Exception:
         pass  # non-fatal: table may not exist yet

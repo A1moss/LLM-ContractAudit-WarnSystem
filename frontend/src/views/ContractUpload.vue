@@ -54,6 +54,15 @@
           <div class="form-hint">选择"自动识别"将由 AI 自动判定合同类型</div>
         </el-form-item>
 
+        <el-form-item label="我方角色" prop="our_role">
+          <el-radio-group v-model="form.our_role">
+            <el-radio value="party_a">甲方（委托方/买方/雇主）</el-radio>
+            <el-radio value="party_b">乙方（受托方/卖方/雇员）</el-radio>
+            <el-radio value="neutral">中立审核</el-radio>
+          </el-radio-group>
+          <div class="form-hint">设定我方在合同中的角色，AI 将从我方利益视角审核风险</div>
+        </el-form-item>
+
         <el-form-item label="审核模式" prop="audit_mode">
           <el-radio-group v-model="form.audit_mode">
             <el-radio value="fast">快速审核</el-radio>
@@ -108,6 +117,7 @@ const form = reactive({
   name: '',
   contract_type: '',
   audit_mode: 'fast',
+  our_role: 'party_a',
 })
 
 const rules = {
@@ -162,6 +172,7 @@ async function handleUpload() {
       name: form.name || undefined,
       contract_type: form.contract_type || undefined,
       audit_mode: form.audit_mode,
+      our_role: form.our_role,
       onProgress: (e) => {
         if (e.total) {
           const pct = Math.round((e.loaded / e.total) * 100)
@@ -204,6 +215,7 @@ function handleReset() {
   form.name = ''
   form.contract_type = ''
   form.audit_mode = 'fast'
+  form.our_role = 'party_a'
   selectedFile.value = null
   progress.value = 0
   progressStatus.value = ''

@@ -1,4 +1,5 @@
 from datetime import datetime
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -10,6 +11,8 @@ from models.user import User
 from models.audit_record import AuditRecord
 from models.feedback_log import FeedbackLog
 from api.deps import get_current_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/feedback", tags=["feedback"])
 
@@ -74,6 +77,20 @@ def create_feedback(
 
     db.commit()
     db.refresh(fb)
+
+    # ── 向量化写入审核经验库 ──
+    try:
+        from ai.rag import index_feedback
+        index_feedback(
+            risk_type=record.risk_type,
+            clause_text=record.clause_text or "",
+            action_type=body.action_type,
+            level=record.risk_level or "",
+            suggestion=record.suggestion or "",
+            comment=body.comment or "",
+        )
+    except Exception as e:
+        logger.debug("审核经验库索引失败（不影响主流程）: %s", e)
 
     return {
         "code": 0,

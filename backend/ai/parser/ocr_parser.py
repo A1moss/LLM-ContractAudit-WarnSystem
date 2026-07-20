@@ -1,19 +1,33 @@
 """
 ai.parser.ocr_parser — 图片/扫描件合同 OCR 识别
 使用 PaddleOCR 提取图片中的中文文本。
+仅在真正需要 OCR 时才初始化模型（懒加载）。
 """
 import logging
 
 logger = logging.getLogger(__name__)
 
-try:
-    from paddleocr import PaddleOCR
-    _ocr = PaddleOCR(lang="ch")
-    _ocr_available = True
-except Exception as e:
-    logger.warning(f"PaddleOCR 初始化失败，OCR 功能不可用: {e}")
-    _ocr = None
-    _ocr_available = False
+_ocr = None
+_ocr_init_attempted = False
+
+
+def _get_ocr():
+    """Lazy-init PaddleOCR — only when parse_image() is actually called."""
+    global _ocr, _ocr_init_attempted
+    if _ocr is not None and _ocr_init_attempted:
+        return _ocr
+    _ocr_init_attempted = True
+    try:
+        import os
+        # Suppress PaddleOCR verbose model creation logs
+        os.environ.setdefault("DISABLE_MODEL_SOURCE_CHECK", "True")
+        from paddleocr import PaddleOCR
+        _ocr = PaddleOCR(lang="ch", show_log=False)
+        logger.info("PaddleOCR 初始化完成")
+        return _ocr
+    except Exception as e:
+        logger.warning("PaddleOCR 不可用（仅影响扫描件/图片合同）: %s", e)
+        return None
 
 
 def parse_image(file_path: str) -> dict:
@@ -24,15 +38,10 @@ def parse_image(file_path: str) -> dict:
         file_path: 图片文件路径（支持 .jpg/.png/.tiff/.bmp）
 
     Returns:
-        dict: {
-            "full_text": "OCR 提取全文",
-            "paragraphs": [{"text": "...", "page": 1, "index": 0, "style": None, "is_heading": False}],
-            "format": "image",
-            "page_count": 1,
-            "ocr_quality": "normal" | "low"
-        }
+        dict: {full_text, paragraphs, format, page_count, ocr_quality}
     """
-    if not _ocr_available or _ocr is None:
+    ocr = _get_ocr()
+    if ocr is None:
         return {
             "full_text": "",
             "paragraphs": [],
