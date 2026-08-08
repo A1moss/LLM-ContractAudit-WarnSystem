@@ -5,7 +5,12 @@ ai.rag.vector_store — ChromaDB 向量知识库封装
 import json
 import os
 import logging
+import threading
 from typing import Optional
+
+# HuggingFace 不通时避免模型加载长时间卡住，优先使用本地缓存
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 import chromadb
 from chromadb.config import Settings
@@ -17,6 +22,8 @@ CHROMA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file
 
 _client: Optional[chromadb.PersistentClient] = None
 _embedder: Optional[SentenceTransformer] = None
+_init_lock = threading.Lock()
+_init_done = False
 
 COLLECTIONS = {
     "laws": "法律法规库",
@@ -109,14 +116,32 @@ def search_knowledge(query: str, collection_name: str = "laws", top_k: int = 5) 
     Returns:
         [{"content": "法条全文", "score": 0.95}, ...]
     """
+    global _init_done
+
     client = _get_client()
-    embedder = _get_embedder()
 
     try:
         collection = client.get_collection(collection_name)
     except Exception:
-        logger.warning(f"集合 {collection_name} 不存在，请先运行 init_chroma()")
-        return []
+        # 集合缺失时自动初始化一次，保证新拉取的项目开箱即用
+        if _init_done:
+            logger.warning(f"集合 {collection_name} 不存在")
+            return []
+        with _init_lock:
+            if not _init_done:
+                try:
+                    init_chroma()
+                    _init_done = True
+                except Exception as e:
+                    logger.error("知识库初始化失败: %s", e)
+                    return []
+        try:
+            collection = client.get_collection(collection_name)
+        except Exception:
+            logger.warning(f"集合 {collection_name} 初始化后仍不存在")
+            return []
+
+    embedder = _get_embedder()
 
     query_embedding = embedder.encode([query]).tolist()
     results = collection.query(query_embeddings=query_embedding, n_results=min(top_k, 10))
