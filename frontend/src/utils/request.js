@@ -21,13 +21,20 @@ request.interceptors.request.use(
   }
 )
 
-// ── response 拦截器：401 → /login，其他错误统一弹 message ──
+// ── response 拦截器：401 → /login，网络错误静默重试一次，其他错误统一弹 message ──
 request.interceptors.response.use(
   (response) => {
     // 直接返回 data，调用方不用每次都 .data
     return response.data
   },
-  (error) => {
+  async (error) => {
+    const config = error.config
+    // 网络错误（后端刚启动/连接未建立）时静默重试一次，避免页面首刷就弹"网络异常"
+    if (!error.response && config && !config.__retried) {
+      config.__retried = true
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      return request(config)
+    }
     if (error.response) {
       const { status, data } = error.response
       if (status === 401) {

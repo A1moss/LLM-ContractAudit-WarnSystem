@@ -1,11 +1,13 @@
 import json
 import logging
 import os
+import re
 import uuid
 import mimetypes
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, status
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 
@@ -22,6 +24,7 @@ from ai.corex import run_review
 from ai.rag import search_knowledge
 from ai.reporter import generate_report, compute_heatmap
 from ai.matcher import compare_clauses
+from ai.reviser import revise_clause
 from models.audit_record import AuditRecord
 from services.docx_converter import docx_to_pdf
 from models.audit_report import AuditReport
@@ -62,6 +65,38 @@ def _build_evidence(r: dict, rag_ctx: list | None) -> dict | None:
     if method == "corex_review":
         return {"method": "corex", "agreement": r.get("agreement_count", 0)}
     return None
+
+
+def _locate_clause(full_text: str, clause_text: str) -> dict | None:
+    """定位条款位置，返回 {clause_no, clause_title}。
+
+    用 clause_text 前缀在 full_text 中定位，找到该位置之前最近的"第X条"
+    标题，返回第几条和该条标题（如"第五条 合同变更与解除"）。无法定位返回 None。
+    """
+    if not full_text or not clause_text:
+        return None
+    needle = (clause_text or "").strip()
+    if not needle:
+        return None
+    idx = -1
+    for n in (30, 20, 10):
+        probe = needle[:n] if len(needle) >= n else needle
+        idx = full_text.find(probe)
+        if idx >= 0:
+            break
+    if idx < 0:
+        return None
+    before = full_text[:idx]
+    headings = list(re.finditer(r'第\s*[一二三四五六七八九十百千\d]+\s*[条款]', before))
+    if not headings:
+        return None
+    last = headings[-1]
+    clause_no = len(headings)
+    # 提取标题：从"第X条"之后到下一个换行/全角空格/标点为止
+    seg = full_text[last.end():last.end() + 30]
+    parts = [p for p in re.split(r'[\n　\s。；;：，,]', seg) if p.strip()]
+    title = parts[0] if parts else ''
+    return {"clause_no": clause_no, "clause_title": title or None}
 
 
 @router.post("/upload")
@@ -322,6 +357,11 @@ def trigger_audit(
         # Save each risk as AuditRecord
         records = []
         for r in all_risks:
+            # 定位条款在合同中的位置（第几条 + 标题），供前端标注风险位置
+            if not r.get("clause_position"):
+                loc = _locate_clause(full_text, r.get("clause_text", ""))
+                if loc:
+                    r["clause_position"] = loc
             record = AuditRecord(
                 contract_id=contract_id,
                 audit_batch=audit_batch,
@@ -466,6 +506,39 @@ def approve_contract(
     c.status = "approved"
     db.commit()
     return {"code": 0, "message": "ok", "data": {"id": contract_id, "status": c.status, "msg": "验收通过"}}
+
+
+class ReviseRequest(BaseModel):
+    clause_text: str
+    instruction: str
+    history: list = []
+
+
+@router.post("/{contract_id}/revise")
+def revise_contract_clause(
+    contract_id: int,
+    body: ReviseRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """多轮对话式改条款（Leader-Follower 多智能体，参考 RCBSF）"""
+    c = db.query(Contract).filter(Contract.id == contract_id, Contract.user_id == current_user.id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="contract not found")
+    if not body.clause_text.strip():
+        raise HTTPException(status_code=400, detail="clause_text is required")
+    if not body.instruction.strip():
+        raise HTTPException(status_code=400, detail="instruction is required")
+
+    # 检索相关法条作为修订依据
+    rag_context = None
+    try:
+        rag_context = search_knowledge(body.instruction, "laws", 3)
+    except Exception as e:
+        logger.warning("改条款法条检索失败: %s", e)
+
+    result = revise_clause(body.clause_text, body.instruction, c.contract_type or "", body.history, rag_context)
+    return {"code": 0, "message": "ok", "data": result}
 @router.get("/{contract_id}/audit-result")
 def get_audit_result(
     contract_id: int,
@@ -496,6 +569,7 @@ def get_audit_result(
                     "risk_type": r.risk_type,
                     "risk_level": r.risk_level,
                     "clause_text": r.clause_text,
+                    "clause_position": r.clause_position,
                     "reason": r.reason,
                     "suggestion": r.suggestion,
                     "detection_method": r.detection_method,

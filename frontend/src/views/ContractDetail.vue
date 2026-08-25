@@ -60,15 +60,22 @@
                 <template v-else-if="riskItems.length > 0">
                   <el-alert :title="`共检测到 ${riskSummary.total} 条风险，高风险 ${riskSummary.high}、中风险 ${riskSummary.mid}、低风险 ${riskSummary.low}`" type="warning" show-icon :closable="false" class="audit-alert" />
                   <el-table :data="riskItems" stripe size="small" max-height="400">
-                    <el-table-column prop="level" label="等级" width="80"><template #default="{row}"><el-tag :type="levelTag(row.level)" size="small">{{ row.level }}</el-tag></template></el-table-column>
-                    <el-table-column prop="category" label="风险类别" width="130" />
-                    <el-table-column prop="clause" label="涉及条款" min-width="180" show-overflow-tooltip />
-                    <el-table-column prop="suggestion" label="建议" min-width="200" show-overflow-tooltip />
-                    <el-table-column prop="confidence" label="置信度" width="100"><template #default="{row}"><el-progress :percentage="Math.round((row.confidence||0)*100)" :color="row.confidence>=0.7?'#67C23A':row.confidence>=0.5?'#E6A23C':'#F56C6C'" :stroke-width="6" /></template></el-table-column>
+                    <el-table-column prop="level" label="等级" width="80" align="center"><template #default="{row}"><el-tag :type="levelTag(row.level)" size="small">{{ row.level }}</el-tag></template></el-table-column>
+                    <el-table-column prop="category" label="类别" width="80" align="center" />
+                    <el-table-column label="定位" width="90" align="center">
+                      <template #default="{row}">
+                        <span v-if="row.clause_no" style="color:#409EFF">第{{ cnNo(row.clause_no) }}条</span>
+                        <span v-else style="color:#c0c4cc">—</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column prop="clause" label="涉及条款" min-width="160" show-overflow-tooltip />
+                    <el-table-column prop="suggestion" label="建议" min-width="160" show-overflow-tooltip />
+                    <el-table-column prop="confidence" label="置信度" width="90" align="center"><template #default="{row}"><el-progress :percentage="Math.round((row.confidence||0)*100)" :color="row.confidence>=0.7?'#67C23A':row.confidence>=0.5?'#E6A23C':'#F56C6C'" :stroke-width="6" /></template></el-table-column>
                   </el-table>
-                  <el-button type="primary" size="small" class="audit-full-link" @click="goToAuditResult">
-                    全屏查看结果
-                  </el-button>
+                  <div class="audit-actions">
+                    <el-button type="primary" size="small" @click="goToAuditResult">全屏查看结果</el-button>
+                    <el-button type="warning" size="small" @click="openReviseOverview">改条款</el-button>
+                  </div>
 
                   <FeedbackPanel
                     ref="feedbackRef"
@@ -78,6 +85,63 @@
                     @feedback-change="onFeedback"
                     @feedback-undo="onFeedbackUndo"
                   />
+
+                  <!-- 改条款总览抽屉（聊天式，多条款） -->
+                  <el-drawer v-model="revisePanel.visible" title="改条款" size="85%" :close-on-click-modal="false">
+                    <div class="revise-layout">
+                      <!-- 左侧：会话列表 -->
+                      <div class="revise-list">
+                        <!-- 总览会话（整个合同，统领） -->
+                        <div class="revise-item revise-item-overview" :class="{ 'is-active': isOverviewActive }" @click="revisePanel.activeId = '__overview__'">
+                          <div class="revise-item-top">
+                            <span class="revise-overview-icon">📄</span>
+                            <span class="revise-overview-title">总览（整个合同）</span>
+                            <el-badge v-if="revisePanel.overviewMessages.length" :value="Math.ceil(revisePanel.overviewMessages.length / 2)" type="warning" />
+                          </div>
+                          <div class="revise-item-clause">对整个合同提出统一修改要求</div>
+                        </div>
+                        <!-- 各条款会话 -->
+                        <div v-for="c in revisePanel.clauses" :key="c.id" class="revise-item" :class="{ 'is-active': c.id === revisePanel.activeId }" @click="revisePanel.activeId = c.id">
+                          <div class="revise-item-top">
+                            <el-tag :type="levelTag(c.level)" size="small">{{ c.level }}</el-tag>
+                            <span class="revise-item-cat">{{ c.category }}</span>
+                            <span v-if="c.clause_no" class="revise-item-no">第{{ cnNo(c.clause_no) }}条</span>
+                            <el-badge v-if="c.messages.length" :value="Math.ceil(c.messages.length / 2)" type="primary" />
+                          </div>
+                          <div class="revise-item-clause">{{ c.clause }}</div>
+                        </div>
+                      </div>
+                      <!-- 右侧：聊天 -->
+                      <div class="revise-chat">
+                        <!-- 标题 -->
+                        <div v-if="isOverviewActive" class="revise-chat-title">
+                          <span class="revise-chat-title-label">📄 总览会话 · 整个合同</span>
+                        </div>
+                        <div v-else-if="activeClause" class="revise-chat-title">
+                          <span class="revise-chat-title-label">正在修订条款：</span>
+                          <el-tag :type="levelTag(activeClause.level)" size="small">{{ activeClause.level }}</el-tag>
+                          <span class="revise-chat-title-cat">{{ activeClause.category }}</span>
+                          <span v-if="activeClause.clause_no" class="revise-chat-title-no">第{{ cnNo(activeClause.clause_no) }}条</span>
+                        </div>
+                        <div v-if="!isOverviewActive && activeClause" class="revise-chat-sub">{{ activeClause.clause }}</div>
+                        <!-- 消息区 -->
+                        <div class="revise-chat-body">
+                          <div v-if="!currentMessages.length" class="revise-empty">{{ reviseEmptyHint }}</div>
+                          <div v-for="(m, i) in currentMessages" :key="i" class="revise-msg" :class="'revise-msg-' + m.role">
+                            <div class="revise-msg-head">{{ m.role === 'user' ? '你' : 'AI 修订' }}</div>
+                            <div class="revise-msg-text">{{ m.text }}</div>
+                            <div v-if="m.clause" class="revise-msg-clause">{{ m.clause }}</div>
+                            <div v-if="m.meta" class="revise-msg-meta">{{ m.meta }}</div>
+                          </div>
+                        </div>
+                        <!-- 输入区 -->
+                        <div class="revise-chat-foot">
+                          <el-input v-model="revisePanel.input" type="textarea" :rows="2" :placeholder="isOverviewActive ? '对整个合同的修改要求…' : '输入修改指令，例如：把违约金上限从30%改为20%'" @keydown.enter.prevent="handleRevise" />
+                          <el-button type="primary" :loading="revisePanel.loading" @click="handleRevise">发送</el-button>
+                        </div>
+                      </div>
+                    </div>
+                  </el-drawer>
                 </template>
 
                 <el-empty v-else description="审核完成，未检测到风险" />
@@ -225,12 +289,12 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Warning, ArrowLeft, ArrowRight, Loading } from '@element-plus/icons-vue'
 import FeedbackPanel from '../components/FeedbackPanel.vue'
 import { ElMessage } from 'element-plus'
-import { getContractDetail, getAuditResult, triggerAudit, getClauseComparison, submitFeedback, getFeedback, deleteFeedback, reviewContract, approveContract, getContractFile } from '../api/contract.js'
+import { getContractDetail, getAuditResult, triggerAudit, getClauseComparison, submitFeedback, getFeedback, deleteFeedback, reviewContract, approveContract, reviseClause, getContractFile } from '../api/contract.js'
 import { formatTime } from '../utils/format.js'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -444,6 +508,8 @@ async function fetchAuditResult() {
     riskItems.value = (res.data?.items || []).map(r => ({
       id: r.id, risk_level: r.risk_level, risk_type: r.risk_type, clause_text: r.clause_text,
       level: levelMap[r.risk_level] || r.risk_level, category: r.risk_type, clause: r.clause_text,
+      clause_no: r.clause_position?.clause_no || null,
+      clause_title: r.clause_position?.clause_title || null,
       suggestion: r.suggestion, reason: r.reason, confidence: r.confidence, detection_method: r.detection_method,
     }))
   } catch { riskItems.value = [] }
@@ -505,6 +571,104 @@ async function handleApprove() {
     // 错误已在拦截器处理
   } finally {
     reviewing.value = false
+  }
+}
+
+// ── 多轮对话式改条款（总览会话 + 各条款会话，聊天式）──
+const revisePanel = reactive({
+  visible: false,
+  clauses: [],   // [{id, level, category, clause, clause_no, messages: []}]
+  activeId: '',  // 条款 id 或 '__overview__'
+  overviewMessages: [],  // 总览会话（整个合同）的消息
+  input: '',
+  loading: false,
+})
+const isOverviewActive = computed(() => revisePanel.activeId === '__overview__')
+const activeClause = computed(() => revisePanel.clauses.find(c => c.id === revisePanel.activeId))
+const currentMessages = computed(() => isOverviewActive.value ? revisePanel.overviewMessages : (activeClause.value ? activeClause.value.messages : []))
+
+// 阿拉伯数字 → 中文数字（如 5 → 五）
+function cnNo(n) {
+  const d = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九']
+  if (!n || n <= 0) return ''
+  if (n < 10) return d[n]
+  if (n < 20) return '十' + (n % 10 === 0 ? '' : d[n % 10])
+  if (n < 100) return d[Math.floor(n / 10)] + '十' + (n % 10 === 0 ? '' : d[n % 10])
+  return String(n)
+}
+
+const reviseEmptyHint = computed(() => {
+  if (isOverviewActive.value) return '对整个合同提出统一修改要求，例如：把所有违约金条款统一改为不超过20%'
+  if (!activeClause.value) return ''
+  if (activeClause.value.clause_no) return '输入修改指令，开始修订「第' + cnNo(activeClause.value.clause_no) + '条」条款'
+  return '输入修改指令，开始修订缺失条款'
+})
+
+function openRevise(row) {
+  openRevisePanel(row.id)
+}
+
+function openReviseOverview() {
+  openRevisePanel(null)
+}
+
+function openRevisePanel(focusId) {
+  // 从当前 riskItems 重建条款列表（保留已有对话历史）
+  const existing = {}
+  revisePanel.clauses.forEach(c => { existing[c.id] = c.messages })
+  revisePanel.clauses = riskItems.value
+    .filter(r => r.clause)
+    .map(r => ({ id: r.id, level: r.level, category: r.category, clause: r.clause, clause_no: r.clause_no || null, messages: existing[r.id] || [] }))
+  revisePanel.activeId = focusId || (revisePanel.clauses[0]?.id || '__overview__')
+  revisePanel.input = ''
+  revisePanel.visible = true
+}
+
+async function handleRevise() {
+  const instruction = revisePanel.input.trim()
+  if (!instruction) { ElMessage.warning('请输入修改指令'); return }
+
+  const isOverview = isOverviewActive.value
+  const messages = isOverview ? revisePanel.overviewMessages : (activeClause.value ? activeClause.value.messages : null)
+  if (!messages) { ElMessage.warning('请先选择会话'); return }
+  // 总览会话改整个合同；条款会话改单条
+  const clauseText = isOverview ? (contract.value?.parsed_text || '') : activeClause.value.clause
+
+  // 从消息历史提取 history（多轮上下文）
+  const history = []
+  for (let i = 0; i < messages.length; i += 2) {
+    if (messages[i]?.role === 'user' && messages[i + 1]?.role === 'assistant') {
+      history.push({ instruction: messages[i].text, revised_clause: messages[i + 1].clause || '' })
+    }
+  }
+
+  messages.push({ role: 'user', text: instruction })
+  revisePanel.input = ''
+  revisePanel.loading = true
+  try {
+    const res = await reviseClause(contractId.value, {
+      clause_text: clauseText,
+      instruction,
+      history,
+    })
+    const data = res.data || {}
+    const meta = []
+    if (data.constraints?.length) meta.push('约束：' + data.constraints.join('；'))
+    if (data.legal_basis?.length) meta.push('法律依据：' + data.legal_basis.join('；'))
+    if (data.remaining_risks?.length) meta.push('⚠ 剩余风险：' + data.remaining_risks.join('；'))
+    messages.push({
+      role: 'assistant',
+      text: data.explanation || '（修订完成）',
+      clause: data.revised_clause || '',
+      meta: meta.join('\n'),
+    })
+    // 条款会话更新当前条款；总览会话不更新单条
+    if (data.revised_clause && !isOverview && activeClause.value) activeClause.value.clause = data.revised_clause
+  } catch {
+    // 失败时移除悬空的 user 消息
+    messages.pop()
+  } finally {
+    revisePanel.loading = false
   }
 }
 
@@ -616,6 +780,42 @@ onMounted(() => {
   margin-top: 8px;
 }
 .cross-risk-text { font-size: 13px; color: #303133; line-height: 1.6; }
+
+.audit-actions { display: flex; gap: 8px; margin-top: 12px; }
+
+/* 改条款总览抽屉 */
+.revise-layout { display: flex; height: calc(100vh - 110px); gap: 12px; }
+.revise-list { width: 280px; flex-shrink: 0; overflow-y: auto; padding-right: 8px; border-right: 1px solid #ebeef5; }
+.revise-item { padding: 10px; margin-bottom: 8px; border: 1px solid #e4e7ed; border-radius: 6px; cursor: pointer; transition: all .2s; }
+.revise-item:hover { border-color: #409EFF; }
+.revise-item.is-active { border-color: #409EFF; background: #ecf5ff; }
+.revise-item-top { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.revise-item-cat { font-size: 12px; color: #909399; }
+.revise-item-no { font-size: 12px; color: #409EFF; }
+.revise-item-overview { border-style: dashed; background: #fdf6ec; }
+.revise-overview-icon { font-size: 14px; }
+.revise-overview-title { font-weight: 600; color: #e6a23c; }
+.revise-chat-title-no { font-size: 13px; color: #409EFF; font-weight: 600; }
+.revise-item-clause { font-size: 13px; color: #303133; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.revise-chat { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.revise-chat-title { display: flex; align-items: center; gap: 6px; padding: 8px 10px; background: #f5f7fa; border-radius: 6px; margin-bottom: 6px; }
+.revise-chat-title-label { font-weight: 600; color: #303133; }
+.revise-chat-title-cat { font-weight: 600; color: #409EFF; }
+.revise-chat-sub { padding: 4px 10px 8px; font-size: 13px; color: #606266; border-bottom: 1px solid #ebeef5; margin-bottom: 8px; line-height: 1.6; }
+.revise-chat-body { flex: 1; overflow-y: auto; padding: 4px 8px; }
+.revise-empty { color: #909399; text-align: center; padding: 40px 0; }
+.revise-msg { margin-bottom: 12px; max-width: 92%; }
+.revise-msg-user { margin-left: auto; }
+.revise-msg-assistant { margin-right: auto; }
+.revise-msg-head { font-size: 12px; color: #909399; margin-bottom: 4px; text-align: left; }
+.revise-msg-user .revise-msg-head { text-align: right; }
+.revise-msg-text { display: inline-block; padding: 8px 12px; border-radius: 8px; font-size: 13px; line-height: 1.6; text-align: left; }
+.revise-msg-user .revise-msg-text { background: #409EFF; color: #fff; }
+.revise-msg-assistant .revise-msg-text { background: #f5f7fa; color: #303133; }
+.revise-msg-clause { margin-top: 6px; padding: 8px 10px; background: #fff; border: 1px solid #e4e7ed; border-radius: 6px; font-size: 13px; white-space: pre-wrap; line-height: 1.6; color: #303133; }
+.revise-msg-meta { margin-top: 6px; font-size: 12px; color: #909399; white-space: pre-line; }
+.revise-chat-foot { display: flex; gap: 8px; align-items: flex-end; margin-top: 8px; }
+.revise-chat-foot .el-input { flex: 1; }
 .audit-placeholder { padding: 60px 0; }
 .audit-full-link { margin-top: 12px; }
 .report-desc { margin-bottom: 16px; }

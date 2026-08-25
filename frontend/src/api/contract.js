@@ -91,6 +91,15 @@ export function approveContract(id) {
   return request.post(`/contracts/${id}/approve`)
 }
 
+/**
+ * 多轮对话式改条款
+ * @param {number|string} id — 合同 ID
+ * @param {Object} data — { clause_text, instruction, history }
+ */
+export function reviseClause(id, data) {
+  return request.post(`/contracts/${id}/revise`, data)
+}
+
 // ====== 反馈标注 ======
 
 /**
