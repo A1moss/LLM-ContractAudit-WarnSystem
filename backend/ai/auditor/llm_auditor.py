@@ -1,8 +1,13 @@
 from ai.llm_client import llm_client
+from ai.confidence import clamp_confidence, LLM_FALLBACK_CONFIDENCE
 import json
 import logging
 
 logger = logging.getLogger(__name__)
+
+# 送入 LLM 的合同文本上限（字符）。超出会截断并告警；
+# 更彻底的分块（chunking）方案见 TODO，避免单次上下文超限。
+MAX_AUDIT_CHARS = 12000
 
 SYSTEM_PROMPT_AUDIT = """你是一位资深合同审核律师。请对以下合同条款逐条审核，识别以下 12 类风险。
 
@@ -70,7 +75,9 @@ def _extract_json(response: str) -> list:
 
 
 def audit_with_llm(full_text: str, rag_context: list = None) -> list[dict]:
-    truncated = full_text[:4000]
+    truncated = full_text[:MAX_AUDIT_CHARS]
+    if len(full_text) > MAX_AUDIT_CHARS:
+        logger.warning("合同文本 %d 字超过上限 %d，尾部内容未参与 LLM 审核", len(full_text), MAX_AUDIT_CHARS)
 
     rag_text = ""
     if rag_context:
@@ -104,7 +111,8 @@ def audit_with_llm(full_text: str, rag_context: list = None) -> list[dict]:
                     "clause_text": r.get("clause_text", ""),
                     "reason": r.get("reason", ""),
                     "suggestion": r.get("suggestion", ""),
-                    "confidence": float(r.get("confidence", 0.7)),
+                    # LLM 自报置信度优先；缺失时给中性 0.6（诚实标注不确定性），不再硬编码 0.7
+                    "confidence": clamp_confidence(r.get("confidence", LLM_FALLBACK_CONFIDENCE)),
                     "detection_method": "llm",
                 })
             logger.info(f"LLM 审核完成，检出 {len(validated)} 条风险")

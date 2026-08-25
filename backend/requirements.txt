@@ -11,6 +11,13 @@ pyjwt>=2.8.0
 python-dotenv>=1.0.0
 pdfplumber>=0.11.0
 python-docx>=1.1.0
+openai>=1.0.0
+chromadb>=0.4.0
+sentence-transformers>=2.2.0
 
 email-validator>=2.0.0
 pywin32>=306
+
+# 可选：图片/扫描件合同 OCR 识别（体积较大，代码会在缺失时自动降级为"OCR不可用"）
+# paddleocr>=2.7.0
+# paddlepaddle>=2.5.0

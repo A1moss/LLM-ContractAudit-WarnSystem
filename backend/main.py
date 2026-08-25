@@ -20,6 +20,14 @@ def _ensure_columns():
         if "stored_path" not in existing:
             db.execute("ALTER TABLE contracts ADD COLUMN stored_path VARCHAR(500)")
             db.commit()
+        # audit_records 新增 evidence 列（证据链）
+        try:
+            existing_ar = {row[1] for row in db.execute("PRAGMA table_info(audit_records)")}
+            if existing_ar and "evidence" not in existing_ar:
+                db.execute("ALTER TABLE audit_records ADD COLUMN evidence JSON")
+                db.commit()
+        except Exception:
+            pass  # 表可能尚不存在
         db.close()
     except Exception:
         pass  # non-fatal: table may not exist yet

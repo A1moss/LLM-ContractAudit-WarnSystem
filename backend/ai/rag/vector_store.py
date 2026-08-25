@@ -16,9 +16,15 @@ import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 
+from ai.rag.bm25 import bm25_search, rrf_fuse
+
 logger = logging.getLogger(__name__)
 
 CHROMA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "chroma_data")
+KNOWLEDGE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "knowledge")
+
+# 知识库 JSON 缓存（用于 BM25 词面检索 + 元数据回填）
+_json_cache: dict = {}
 
 _client: Optional[chromadb.PersistentClient] = None
 _embedder: Optional[SentenceTransformer] = None
@@ -105,27 +111,56 @@ def init_chroma() -> dict:
     return stats
 
 
-def search_knowledge(query: str, collection_name: str = "laws", top_k: int = 5) -> list[dict]:
-    """语义检索知识库，返回 top_k 条最相关文档。
+def _load_knowledge_json(collection_name: str) -> list[dict]:
+    """加载知识库 JSON（用于 BM25 词面检索 + 元数据回填），带缓存。"""
+    if collection_name in _json_cache:
+        return _json_cache[collection_name]
+    file_map = {"laws": "laws.json", "standard_clauses": "standard_clauses.json"}
+    filename = file_map.get(collection_name)
+    if not filename:
+        return []
+    path = os.path.join(KNOWLEDGE_DIR, filename)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        _json_cache[collection_name] = data if isinstance(data, list) else []
+    except Exception as e:
+        logger.warning("知识库 JSON 加载失败 %s: %s", filename, e)
+        _json_cache[collection_name] = []
+    return _json_cache[collection_name]
 
-    Args:
-        query: 检索查询文本
-        collection_name: laws / standard_clauses
-        top_k: 返回文档数量
 
-    Returns:
-        [{"content": "法条全文", "score": 0.95}, ...]
-    """
+def _to_result(item: dict, score: float) -> dict:
+    """把知识库条目转成统一检索结果，保留 content/score 并回填可溯源元数据。"""
+    result = {
+        "content": item.get("content", ""),
+        "score": round(score, 5),
+        "id": item.get("id"),
+        "title": item.get("title", ""),
+    }
+    if "law" in item:
+        # 法律法规库
+        result["law"] = item.get("law", "")
+        result["article"] = item.get("article", "")
+        result["source"] = f"{item.get('law', '')}{item.get('article', '')}"
+        result["tags"] = item.get("tags", [])
+    if "type" in item:
+        # 标准条款库
+        result["type"] = item.get("type", "")
+        result["priority"] = item.get("priority", "")
+        result["related_law"] = item.get("related_law", "")
+        result["source"] = item.get("source", "") or item.get("related_law", "")
+    return result
+
+
+def _dense_search(query: str, collection_name: str, top_k: int) -> list[tuple[int, float]]:
+    """稠密（语义）检索：返回 [(文档下标, 分数)]，失败时返回空列表（降级到 BM25）。"""
     global _init_done
-
     client = _get_client()
-
     try:
         collection = client.get_collection(collection_name)
     except Exception:
-        # 集合缺失时自动初始化一次，保证新拉取的项目开箱即用
         if _init_done:
-            logger.warning(f"集合 {collection_name} 不存在")
             return []
         with _init_lock:
             if not _init_done:
@@ -138,18 +173,54 @@ def search_knowledge(query: str, collection_name: str = "laws", top_k: int = 5) 
         try:
             collection = client.get_collection(collection_name)
         except Exception:
-            logger.warning(f"集合 {collection_name} 初始化后仍不存在")
             return []
 
-    embedder = _get_embedder()
+    try:
+        embedder = _get_embedder()
+        query_embedding = embedder.encode([query]).tolist()
+        results = collection.query(query_embeddings=query_embedding, n_results=min(top_k, 10))
+    except Exception as e:
+        logger.warning("稠密检索失败: %s", e)
+        return []
 
-    query_embedding = embedder.encode([query]).tolist()
-    results = collection.query(query_embeddings=query_embedding, n_results=min(top_k, 10))
+    # 用 content 反查文档下标，便于与 BM25 在同一个下标空间里做 RRF
+    data = _load_knowledge_json(collection_name)
+    content_index = {d.get("content", ""): i for i, d in enumerate(data)}
 
-    docs = []
+    hits = []
     if results and results.get("documents"):
         for i, doc in enumerate(results["documents"][0]):
-            score = 1.0 - results.get("distances", [[1.0]])[0][i] if results.get("distances") else 1.0
-            docs.append({"content": doc, "score": round(score, 4)})
+            dist = results.get("distances", [[1.0]])[0][i] if results.get("distances") else 1.0
+            score = 1.0 - dist
+            idx = content_index.get(doc)
+            if idx is not None:
+                hits.append((idx, score))
+    return hits
 
-    return docs
+
+def search_knowledge(query: str, collection_name: str = "laws", top_k: int = 5) -> list[dict]:
+    """混合检索：稠密（语义）+ BM25（词面）经 RRF 融合，返回带元数据的结果。
+
+    Args:
+        query: 检索查询文本
+        collection_name: laws / standard_clauses
+        top_k: 返回文档数量
+
+    Returns:
+        [{"content": "...", "score": 0.95, "id":..., "title":..., "law":..., "article":...}, ...]
+    """
+    data = _load_knowledge_json(collection_name)
+    if not data:
+        return []
+
+    fetch_k = max(top_k * 2, 5)
+
+    # 两路检索（稠密可能因模型未就绪而失败，BM25 始终可用）
+    dense_hits = _dense_search(query, collection_name, fetch_k)
+    sparse_hits = bm25_search(query, collection_name, data, fetch_k)
+
+    # RRF 融合
+    fused = rrf_fuse([dense_hits, sparse_hits])
+    ranked = sorted(fused.items(), key=lambda x: x[1], reverse=True)[:top_k]
+
+    return [_to_result(data[idx], score) for idx, score in ranked if 0 <= idx < len(data)]

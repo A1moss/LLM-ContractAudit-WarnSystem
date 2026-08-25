@@ -16,6 +16,7 @@ from ai.parser import detect_and_parse
 from ai.classifier import classify_contract
 from ai.extractor import extract_elements
 from ai.auditor import run_rules, audit_with_llm
+from ai.confidence import enrich_confidences
 from ai.corex import run_review
 from ai.rag import search_knowledge
 from ai.reporter import generate_report, compute_heatmap
@@ -37,6 +38,29 @@ def _iso(ts) -> str | None:
     if ts is None:
         return None
     return ts.isoformat() + "Z"
+
+
+def _build_evidence(r: dict, rag_ctx: list | None) -> dict | None:
+    """按检测来源构建可溯源证据链。
+
+    - 规则引擎：附带命中的法条（related_law）
+    - RAG/LLM：附带检索到的知识库法条（law/article/title/source）
+    - Corex：附带多 Agent 一致性（agreement_count）
+    """
+    method = r.get("detection_method", "")
+    if method == "rule":
+        law = r.get("related_law", "")
+        return {"method": "rule", "law": law} if law else None
+    if method == "rag" and rag_ctx:
+        refs = [
+            {"law": it.get("law"), "article": it.get("article"),
+             "title": it.get("title"), "source": it.get("source")}
+            for it in rag_ctx[:3] if it.get("source")
+        ]
+        return {"method": "rag", "references": refs} if refs else None
+    if method == "corex_review":
+        return {"method": "corex", "agreement": r.get("agreement_count", 0)}
+    return None
 
 
 @router.post("/upload")
@@ -226,6 +250,7 @@ def trigger_audit(
         # 1. Rule engine (always runs)
         rule_results = run_rules(full_text)
         all_risks = list(rule_results)
+        rag_ctx = None  # 供证据链使用，precise 模式下会被赋值为检索到的法条
 
         # 2. LLM auditor (precise mode only)
         if c.audit_mode == "precise":
@@ -261,9 +286,11 @@ def trigger_audit(
             except Exception as e:
                 logger.warning("Corex review unavailable, continue with rule/LLM results: %s", e)
 
+        # 跨来源置信度融合：规则/LLM/多Agent 独立检出同一风险时交叉验证上调
+        enrich_confidences(all_risks)
+
         # Save each risk as AuditRecord
         records = []
-        missing_clauses = []
         for r in all_risks:
             record = AuditRecord(
                 contract_id=contract_id,
@@ -275,23 +302,26 @@ def trigger_audit(
                 reason=r.get("reason"),
                 suggestion=r.get("suggestion"),
                 detection_method=r.get("detection_method", "rule"),
-                confidence=r.get("confidence", 0.8),
+                confidence=r.get("confidence", 0.5),
                 corex_agent_log=r.get("corex_agent_log"),
+                evidence=_build_evidence(r, rag_ctx),
                 feedback_status="pending",
             )
             db.add(record)
             records.append(record)
 
-            if r.get("risk_type") in ("R08", "R09", "R10"):
-                missing_clauses.append({
-                    "risk_type": r["risk_type"],
-                    "clause": r.get("name", r["risk_type"]),
-                    "suggestion": r.get("suggestion"),
-                })
-
         db.commit()
         for record in records:
             db.refresh(record)
+
+        # 条款比对：作为审核流程的一部分同步完成，避免"审核已完成但条款比对仍空白"。
+        # 失败时不阻断审核（风险审核结果已入库），报告会标注"待重试"。
+        compare_result = None
+        try:
+            compare_result = compare_clauses(full_text, c.contract_type or "采购合同")
+            logger.info("条款比对完成: %s", compare_result.get("summary") if compare_result else None)
+        except Exception as e:
+            logger.warning("条款比对失败，报告将标注待重试: %s", e)
 
         # Calculate report stats
         high = sum(1 for r in all_risks if r.get("level") == "high")
@@ -299,16 +329,35 @@ def trigger_audit(
         low = sum(1 for r in all_risks if r.get("level") == "low")
         risk_score = min(100, high * 30 + mid * 15 + low * 5)
 
-        # Generate simple HTML report
+        # Generate report HTML（风险表 + 条款比对章节）
         risk_rows = "".join(
             f"<tr><td>{r.get('risk_type','')}</td><td>{r.get('level','')}</td>"
             f"<td>{r.get('reason','')[:80]}</td><td>{r.get('suggestion','')[:80]}</td></tr>"
             for r in all_risks
         )
+
+        compare_section = ""
+        if compare_result and compare_result.get("clauses"):
+            s = compare_result.get("summary") or {}
+            cov_rate = s.get("coverage_rate") or 0
+            miss_cnt = s.get("missing") or 0
+            compare_rows = "".join(
+                f"<tr><td>{cl.get('title','')}</td><td>{cl.get('status','')}</td>"
+                f"<td>{cl.get('deviation','') or ''}</td><td>{cl.get('completion','') or ''}</td></tr>"
+                for cl in compare_result["clauses"]
+            )
+            compare_section = (
+                f"<h3>条款比对（覆盖率 {cov_rate:.0%}，缺失 {miss_cnt} 条）</h3>"
+                f"<table border='1'><tr><th>条款</th><th>状态</th><th>偏离说明</th><th>补全建议</th></tr>{compare_rows}</table>"
+            )
+        else:
+            compare_section = "<p>⚠️ 条款比对未完成（知识库未初始化或比对失败），可稍后重试</p>"
+
         report_html = (
             f"<html><body><h2>Audit Report</h2>"
             f"<p>Batch: {audit_batch} | Mode: {c.audit_mode} | Score: {risk_score}</p>"
             f"<table border='1'><tr><th>Type</th><th>Level</th><th>Reason</th><th>Suggestion</th></tr>{risk_rows}</table>"
+            f"{compare_section}"
             f"</body></html>"
         )
 
@@ -321,7 +370,7 @@ def trigger_audit(
             mid_risk_count=mid,
             low_risk_count=low,
             risk_heatmap_data={"high": high, "mid": mid, "low": low},
-            missing_clauses=missing_clauses if missing_clauses else None,
+            missing_clauses=compare_result if compare_result else None,
         )
         db.add(report)
 
@@ -381,6 +430,7 @@ def get_audit_result(
                     "suggestion": r.suggestion,
                     "detection_method": r.detection_method,
                     "confidence": r.confidence,
+                    "evidence": r.evidence,
                     "feedback_status": r.feedback_status,
                 }
                 for r in records

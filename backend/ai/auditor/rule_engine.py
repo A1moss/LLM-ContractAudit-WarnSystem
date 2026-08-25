@@ -1,6 +1,8 @@
 import re
 import logging
 
+from ai.confidence import rule_confidence
+
 logger = logging.getLogger(__name__)
 
 RISK_RULES = [
@@ -38,6 +40,22 @@ SAFE_PATTERNS = [
     (r"商业秘密.*?(合同.*?终止.*?\d\s*年|期满.*?\d\s*年)", "R05"),
     (r"违约金.*?(实际损失|直接损失).*?(为限|为上限)", "R01"),
 ]
+
+# 12 类风险 → 法条映射（用于可溯源证据链）
+RULE_LAWS = {
+    "R01": "民法典第585条",
+    "R02": "民法典第506条",
+    "R03": "民法典第562/563条",
+    "R04": "民事诉讼法第35条",
+    "R05": "民法典第509条",
+    "R06": "民法典第859/860/861条",
+    "R07": "民法典第511/525/526条",
+    "R08": "民法典第510/511条",
+    "R09": "民法典第590条",
+    "R10": "劳动合同法第24条",
+    "R11": "民法典第563/564条",
+    "R12": "个人信息保护法第23条",
+}
 
 
 def _is_safe(clause_text: str, risk_type: str) -> bool:
@@ -109,6 +127,8 @@ def run_rules(text: str) -> list[dict]:
                         "reason": _build_reason(rule_id, ctx, final_level),
                         "suggestion": suggestion,
                         "detection_method": "rule",
+                        "confidence": rule_confidence(rule_id),
+                        "related_law": RULE_LAWS.get(rule_id, ""),
                     })
         elif rule_id == "R08":
             if "验收" not in text[:5000] and "验收标准" not in text[:5000] and "验收方式" not in text[:5000]:
@@ -117,6 +137,8 @@ def run_rules(text: str) -> list[dict]:
                     "clause_text": "全文未定义验收标准或验收方式",
                     "reason": "合同未定义验收标准和验收流程",
                     "suggestion": suggestion, "detection_method": "rule",
+                    "confidence": rule_confidence("R08"),
+                    "related_law": RULE_LAWS.get("R08", ""),
                 })
         elif rule_id == "R09":
             if "不可抗力" not in text[:5000]:
@@ -125,6 +147,8 @@ def run_rules(text: str) -> list[dict]:
                     "clause_text": "全文未出现不可抗力相关条款",
                     "reason": "合同缺少不可抗力条款，一旦发生不可抗力事件将无法免责",
                     "suggestion": suggestion, "detection_method": "rule",
+                    "confidence": rule_confidence("R09"),
+                    "related_law": RULE_LAWS.get("R09", ""),
                 })
 
     logger.info(f"规则引擎检出 {len(results)} 条风险")

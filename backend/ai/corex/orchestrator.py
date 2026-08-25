@@ -3,10 +3,15 @@ from ai.corex.agents import (
     LEGAL_AGENT_PROMPT, COMPLIANCE_AGENT_PROMPT,
     FINANCE_AGENT_PROMPT, SELF_QA_AGENT_PROMPT,
 )
+from ai.confidence import agent_confidence, clamp_confidence
 import json
 import logging
 
 logger = logging.getLogger(__name__)
+
+# 送入每个 Agent 的合同文本上限（字符）。超出会截断并告警；
+# 彻底的分块（chunking）方案见 TODO，避免单次上下文超限。
+MAX_AGENT_CHARS = 12000
 
 
 def _extract_json(response: str) -> list | None:
@@ -46,15 +51,18 @@ def _call_agent(name: str, system_prompt: str, context: str, prev_output: str = 
             logger.info(f"[Corex] {name} 完成，检出 {len(risks)} 条")
             return risks
         else:
+            # JSON 解析失败也打上 failed 标记，避免被误判为"该 Agent 无风险"
             logger.warning(f"[Corex] {name} JSON 解析失败")
-            return []
+            return [{"error": "JSON parse failed", "agent_source": name, "failed": True}]
     except Exception as e:
         logger.error(f"[Corex] {name} 异常: {e}")
         return [{"error": str(e), "agent_source": name, "failed": True}]
 
 
 def run_review(full_text: str, initial_risks: list[dict] = None) -> dict:
-    truncated = full_text[:4000]
+    truncated = full_text[:MAX_AGENT_CHARS]
+    if len(full_text) > MAX_AGENT_CHARS:
+        logger.warning("合同文本 %d 字超过上限 %d，尾部内容未参与 Corex 审核", len(full_text), MAX_AGENT_CHARS)
     context = f"请审核以下合同：\n\n{truncated}"
     agent_logs = {}
     all_risks = list(initial_risks) if initial_risks else []
@@ -82,20 +90,44 @@ def run_review(full_text: str, initial_risks: list[dict] = None) -> dict:
     agent_logs["self_qa"] = {"count": len(qa), "risks": qa}
     if any(r.get("failed") for r in qa): failed.append("Self-QA")
 
-    final = qa if qa and not any(r.get("failed") for r in qa) else all_risks
+    # 修复 Self-QA 空结果逻辑反转：QA 返回 []（终审判定"无风险"）时不应回退到
+    # 未去重的 all_risks；仅当 QA 真正失败（带 failed 标记）时才回退。
+    final = qa if not any(r.get("failed") for r in qa) else all_risks
 
-    # 去重
-    seen = set()
-    deduped = []
+    # 去重 + 多 Agent 一致性置信度
+    grouped = {}
+    order = []
     for r in final:
-        key = (r.get("risk_type", ""), r.get("clause_text", "")[:30])
-        if key not in seen:
-            seen.add(key)
-            deduped.append(r)
+        if not isinstance(r, dict):
+            continue
+        key = (r.get("risk_type", ""), (r.get("clause_text") or "")[:30])
+        if key not in grouped:
+            grouped[key] = []
+            order.append(key)
+        grouped[key].append(r)
+
+    deduped = []
+    for key in order:
+        items = grouped[key]
+        rep = items[0]
+        # 统计该风险被多少独立来源检出（多 Agent + 规则引擎）
+        agent_sources = {it.get("agent_source", "") for it in items if it.get("agent_source")}
+        rule_backed = any(it.get("detection_method") == "rule" for it in items)
+        agreement = len(agent_sources) + (1 if rule_backed else 0)
+        rep["agreement_count"] = agreement
+
+        if len(agent_sources) >= 2:
+            # 多个 Agent 独立检出同一风险 → 用一致性置信度（投票一致性）
+            rep["confidence"] = agent_confidence(agreement)
+        elif rep.get("confidence") is None:
+            # 单一来源且无置信度 → 用一致性置信度兜底
+            rep["confidence"] = agent_confidence(agreement)
+        deduped.append(rep)
 
     # 置信度过滤
     for r in deduped:
-        conf = float(r.get("confidence", 0.7))
+        conf = clamp_confidence(r.get("confidence"))
+        r["confidence"] = conf
         if conf < 0.7:
             r["level"] = "low" if r.get("level") == "medium" else r.get("level", "low")
             r["low_confidence"] = True
