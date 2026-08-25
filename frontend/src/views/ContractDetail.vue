@@ -21,6 +21,19 @@
         </el-descriptions-item>
       </el-descriptions>
 
+      <!-- 复核 / 验收 操作栏（按角色显示） -->
+      <div v-if="(contract.status === 'completed' && canReview) || (contract.status === 'reviewed' && canApprove)" class="review-bar">
+        <template v-if="contract.status === 'completed' && canReview">
+          <span class="review-hint">审核人复核：</span>
+          <el-button type="success" size="small" :loading="reviewing" @click="handleReview('approve')">复核通过</el-button>
+          <el-button type="danger" size="small" :loading="reviewing" @click="handleReview('reject')">驳回重审</el-button>
+        </template>
+        <template v-if="contract.status === 'reviewed' && canApprove">
+          <span class="review-hint">验收人验收：</span>
+          <el-button type="success" size="small" :loading="reviewing" @click="handleApprove">验收通过</el-button>
+        </template>
+      </div>
+
       <el-row :gutter="20" class="detail-row">
         <el-col :span="14">
           <el-tabs v-model="activeTab" type="border-card">
@@ -207,7 +220,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Warning, ArrowLeft, ArrowRight, Loading } from '@element-plus/icons-vue'
 import FeedbackPanel from '../components/FeedbackPanel.vue'
 import { ElMessage } from 'element-plus'
-import { getContractDetail, getAuditResult, triggerAudit, getClauseComparison, submitFeedback, getFeedback, getContractFile } from '../api/contract.js'
+import { getContractDetail, getAuditResult, triggerAudit, getClauseComparison, submitFeedback, getFeedback, deleteFeedback, reviewContract, approveContract, getContractFile } from '../api/contract.js'
 import { formatTime } from '../utils/format.js'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -232,12 +245,16 @@ function typeLabel(type) { return typeMap[type] || type || '未分类' }
 
 // ── 状态映射 ──
 function statusLabel(status) {
-  const map = { uploaded: '已上传', parsed: '已解析', auditing: '审核中', completed: '审核完成' }
+  const map = {
+    uploaded: '已上传', parsed: '已解析', auditing: '审核中',
+    completed: '审核完成', reviewed: '待验收', approved: '已验收',
+  }
   return map[status] || status || '未知'
 }
 function statusTag(status) {
-  if (status === 'completed') return 'success'
+  if (status === 'completed' || status === 'approved') return 'success'
   if (status === 'auditing' || status === 'parsing') return 'warning'
+  if (status === 'reviewed') return 'primary'
   return 'info'
 }
 
@@ -447,6 +464,40 @@ async function fetchClauseComparison() {
 }
 
 const auditing = ref(false)
+const reviewing = ref(false)
+
+// ── 多用户角色（从 localStorage 读取）──
+const role = localStorage.getItem('role') || ''
+const canReview = computed(() => role === 'reviewer' || role === 'admin')
+const canApprove = computed(() => role === 'approver' || role === 'admin')
+
+async function handleReview(action) {
+  reviewing.value = true
+  try {
+    await reviewContract(contractId.value, action)
+    ElMessage.success(action === 'approve' ? '复核通过，待验收' : '已驳回，需重新审核')
+    await fetchDetail()
+    await fetchAuditResult()
+  } catch {
+    // 错误已在拦截器处理
+  } finally {
+    reviewing.value = false
+  }
+}
+
+async function handleApprove() {
+  reviewing.value = true
+  try {
+    await approveContract(contractId.value)
+    ElMessage.success('验收通过')
+    await fetchDetail()
+  } catch {
+    // 错误已在拦截器处理
+  } finally {
+    reviewing.value = false
+  }
+}
+
 async function handleTriggerAudit() {
   auditing.value = true
   try {
@@ -480,9 +531,16 @@ async function onFeedback(payload) {
   }
 }
 
-function onFeedbackUndo(payload) {
-  console.log('[FeedbackPanel] 撤销反馈:', payload)
-  ElMessage.info('已撤销（本地状态）')
+async function onFeedbackUndo(payload) {
+  try {
+    if (payload.feedback_id) {
+      await deleteFeedback(payload.feedback_id)
+      fetchFeedback()
+    }
+    ElMessage.info('已撤销')
+  } catch (e) {
+    ElMessage.error('撤销失败：' + (e.response?.data?.detail || e.message))
+  }
 }
 
 // ── 跳转 ──
@@ -507,6 +565,18 @@ onMounted(() => {
 .loading-state { padding: 40px 0; }
 .error-state { padding: 60px 0; }
 .meta-descriptions { margin-bottom: 20px; }
+
+.review-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -8px 0 16px 0;
+  padding: 10px 12px;
+  background: #f0f9eb;
+  border: 1px solid #b7eb8f;
+  border-radius: 6px;
+}
+.review-hint { font-size: 13px; color: #606266; }
 
 .detail-row {
   --row-height: calc(100vh - 200px);

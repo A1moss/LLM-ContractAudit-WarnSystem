@@ -169,22 +169,14 @@ async function fetchList(page = pagination.page) {
     const items = res.data?.items || []
     pagination.total = res.data?.total || 0
 
-    // 为每个合同预取风险计数
-    const enriched = await Promise.all(
-      items.map(async (c) => {
-        try {
-          const auditRes = await getAuditResult(c.id)
-          const risks = auditRes.data?.items || []
-          const high = risks.filter(r => r.risk_level === 'high').length
-          const mid = risks.filter(r => r.risk_level === 'medium').length
-          const low = risks.filter(r => r.risk_level === 'low').length
-          return { ...c, _riskTotal: risks.length, _riskHigh: high, _riskMid: mid, _riskLow: low }
-        } catch {
-          return { ...c, _riskTotal: 0, _riskHigh: 0, _riskMid: 0, _riskLow: 0 }
-        }
-      })
-    )
-    contracts.value = enriched
+    // 直接用列表接口返回的风险计数（后端已一次汇总，避免 N+1 逐条请求）
+    contracts.value = items.map(c => ({
+      ...c,
+      _riskTotal: c.risk_count || 0,
+      _riskHigh: c.high_risk_count || 0,
+      _riskMid: c.mid_risk_count || 0,
+      _riskLow: c.low_risk_count || 0,
+    }))
   } catch (e) {
     error.value = '加载审核结果列表失败'
     console.warn('审核结果列表加载失败:', e)

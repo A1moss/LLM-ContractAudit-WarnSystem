@@ -204,12 +204,16 @@ function apply(item, actionType, extra = {}) {
 function undoFeedback(item) {
   const id = item.id
   const prevAction = feedbackStates[id]
+  // 从已加载的反馈记录里找到对应的反馈 id，供后端 DELETE 使用
+  const fb = props.loadedFeedbacks.find(f => f.record_id === id)
+  const feedbackId = fb?.id || null
   delete feedbackStates[id]
   delete feedbackComments[id]
   delete feedbackCorrected[id]
   ElMessage.info('已撤销' + statusLabel(prevAction))
   emit('feedback-undo', {
     record_id: id,
+    feedback_id: feedbackId,
     prev_action_type: prevAction,
     contract_id: props.contractId,
   })

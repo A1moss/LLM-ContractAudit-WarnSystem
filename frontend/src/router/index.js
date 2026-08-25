@@ -53,6 +53,12 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/templates',
+    name: 'TemplateList',
+    component: () => import('../views/TemplateList.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
     component: () => import('../views/NotFoundView.vue'),

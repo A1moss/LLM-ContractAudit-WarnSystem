@@ -32,12 +32,16 @@ request.interceptors.response.use(
       const { status, data } = error.response
       if (status === 401) {
         localStorage.removeItem('token')
+        localStorage.removeItem('username')
+        localStorage.removeItem('role')
         // 不在登录页时才跳转，避免登录失败时死循环
         if (router.currentRoute.value.path !== '/login') {
           router.push('/login')
         }
         const msg = data?.detail || '用户名或密码错误'
         ElMessage.error(msg)
+      } else if (status === 403) {
+        ElMessage.error(data?.detail || '没有权限执行此操作')
       } else {
         const msg = data?.detail || data?.message || `请求失败 (${status})`
         ElMessage.error(msg)

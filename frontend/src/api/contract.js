@@ -74,6 +74,23 @@ export function getClauseComparison(id) {
   return request.get(`/contracts/${id}/clause-comparison`)
 }
 
+/**
+ * 审核人复核：approve(通过→待验收) / reject(驳回→退回重新审核)
+ * @param {number|string} id — 合同 ID
+ * @param {'approve'|'reject'} action — 复核动作
+ */
+export function reviewContract(id, action = 'approve') {
+  return request.post(`/contracts/${id}/review`, null, { params: { action } })
+}
+
+/**
+ * 验收人验收：待验收 → 已验收
+ * @param {number|string} id — 合同 ID
+ */
+export function approveContract(id) {
+  return request.post(`/contracts/${id}/approve`)
+}
+
 // ====== 反馈标注 ======
 
 /**
@@ -90,6 +107,14 @@ export function submitFeedback(data) {
  */
 export function getFeedback(contractId) {
   return request.get(`/feedback/${contractId}`)
+}
+
+/**
+ * 撤销一条反馈标注
+ * @param {number|string} feedbackId — 反馈记录 ID
+ */
+export function deleteFeedback(feedbackId) {
+  return request.delete(`/feedback/${feedbackId}`)
 }
 
 /**

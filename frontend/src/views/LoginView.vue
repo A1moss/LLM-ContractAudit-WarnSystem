@@ -36,6 +36,14 @@
             <el-form-item label="确认密码" prop="confirmPassword">
               <el-input v-model="regForm.confirmPassword" type="password" show-password placeholder="再次输入密码" />
             </el-form-item>
+            <el-form-item label="角色" prop="role">
+              <el-select v-model="regForm.role" style="width: 100%">
+                <el-option label="上传者（上传并触发审核）" value="uploader" />
+                <el-option label="审核人（复核审核结果）" value="reviewer" />
+                <el-option label="验收人（最终验收）" value="approver" />
+                <el-option label="管理员（全部权限）" value="admin" />
+              </el-select>
+            </el-form-item>
             <el-form-item>
               <el-button type="success" class="login-btn" :loading="loading" @click="handleRegister">
                 注 册
@@ -105,6 +113,7 @@ async function handleLogin() {
     })
     localStorage.setItem('token', res.data.token)
     localStorage.setItem('username', res.data.user.username)
+    localStorage.setItem('role', res.data.user.role || '')
     ElMessage.success('登录成功')
     router.replace('/')
   } catch {
@@ -116,7 +125,7 @@ async function handleLogin() {
 
 // ── 注册 ──
 const regFormRef = ref(null)
-const regForm = ref({ username: '', email: '', password: '', confirmPassword: '' })
+const regForm = ref({ username: '', email: '', password: '', confirmPassword: '', role: 'uploader' })
 
 const validateConfirmPassword = (_rule, value, callback) => {
   if (value !== regForm.value.password) {
@@ -155,9 +164,11 @@ async function handleRegister() {
       username: regForm.value.username,
       email: regForm.value.email,
       password: regForm.value.password,
+      role: regForm.value.role,
     })
     localStorage.setItem('token', res.data.token)
     localStorage.setItem('username', res.data.user.username)
+    localStorage.setItem('role', res.data.user.role || '')
     ElMessage.success('注册成功')
     router.replace('/')
   } catch {

@@ -39,6 +39,11 @@
         <el-menu-item index="/audit/report">审核报告</el-menu-item>
       </el-sub-menu>
 
+      <el-menu-item v-if="isLoggedIn" index="/templates">
+        <el-icon><Files /></el-icon>
+        模板管理
+      </el-menu-item>
+
       <!-- 右侧占位 -->
       <div class="nav-spacer" />
 
@@ -47,6 +52,7 @@
         <template #title>
           <el-icon><User /></el-icon>
           <span>{{ username }}</span>
+          <el-tag v-if="roleLabel" size="small" type="info" effect="plain">{{ roleLabel }}</el-tag>
         </template>
         <el-menu-item index="profile" disabled>
           <el-icon><User /></el-icon>
@@ -83,7 +89,7 @@ import { ref, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
   HomeFilled, FolderOpened, Checked, User,
-  SwitchButton, ArrowLeft, Document,
+  SwitchButton, ArrowLeft, Document, Files,
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -116,10 +122,16 @@ const openSubs = computed(() => {
 // ── 登录状态与用户名（ref + router.afterEach 确保 localStorage 变化后同步）──
 const isLoggedIn = ref(!!localStorage.getItem('token'))
 const username = ref(localStorage.getItem('username') || '未登录')
+const role = ref(localStorage.getItem('role') || '')
+
+const ROLE_LABELS = { uploader: '上传者', reviewer: '审核人', approver: '验收人', admin: '管理员' }
+const roleLabel = ref(ROLE_LABELS[role.value] || '')
 
 router.afterEach(() => {
   isLoggedIn.value = !!localStorage.getItem('token')
   username.value = localStorage.getItem('username') || '未登录'
+  role.value = localStorage.getItem('role') || ''
+  roleLabel.value = ROLE_LABELS[role.value] || ''
 })
 
 // ── 返回 ──
@@ -136,6 +148,7 @@ function goBack() {
 function handleLogout() {
   localStorage.removeItem('token')
   localStorage.removeItem('username')
+  localStorage.removeItem('role')
   router.push('/login')
 }
 </script>

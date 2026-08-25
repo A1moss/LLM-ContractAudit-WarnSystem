@@ -28,12 +28,12 @@
             style="width: 150px;"
             @change="handleSearch"
           >
-            <el-option label="采购合同" value="purchase" />
-            <el-option label="销售合同" value="sales" />
-            <el-option label="保密协议" value="nda" />
-            <el-option label="服务外包" value="outsourcing" />
-            <el-option label="劳动合同" value="employment" />
-            <el-option label="其他合同" value="other" />
+            <el-option label="采购合同" value="采购合同" />
+            <el-option label="销售合同" value="销售合同" />
+            <el-option label="保密协议" value="保密协议" />
+            <el-option label="服务外包合同" value="服务外包合同" />
+            <el-option label="劳动合同" value="劳动合同" />
+            <el-option label="其他合同" value="其他合同" />
           </el-select>
         </el-form-item>
         <el-form-item label="审核状态">
@@ -48,6 +48,8 @@
             <el-option label="解析中" value="parsing" />
             <el-option label="审核中" value="auditing" />
             <el-option label="审核完成" value="completed" />
+            <el-option label="待验收" value="reviewed" />
+            <el-option label="已验收" value="approved" />
             <el-option label="审核失败" value="failed" />
           </el-select>
         </el-form-item>
@@ -147,7 +149,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
@@ -183,11 +185,26 @@ async function fetchList() {
     })
     contractList.value = res.data?.items || []
     pagination.total = res.data?.total || 0
+    schedulePoll()
   } catch {
     console.warn('合同列表加载失败')
     ElMessage.error('加载合同列表失败，请检查网络连接')
   } finally {
     loading.value = false
+  }
+}
+
+// ── 自动轮询：列表里有"审核中/解析中"的合同时，每 3 秒刷新一次，直到都完成 ──
+let pollTimer = null
+function schedulePoll() {
+  const hasPending = contractList.value.some(c => c.status === 'auditing' || c.status === 'parsing')
+  if (hasPending && !pollTimer) {
+    pollTimer = setInterval(() => {
+      fetchList()
+    }, 3000)
+  } else if (!hasPending && pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
   }
 }
 
@@ -224,14 +241,16 @@ function goToResult(id) {
 
 function typeLabel(type) {
   const map = {
-    purchase: '采购合同',
-    sales: '销售合同',
-    nda: '保密协议',
-    outsourcing: '服务外包',
-    employment: '劳动合同',
-    other: '其他合同',
+    '采购合同': '采购合同',
+    '销售合同': '销售合同',
+    '保密协议': '保密协议',
+    '服务外包合同': '服务外包合同',
+    '劳动合同': '劳动合同',
+    '其他合同': '其他合同',
+    purchase: '采购合同', sales: '销售合同', nda: '保密协议',
+    outsourcing: '服务外包合同', employment: '劳动合同', other: '其他合同',
   }
-  return map[type] || type
+  return map[type] || type || '未分类'
 }
 
 function statusLabel(status) {
@@ -240,6 +259,8 @@ function statusLabel(status) {
     parsing: '解析中',
     auditing: '审核中',
     completed: '审核完成',
+    reviewed: '待验收',
+    approved: '已验收',
     failed: '审核失败',
   }
   return map[status] || status
@@ -251,6 +272,8 @@ function statusTag(status) {
     parsing: 'warning',
     auditing: 'warning',
     completed: 'success',
+    reviewed: 'primary',
+    approved: 'success',
     failed: 'danger',
   }
   return map[status] || 'info'
@@ -259,6 +282,13 @@ function statusTag(status) {
 
 onMounted(() => {
   fetchList()
+})
+
+onUnmounted(() => {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
 })
 </script>
 

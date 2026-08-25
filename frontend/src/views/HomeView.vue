@@ -1,6 +1,6 @@
 <template>
   <div class="page-container">
-    <!-- 顶部：欢迎语 + 退出按钮 -->
+    <!-- 顶部：欢迎语 -->
     <div class="page-header">
       <div>
         <h2>欢迎回来，{{ username }}</h2>
@@ -8,52 +8,33 @@
       </div>
     </div>
 
-    <!-- 后端连通性 -->
-    <el-card shadow="hover" class="section-card">
-      <div class="backend-row">
-        <span class="backend-label">后端状态：</span>
-        <el-tag v-if="backendStatus === '未检测'" type="info">未检测</el-tag>
-        <el-tag v-else-if="backendStatus.startsWith('✅')" type="success">已连通</el-tag>
-        <el-tag v-else type="danger">未连通</el-tag>
-        <el-button size="small" @click="checkBackend">测试连通性</el-button>
-      </div>
-    </el-card>
-
     <!-- 四个统计卡片 -->
     <el-row :gutter="20" class="stat-row">
       <el-col :span="6">
         <el-card shadow="hover">
-          <el-statistic title="今日审核" :value="12">
-            <template #suffix>
-              <span class="stat-suffix suffix-green">份</span>
-            </template>
+          <el-statistic title="今日审核" :value="stats.today_audit">
+            <template #suffix><span class="stat-suffix suffix-green">份</span></template>
           </el-statistic>
         </el-card>
       </el-col>
       <el-col :span="6">
         <el-card shadow="hover">
-          <el-statistic title="待处理" :value="5">
-            <template #suffix>
-              <span class="stat-suffix suffix-orange">份</span>
-            </template>
+          <el-statistic title="待处理" :value="stats.pending">
+            <template #suffix><span class="stat-suffix suffix-orange">份</span></template>
           </el-statistic>
         </el-card>
       </el-col>
       <el-col :span="6">
         <el-card shadow="hover">
-          <el-statistic title="本月风险" :value="38">
-            <template #suffix>
-              <span class="stat-suffix suffix-red">条</span>
-            </template>
+          <el-statistic title="本月风险" :value="stats.month_risks">
+            <template #suffix><span class="stat-suffix suffix-red">条</span></template>
           </el-statistic>
         </el-card>
       </el-col>
       <el-col :span="6">
         <el-card shadow="hover">
-          <el-statistic title="通过率" :value="92.3">
-            <template #suffix>
-              <span class="stat-suffix suffix-blue">%</span>
-            </template>
+          <el-statistic title="通过率" :value="stats.approval_rate">
+            <template #suffix><span class="stat-suffix suffix-blue">%</span></template>
           </el-statistic>
         </el-card>
       </el-col>
@@ -61,100 +42,122 @@
 
     <!-- 最近合同列表 -->
     <el-card shadow="hover" class="section-card">
-      <template #header>
-        <span>最近合同</span>
-      </template>
-      <el-table :data="recentContracts" stripe>
-        <el-table-column prop="filename" label="文件名" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="type" label="类型" width="120" />
-        <el-table-column prop="status" label="状态" width="100">
+      <template #header><span>最近合同</span></template>
+      <el-table :data="recentContracts" stripe v-loading="loading">
+        <template #empty><el-empty description="暂无合同" /></template>
+        <el-table-column prop="file_name" label="文件名" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-tag :type="statusTag(row.status)" size="small">{{ row.status }}</el-tag>
+            <el-link type="primary" @click="$router.push(`/contracts/${row.id}`)">{{ row.file_name }}</el-link>
           </template>
         </el-table-column>
-        <el-table-column prop="riskLevel" label="风险等级" width="100">
+        <el-table-column prop="contract_type" label="类型" width="130" />
+        <el-table-column label="状态" width="110">
           <template #default="{ row }">
-            <el-tag :type="riskTag(row.riskLevel)" size="small">{{ row.riskLevel }}</el-tag>
+            <el-tag :type="statusTag(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="uploadTime" label="上传时间" width="160" />
+        <el-table-column label="风险等级" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.risk_level" :type="riskTag(row.risk_level)" size="small">{{ riskLabel(row.risk_level) }}</el-tag>
+            <span v-else style="color: #909399;">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="上传时间" width="160">
+          <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+        </el-table-column>
       </el-table>
     </el-card>
 
     <!-- 近 7 天审核量柱状图 -->
     <el-card shadow="hover">
-      <template #header>
-        <span>近 7 天审核量</span>
-      </template>
+      <template #header><span>近 7 天审核量</span></template>
       <div ref="barChartRef" class="chart-container"></div>
     </el-card>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import request from '../utils/request.js'
+import { formatTime } from '../utils/format.js'
 import * as echarts from 'echarts'
 
 const router = useRouter()
-const username = ref('用户')
-const backendStatus = ref('未检测')
+const username = ref(localStorage.getItem('username') || '用户')
+const loading = ref(false)
 const barChartRef = ref(null)
 
-async function checkBackend() {
-  try {
-    const res = await request.get('/health')
-    backendStatus.value = '✅ 后端连通！' + JSON.stringify(res)
-  } catch (e) {
-    backendStatus.value = '❌ 后端未启动，请确认 uvicorn 在运行'
-  }
+// ── 仪表盘数据（来自后端 /stats/dashboard）──
+const stats = reactive({
+  today_audit: 0,
+  pending: 0,
+  month_risks: 0,
+  approval_rate: 0,
+  last7days: [],
+})
+const recentContracts = ref([])
+
+// ── 状态 / 风险等级映射 ──
+function statusLabel(s) {
+  const map = { uploaded: '已上传', parsed: '已解析', auditing: '审核中', completed: '审核完成', reviewed: '待验收', approved: '已验收' }
+  return map[s] || s || '未知'
 }
-
-// ── 最近合同（写死数据） ──
-const recentContracts = [
-  { filename: '2026年度采购框架协议.pdf', type: '采购合同', status: '审核完成', riskLevel: '高风险', uploadTime: '2026-07-17 14:30' },
-  { filename: '员工保密协议-李四.docx', type: '保密协议', status: '审核完成', riskLevel: '中风险', uploadTime: '2026-07-17 11:20' },
-  { filename: '软件开发外包合同-v2.pdf', type: '服务合同', status: '审核中', riskLevel: '—', uploadTime: '2026-07-17 09:15' },
-  { filename: '办公室租赁合同.pdf', type: '租赁合同', status: '待审核', riskLevel: '—', uploadTime: '2026-07-16 16:45' },
-  { filename: '战略合作协议-XX科技.docx', type: '合作协议', status: '审核完成', riskLevel: '低风险', uploadTime: '2026-07-16 10:00' },
-]
-
-function statusTag(status) {
-  if (status === '审核完成') return 'success'
-  if (status === '审核中') return 'warning'
-  return 'info'
+function statusTag(s) {
+  const map = { completed: 'success', approved: 'success', reviewed: 'primary', auditing: 'warning', parsed: 'info', uploaded: 'info' }
+  return map[s] || 'info'
 }
-
+function riskLabel(level) {
+  const map = { high: '高风险', medium: '中风险', low: '低风险' }
+  return map[level] || level
+}
 function riskTag(level) {
-  if (level === '高风险') return 'danger'
-  if (level === '中风险') return 'warning'
-  if (level === '低风险') return 'success'
+  if (level === 'high') return 'danger'
+  if (level === 'medium') return 'warning'
+  if (level === 'low') return 'success'
   return 'info'
+}
+
+async function fetchDashboard() {
+  loading.value = true
+  try {
+    const res = await request.get('/stats/dashboard')
+    const d = res.data || {}
+    stats.today_audit = d.today_audit ?? 0
+    stats.pending = d.pending ?? 0
+    stats.month_risks = d.month_risks ?? 0
+    stats.approval_rate = d.approval_rate ?? 0
+    recentContracts.value = d.recent_contracts || []
+    stats.last7days = d.last7days || []
+    await nextTick()
+    renderChart()
+  } catch {
+    // 后端未启动时保持 0 值，不打断页面
+  } finally {
+    loading.value = false
+  }
 }
 
 // ── ECharts 柱状图 ──
 let chartInstance = null
 
-function initBarChart() {
-  chartInstance = echarts.init(barChartRef.value)
+function renderChart() {
+  if (!barChartRef.value) return
+  if (!chartInstance) chartInstance = echarts.init(barChartRef.value)
+  const days = stats.last7days || []
   chartInstance.setOption({
     tooltip: { trigger: 'axis' },
     grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-    xAxis: {
-      type: 'category',
-      data: ['07/11', '07/12', '07/13', '07/14', '07/15', '07/16', '07/17'],
-    },
+    xAxis: { type: 'category', data: days.map(d => d.date) },
     yAxis: { type: 'value', name: '审核数', minInterval: 1 },
     series: [{
       name: '审核量',
       type: 'bar',
-      data: [3, 5, 2, 8, 4, 6, 7],
+      data: days.map(d => d.count),
       itemStyle: { color: '#409EFF' },
       barWidth: '50%',
     }],
   })
-  window.addEventListener('resize', handleResize)
 }
 
 function handleResize() {
@@ -163,7 +166,8 @@ function handleResize() {
 
 onMounted(() => {
   username.value = localStorage.getItem('username') || '用户'
-  initBarChart()
+  window.addEventListener('resize', handleResize)
+  fetchDashboard()
 })
 
 onUnmounted(() => {
@@ -187,9 +191,7 @@ onUnmounted(() => {
   margin-bottom: 16px;
 }
 
-.page-header h2 {
-  margin: 0;
-}
+.page-header h2 { margin: 0; }
 
 .page-subtitle {
   margin: 4px 0 0 0;
@@ -197,46 +199,15 @@ onUnmounted(() => {
   font-size: 14px;
 }
 
-.section-card {
-  margin-bottom: 20px;
-}
+.section-card { margin-bottom: 20px; }
 
-.backend-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
+.stat-row { margin-bottom: 20px; }
 
-.backend-label {
-  color: #606266;
-}
+.stat-suffix { font-size: 14px; }
+.suffix-green { color: #67C23A; }
+.suffix-orange { color: #E6A23C; }
+.suffix-red { color: #F56C6C; }
+.suffix-blue { color: #409EFF; }
 
-.stat-row {
-  margin-bottom: 20px;
-}
-
-.stat-suffix {
-  font-size: 14px;
-}
-
-.suffix-green {
-  color: #67C23A;
-}
-
-.suffix-orange {
-  color: #E6A23C;
-}
-
-.suffix-red {
-  color: #F56C6C;
-}
-
-.suffix-blue {
-  color: #409EFF;
-}
-
-.chart-container {
-  width: 100%;
-  height: 300px;
-}
+.chart-container { width: 100%; height: 300px; }
 </style>

@@ -44,12 +44,12 @@
         <el-form-item label="合同类型" prop="contract_type">
           <el-select v-model="form.contract_type" placeholder="请选择合同类型" style="width: 100%;">
             <el-option label="自动识别（推荐）" value="" />
-            <el-option label="采购合同" value="purchase" />
-            <el-option label="销售合同" value="sales" />
-            <el-option label="保密协议" value="nda" />
-            <el-option label="服务外包" value="outsourcing" />
-            <el-option label="劳动合同" value="employment" />
-            <el-option label="其他合同" value="other" />
+            <el-option label="采购合同" value="采购合同" />
+            <el-option label="销售合同" value="销售合同" />
+            <el-option label="保密协议" value="保密协议" />
+            <el-option label="服务外包合同" value="服务外包合同" />
+            <el-option label="劳动合同" value="劳动合同" />
+            <el-option label="其他合同" value="其他合同" />
           </el-select>
           <div class="form-hint">选择"自动识别"将由 AI 自动判定合同类型</div>
         </el-form-item>
