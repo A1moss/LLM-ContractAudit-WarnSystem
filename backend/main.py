@@ -2,9 +2,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import Base, engine
+from config import CORS_ORIGINS
 from api.auth import router as auth_router
 from api.contracts import router as contracts_router
 from api.feedback import router as feedback_router
+from api.templates import router as templates_router
+from api.stats import router as stats_router
 
 
 def _ensure_columns():
@@ -28,6 +31,12 @@ def _ensure_columns():
                 db.commit()
         except Exception:
             pass  # 表可能尚不存在
+        # 旧数据角色 backfill：历史 "user" 统一归为 "uploader"
+        try:
+            db.execute("UPDATE users SET role='uploader' WHERE role='user'")
+            db.commit()
+        except Exception:
+            pass
         db.close()
     except Exception:
         pass  # non-fatal: table may not exist yet
@@ -44,7 +53,7 @@ app = FastAPI(title="A24 合同审核系统", version="0.1.0", lifespan=lifespan
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
@@ -62,3 +71,5 @@ def health():
 app.include_router(auth_router, prefix="/api")
 app.include_router(contracts_router, prefix="/api")
 app.include_router(feedback_router, prefix="/api")
+app.include_router(templates_router, prefix="/api")
+app.include_router(stats_router, prefix="/api")

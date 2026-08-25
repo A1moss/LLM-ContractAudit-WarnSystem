@@ -136,3 +136,27 @@ def list_feedback(
             "total": len(records),
         },
     }
+
+
+@router.delete("/{feedback_id}")
+def delete_feedback(
+    feedback_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """撤销一条反馈标注：删除反馈记录，并把对应风险的状态恢复为 pending。"""
+    fb = db.query(FeedbackLog).filter(
+        FeedbackLog.id == feedback_id,
+        FeedbackLog.user_id == current_user.id,
+    ).first()
+    if not fb:
+        raise HTTPException(status_code=404, detail="feedback not found")
+
+    # 恢复该风险记录的反馈状态
+    record = db.query(AuditRecord).filter(AuditRecord.id == fb.record_id).first()
+    if record:
+        record.feedback_status = "pending"
+
+    db.delete(fb)
+    db.commit()
+    return {"code": 0, "message": "ok", "data": None}

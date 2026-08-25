@@ -14,6 +14,8 @@ class RegisterRequest(BaseModel):
     username: str = Field(..., min_length=2, max_length=50)
     email: EmailStr
     password: str = Field(..., min_length=6, max_length=128)
+    # 多用户角色：uploader(上传者)/reviewer(审核人)/approver(验收人)/admin(管理员)
+    role: str = Field(default="uploader", pattern=r"^(uploader|reviewer|approver|admin)$")
 
 
 class LoginRequest(BaseModel):
@@ -25,6 +27,7 @@ class UserOut(BaseModel):
     id: int
     username: str
     email: str
+    role: str
 
     model_config = {'from_attributes': True}
 
@@ -51,12 +54,13 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)):
         username=body.username,
         email=body.email,
         hashed_password=hash_password(body.password),
+        role=body.role,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
 
-    token = create_access_token({'sub': str(user.id), 'username': user.username})
+    token = create_access_token({'sub': str(user.id), 'username': user.username, 'role': user.role})
     return AuthResponse(
         data={
             'token': token,
@@ -76,7 +80,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
             detail='incorrect username/email or password',
         )
 
-    token = create_access_token({'sub': str(user.id), 'username': user.username})
+    token = create_access_token({'sub': str(user.id), 'username': user.username, 'role': user.role})
     return AuthResponse(
         data={
             'token': token,

@@ -6,12 +6,13 @@ import mimetypes
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, status
 from fastapi.responses import FileResponse
+from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 
 from database import get_db
 from models.contract import Contract
 from models.user import User
-from api.deps import get_current_user
+from api.deps import get_current_user, require_role
 from ai.parser import detect_and_parse
 from ai.classifier import classify_contract
 from ai.extractor import extract_elements
@@ -147,7 +148,32 @@ def list_contracts(
         .all()
     )
 
+    # 一次查询汇总本页每个合同的风险数/高中低风险数，避免前端 N+1 逐条调用
+    risk_summary: dict = {}
+    ids = [c.id for c in items]
+    if ids:
+        rows = (
+            db.query(
+                AuditRecord.contract_id,
+                func.count(AuditRecord.id),
+                func.sum(case((AuditRecord.risk_level == "high", 1), else_=0)),
+                func.sum(case((AuditRecord.risk_level == "medium", 1), else_=0)),
+                func.sum(case((AuditRecord.risk_level == "low", 1), else_=0)),
+            )
+            .filter(AuditRecord.contract_id.in_(ids))
+            .group_by(AuditRecord.contract_id)
+            .all()
+        )
+        for cid, risk_cnt, high_cnt, mid_cnt, low_cnt in rows:
+            risk_summary[cid] = {
+                "risk_count": risk_cnt or 0,
+                "high_risk_count": high_cnt or 0,
+                "mid_risk_count": mid_cnt or 0,
+                "low_risk_count": low_cnt or 0,
+            }
+
     def item_dict(c):
+        summary = risk_summary.get(c.id, {"risk_count": 0, "high_risk_count": 0, "mid_risk_count": 0, "low_risk_count": 0})
         return {
             "id": c.id,
             "file_name": c.file_name,
@@ -155,6 +181,10 @@ def list_contracts(
             "type_confidence": c.type_confidence,
             "status": c.status,
             "audit_mode": c.audit_mode,
+            "risk_count": summary["risk_count"],
+            "high_risk_count": summary["high_risk_count"],
+            "mid_risk_count": summary["mid_risk_count"],
+            "low_risk_count": summary["low_risk_count"],
             "created_at": _iso(c.created_at),
             "updated_at": _iso(c.updated_at),
         }
@@ -396,6 +426,46 @@ def trigger_audit(
         db.commit()
         logger.exception("Audit failed, contract reset to parsed: %s", e)
         raise HTTPException(status_code=500, detail=f"audit failed: {e}")
+
+
+@router.post("/{contract_id}/review")
+def review_contract(
+    contract_id: int,
+    action: str = Query("approve", pattern="^(approve|reject)$"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("reviewer")),
+):
+    """审核人复核：approve(通过→待验收 reviewed) / reject(驳回→退回 parsed)"""
+    c = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="contract not found")
+    if c.status != "completed":
+        raise HTTPException(status_code=400, detail=f"当前状态 {c.status} 不可复核，需先完成审核")
+    if action == "approve":
+        c.status = "reviewed"
+        msg = "复核通过，待验收"
+    else:
+        c.status = "parsed"
+        msg = "已驳回，需重新审核"
+    db.commit()
+    return {"code": 0, "message": "ok", "data": {"id": contract_id, "status": c.status, "msg": msg}}
+
+
+@router.post("/{contract_id}/approve")
+def approve_contract(
+    contract_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("approver")),
+):
+    """验收人验收：reviewed(待验收) → approved(已验收)"""
+    c = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="contract not found")
+    if c.status != "reviewed":
+        raise HTTPException(status_code=400, detail=f"当前状态 {c.status} 不可验收，需先复核通过")
+    c.status = "approved"
+    db.commit()
+    return {"code": 0, "message": "ok", "data": {"id": contract_id, "status": c.status, "msg": "验收通过"}}
 @router.get("/{contract_id}/audit-result")
 def get_audit_result(
     contract_id: int,
