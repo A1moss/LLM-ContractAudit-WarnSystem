@@ -260,7 +260,9 @@
     "depends_on": [
       "SAL-002"
     ],
-    "conflict_with": [],
+    "conflict_with": [
+      "SAL-007"
+    ],
     "related_law": "民法典第604-609条",
     "source": "市场监管总局合同示范文本"
   },
@@ -305,7 +307,9 @@
     "depends_on": [
       "SAL-003"
     ],
-    "conflict_with": [],
+    "conflict_with": [
+      "SAL-004"
+    ],
     "related_law": "民法典第641-643条",
     "source": "民法典"
   },
@@ -787,5 +791,265 @@
     "conflict_with": [],
     "related_law": "劳动合同法第46-48条、第87条",
     "source": "人社部通用劳动合同范本"
+  },
+  {
+    "id": "SAL-009",
+    "type": "销售合同",
+    "level": 2,
+    "title": "包装与运输",
+    "content": "明确标的物的包装方式、运输方式、运输费用承担、交付地点及运输过程中的风险承担。",
+    "priority": "required",
+    "depends_on": [],
+    "conflict_with": [],
+    "related_law": "民法典第620条",
+    "source": "合同范本库"
+  },
+  {
+    "id": "SAL-010",
+    "type": "销售合同",
+    "level": 2,
+    "title": "售后服务",
+    "content": "明确产品的质保期、售后服务范围、响应时间、维修或更换方式及超期服务费用。",
+    "priority": "recommended",
+    "depends_on": [],
+    "conflict_with": [],
+    "related_law": "",
+    "source": "合同范本库"
+  },
+  {
+    "id": "SAL-011",
+    "type": "销售合同",
+    "level": 2,
+    "title": "验收条款",
+    "content": "明确验收的标准、方式、期限、异议提出方式及验收不合格的处理。",
+    "priority": "required",
+    "depends_on": [
+      "SAL-002"
+    ],
+    "conflict_with": [],
+    "related_law": "民法典第621条",
+    "source": "合同范本库"
+  },
+  {
+    "id": "SAL-012",
+    "type": "销售合同",
+    "level": 2,
+    "title": "发票与税务",
+    "content": "明确发票开具的时间、类型、税率及税费承担方式。",
+    "priority": "required",
+    "depends_on": [
+      "SAL-003"
+    ],
+    "conflict_with": [],
+    "related_law": "",
+    "source": "合同范本库"
+  },
+  {
+    "id": "SAL-013",
+    "type": "销售合同",
+    "level": 4,
+    "title": "不可抗力",
+    "content": "明确不可抗力的范围、通知义务、举证责任及免责或变更处理。",
+    "priority": "recommended",
+    "depends_on": [],
+    "conflict_with": [],
+    "related_law": "民法典第590条",
+    "source": "合同范本库"
+  },
+  {
+    "id": "SAL-014",
+    "type": "销售合同",
+    "level": 4,
+    "title": "保密条款",
+    "content": "明确双方对交易信息、技术资料等保密信息的范围、保密义务及保密期限。",
+    "priority": "recommended",
+    "depends_on": [],
+    "conflict_with": [],
+    "related_law": "民法典第501条",
+    "source": "合同范本库"
+  },
+  {
+    "id": "EMP-014",
+    "type": "劳动合同",
+    "level": 1,
+    "title": "劳动保护与劳动条件",
+    "content": "明确用人单位提供的劳动安全卫生条件、劳动保护措施及劳动防护用品。",
+    "priority": "required",
+    "depends_on": [],
+    "conflict_with": [],
+    "related_law": "劳动合同法第17条",
+    "source": "合同范本库"
+  },
+  {
+    "id": "EMP-015",
+    "type": "劳动合同",
+    "level": 2,
+    "title": "职业危害防护",
+    "content": "对存在职业危害的岗位，明确职业病危害告知、防护措施及健康检查安排。",
+    "priority": "required",
+    "depends_on": [],
+    "conflict_with": [],
+    "related_law": "劳动合同法第17条",
+    "source": "合同范本库"
+  },
+  {
+    "id": "EMP-016",
+    "type": "劳动合同",
+    "level": 3,
+    "title": "工作交接",
+    "content": "明确劳动合同解除或终止时的工作交接内容、方式及经济补偿支付时点。",
+    "priority": "required",
+    "depends_on": [
+      "EMP-012"
+    ],
+    "conflict_with": [],
+    "related_law": "劳动合同法第50条",
+    "source": "合同范本库"
+  },
+  {
+    "id": "EMP-017",
+    "type": "劳动合同",
+    "level": 3,
+    "title": "劳动合同变更",
+    "content": "明确劳动合同内容变更应协商一致并采用书面形式。",
+    "priority": "required",
+    "depends_on": [
+      "EMP-002"
+    ],
+    "conflict_with": [],
+    "related_law": "劳动合同法第35条",
+    "source": "合同范本库"
+  },
+  {
+    "id": "NDA-009",
+    "type": "保密协议",
+    "level": 1,
+    "title": "保密信息使用限制",
+    "content": "明确接收方仅可在约定目的范围内使用保密信息，不得超范围使用或向第三方披露。",
+    "priority": "required",
+    "depends_on": [
+      "NDA-001"
+    ],
+    "conflict_with": [],
+    "related_law": "民法典第501条",
+    "source": "合同范本库"
+  },
+  {
+    "id": "NDA-010",
+    "type": "保密协议",
+    "level": 2,
+    "title": "保密信息分级",
+    "content": "对保密信息进行密级划分（如绝密/机密/秘密），并明确各级别的接触权限和保护要求。",
+    "priority": "recommended",
+    "depends_on": [
+      "NDA-001"
+    ],
+    "conflict_with": [],
+    "related_law": "",
+    "source": "合同范本库"
+  },
+  {
+    "id": "NDA-011",
+    "type": "保密协议",
+    "level": 4,
+    "title": "通知与送达",
+    "content": "明确双方的联系方式、通知送达方式及视为送达的条件。",
+    "priority": "recommended",
+    "depends_on": [],
+    "conflict_with": [],
+    "related_law": "",
+    "source": "合同范本库"
+  },
+  {
+    "id": "OS-013",
+    "type": "服务外包合同",
+    "level": 2,
+    "title": "服务报告与沟通",
+    "content": "明确服务方定期提交服务报告的内容、频率及双方的沟通机制、对接人。",
+    "priority": "recommended",
+    "depends_on": [
+      "OS-002"
+    ],
+    "conflict_with": [],
+    "related_law": "",
+    "source": "合同范本库"
+  },
+  {
+    "id": "OS-014",
+    "type": "服务外包合同",
+    "level": 2,
+    "title": "变更管理",
+    "content": "明确服务范围、需求发生变更时的提出、评估、定价及批准流程。",
+    "priority": "recommended",
+    "depends_on": [
+      "OS-002"
+    ],
+    "conflict_with": [],
+    "related_law": "民法典第543条",
+    "source": "合同范本库"
+  },
+  {
+    "id": "OS-015",
+    "type": "服务外包合同",
+    "level": 3,
+    "title": "争议解决",
+    "content": "明确争议解决方式（协商、调解、仲裁或诉讼）及管辖约定。",
+    "priority": "required",
+    "depends_on": [],
+    "conflict_with": [],
+    "related_law": "民事诉讼法第35条",
+    "source": "合同范本库"
+  },
+  {
+    "id": "OS-016",
+    "type": "服务外包合同",
+    "level": 0,
+    "title": "合同生效与签署",
+    "content": "明确合同生效条件、签署方式、份数及各份的效力。",
+    "priority": "required",
+    "depends_on": [],
+    "conflict_with": [],
+    "related_law": "民法典第502条",
+    "source": "合同范本库"
+  },
+  {
+    "id": "PUR-016",
+    "type": "采购合同",
+    "level": 2,
+    "title": "包装与运输",
+    "content": "明确标的物的包装标准、运输方式、运输费用承担及风险转移节点。",
+    "priority": "required",
+    "depends_on": [
+      "PUR-005"
+    ],
+    "conflict_with": [],
+    "related_law": "民法典第620条",
+    "source": "合同范本库"
+  },
+  {
+    "id": "PUR-017",
+    "type": "采购合同",
+    "level": 2,
+    "title": "发票条款",
+    "content": "明确供应商开具发票的类型、时间、税率及与付款的先后关系。",
+    "priority": "required",
+    "depends_on": [
+      "PUR-004"
+    ],
+    "conflict_with": [],
+    "related_law": "",
+    "source": "合同范本库"
+  },
+  {
+    "id": "PUR-018",
+    "type": "采购合同",
+    "level": 4,
+    "title": "通知与送达",
+    "content": "明确双方的联系方式、通知送达方式及视为送达的条件。",
+    "priority": "recommended",
+    "depends_on": [],
+    "conflict_with": [],
+    "related_law": "",
+    "source": "合同范本库"
   }
 ]

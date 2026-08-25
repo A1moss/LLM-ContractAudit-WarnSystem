@@ -89,6 +89,16 @@
                 <template v-else>
                   <el-alert :title="`条款覆盖率 ${Math.round(clauseComparison.summary.coverage_rate * 100)}%，缺失 ${clauseComparison.summary.missing} 条关键条款`" :type="clauseComparison.summary.missing > 0 ? 'warning' : 'success'" show-icon :closable="false" class="audit-alert" />
                   <el-tag v-for="c in clauseComparison.missing_critical" :key="c" type="danger" size="small" style="margin:4px">缺失: {{ c }}</el-tag>
+
+                  <!-- 跨条款关联风险（图分析） -->
+                  <div v-if="clauseComparison.cross_clause_risks && clauseComparison.cross_clause_risks.length" class="cross-clause-box">
+                    <el-alert title="跨条款关联风险" type="error" show-icon :closable="false" />
+                    <div v-for="(r, i) in clauseComparison.cross_clause_risks" :key="i" class="cross-risk-item">
+                      <el-tag size="small" :type="r.type === '前置依赖缺失' ? 'danger' : 'warning'">{{ r.type }}</el-tag>
+                      <span class="cross-risk-text">{{ r.risk }}</span>
+                    </div>
+                  </div>
+
                   <el-table :data="clauseComparison.clauses" stripe size="small" max-height="400" style="margin-top:12px">
                     <el-table-column prop="title" label="条款名称" width="140" />
                     <el-table-column label="状态" width="100">
@@ -591,6 +601,21 @@ onMounted(() => {
 }
 
 .audit-alert { margin-bottom: 16px; }
+
+.cross-clause-box {
+  margin: 12px 0;
+  padding: 10px 12px;
+  background: #fef0f0;
+  border: 1px solid #fbc4c4;
+  border-radius: 6px;
+}
+.cross-risk-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+}
+.cross-risk-text { font-size: 13px; color: #303133; line-height: 1.6; }
 .audit-placeholder { padding: 60px 0; }
 .audit-full-link { margin-top: 12px; }
 .report-desc { margin-bottom: 16px; }
