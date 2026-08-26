@@ -44,6 +44,16 @@ def _iso(ts) -> str | None:
     return ts.isoformat() + "Z"
 
 
+WORKFLOW_ROLES = {"reviewer", "approver", "admin"}
+
+
+def _can_view_contract(user: User, c: Contract) -> bool:
+    """上传者只能看自己的合同；审核人/验收人/管理员可查看工作流中的全部合同。"""
+    if user.role in WORKFLOW_ROLES:
+        return True
+    return c.user_id == user.id
+
+
 def _build_evidence(r: dict, rag_ctx: list | None) -> dict | None:
     """按检测来源构建可溯源证据链。
 
@@ -167,7 +177,11 @@ def list_contracts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = db.query(Contract).filter(Contract.user_id == current_user.id)
+    query = db.query(Contract)
+    if current_user.role in WORKFLOW_ROLES:
+        query = query.filter(Contract.status != "deleted")
+    else:
+        query = query.filter(Contract.user_id == current_user.id)
     if keyword:
         query = query.filter(Contract.file_name.contains(keyword))
     if contract_type:
@@ -261,12 +275,8 @@ def get_contract_file(
     current_user: User = Depends(get_current_user),
 ):
     """Serve the original contract file. .docx files are converted to PDF on-the-fly."""
-    c = (
-        db.query(Contract)
-        .filter(Contract.id == contract_id, Contract.user_id == current_user.id)
-        .first()
-    )
-    if not c:
+    c = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not c or not _can_view_contract(current_user, c):
         raise HTTPException(status_code=404, detail="contract not found")
     if not c.stored_path or not os.path.isfile(c.stored_path):
         raise HTTPException(status_code=404, detail="file not found on disk")
@@ -545,8 +555,8 @@ def get_audit_result(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    c = db.query(Contract).filter(Contract.id == contract_id, Contract.user_id == current_user.id).first()
-    if not c:
+    c = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not c or not _can_view_contract(current_user, c):
         raise HTTPException(status_code=404, detail="contract not found")
 
     records = (
@@ -589,8 +599,8 @@ def get_audit_report(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    c = db.query(Contract).filter(Contract.id == contract_id, Contract.user_id == current_user.id).first()
-    if not c:
+    c = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not c or not _can_view_contract(current_user, c):
         raise HTTPException(status_code=404, detail="contract not found")
 
     report = (
@@ -627,8 +637,8 @@ def compare_contract_clauses(
     current_user: User = Depends(get_current_user),
 ):
     """Compare contract against standard clause templates"""
-    c = db.query(Contract).filter(Contract.id == contract_id, Contract.user_id == current_user.id).first()
-    if not c:
+    c = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not c or not _can_view_contract(current_user, c):
         raise HTTPException(status_code=404, detail="contract not found")
     if not c.parsed_text:
         raise HTTPException(status_code=400, detail="contract has no parsed text")
@@ -644,6 +654,10 @@ def get_clause_comparison(
     current_user: User = Depends(get_current_user),
 ):
     """读取条款比对结果；无缓存时当场生成。"""
+    c = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not c or not _can_view_contract(current_user, c) or not c.parsed_text:
+        return {"code": 0, "message": "ok", "data": None}
+
     report = db.query(AuditReport).filter(AuditReport.contract_id == contract_id).order_by(AuditReport.created_at.desc()).first()
     if report and report.missing_clauses:
         data = report.missing_clauses
@@ -651,10 +665,6 @@ def get_clause_comparison(
             data = json.loads(data)
         if isinstance(data, dict) and data.get("clauses"):
             return {"code": 0, "message": "ok", "data": data}
-
-    c = db.query(Contract).filter(Contract.id == contract_id, Contract.user_id == current_user.id).first()
-    if not c or not c.parsed_text:
-        return {"code": 0, "message": "ok", "data": None}
 
     try:
         from ai.matcher import compare_clauses
@@ -675,8 +685,8 @@ def trigger_clause_comparison(
     current_user: User = Depends(get_current_user),
 ):
     """独立触发条款比对：审核完成后前端单独请求，不阻塞审核流程。"""
-    c = db.query(Contract).filter(Contract.id == contract_id, Contract.user_id == current_user.id).first()
-    if not c:
+    c = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not c or not _can_view_contract(current_user, c):
         raise HTTPException(status_code=404, detail="contract not found")
     if not c.parsed_text:
         raise HTTPException(status_code=400, detail="no parsed text")
@@ -721,8 +731,8 @@ def get_contract(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    c = db.query(Contract).filter(Contract.id == contract_id, Contract.user_id == current_user.id).first()
-    if not c:
+    c = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not c or not _can_view_contract(current_user, c):
         raise HTTPException(status_code=404, detail="contract not found")
     return {
         "code": 0, "message": "ok",

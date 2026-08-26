@@ -119,6 +119,7 @@
               审核结果
             </el-button>
             <el-popconfirm
+              v-if="canDelete"
               title="确定要删除这份合同吗？"
               confirm-button-text="确认删除"
               cancel-button-text="取消"
@@ -157,6 +158,9 @@ import { getContractList, deleteContract } from '../api/contract.js'
 import { formatTime } from '../utils/format.js'
 
 const router = useRouter()
+
+const role = localStorage.getItem('role') || ''
+const canDelete = role === 'uploader' || role === 'admin'
 
 const loading = ref(false)
 const contractList = ref([])
