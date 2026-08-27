@@ -15,9 +15,13 @@ import os
 import json
 import logging
 
+from ai.chunker import split_chunks
 from ai.llm_client import llm_client
 
 logger = logging.getLogger(__name__)
+
+# 单块待比对合同文本上限（字符）。超长合同分块逐块比对，尾部条款不再漏检。
+MAX_COMPARE_CHARS = 6000
 
 # 标准条款库路径：ai/matcher/matcher.py → ai/ → ai/knowledge/standard_clauses.json
 _KNOWLEDGE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "knowledge")
@@ -120,8 +124,42 @@ def _cross_clause_risks(clause_results: list[dict], standard_clauses: list[dict]
     return risks
 
 
+def _merge_clause_results(clause_list: list[dict]) -> list[dict]:
+    """合并多块比对结果：同一标准条款取覆盖状态最优的一条（covered > partial > missing）。"""
+    status_rank = {"covered": 3, "partial": 2, "missing": 1}
+    best = {}
+    order = []
+    for cl in clause_list:
+        if not isinstance(cl, dict):
+            continue
+        title = cl.get("title", "")
+        if not title:
+            continue
+        if title not in best:
+            best[title] = cl
+            order.append(title)
+        else:
+            if status_rank.get(cl.get("status"), 0) > status_rank.get(best[title].get("status"), 0):
+                best[title] = cl
+    return [best[t] for t in order]
+
+
+def _compare_chunk(chunk_text: str, contract_type: str, standards: str) -> list[dict]:
+    """对单个文本块做标准条款比对，返回 clauses 列表。"""
+    try:
+        resp = llm_client.chat(
+            prompt=f"{SYSTEM_PROMPT_COMPARE}\n合同类型:{contract_type}\n标准条款:{standards}\n待比对合同:{chunk_text}\n请逐条比对输出JSON。",
+            temperature=0.1)
+        data = _extract_json(resp)
+        if data and data.get("clauses"):
+            return data["clauses"]
+    except Exception as e:
+        logger.error(f"compare_clauses 分块比对失败: {e}")
+    return []
+
+
 def compare_clauses(full_text: str, contract_type: str) -> dict:
-    """将合同全文与对应类型的标准条款模板进行逐条比对。"""
+    """将合同全文与对应类型的标准条款模板进行逐条比对（长合同分块）。"""
     all_clauses = _load_standard_clauses()
 
     # 按合同类型结构过滤（PAKTON 结构检索：类型精确匹配，而非语义模糊检索）
@@ -139,27 +177,28 @@ def compare_clauses(full_text: str, contract_type: str) -> dict:
         f"{i+1}. [{c.get('title','')} | 优先级:{c.get('priority','')}] {c.get('content','')[:300]}"
         for i, c in enumerate(docs)
     )
-    truncated = full_text[:6000]
 
-    try:
-        resp = llm_client.chat(
-            prompt=f"{SYSTEM_PROMPT_COMPARE}\n合同类型:{contract_type}\n标准条款:{standards}\n待比对合同:{truncated}\n请逐条比对输出JSON。",
-            temperature=0.1)
-        data = _extract_json(resp)
-        if data and data.get("clauses"):
-            clauses = data["clauses"]
-            cov = sum(1 for c in clauses if c.get("status") == "covered")
-            par = sum(1 for c in clauses if c.get("status") == "partial")
-            mis = sum(1 for c in clauses if c.get("status") == "missing")
-            mc = [c.get("title", "") for c in clauses if c.get("status") == "missing" and c.get("priority") == "required"]
-            # 跨条款关联风险（图分析：前置依赖缺失 + 互斥冲突）
-            cross_risks = _cross_clause_risks(clauses, docs)
-            return {
-                "clauses": clauses,
-                "summary": {"total": len(clauses), "covered": cov, "partial": par, "missing": mis, "coverage_rate": round(cov / max(len(clauses), 1), 3)},
-                "missing_critical": mc,
-                "cross_clause_risks": cross_risks,
-            }
-    except Exception as e:
-        logger.error(f"compare_clauses failed: {e}")
+    # 分块：长合同逐块比对，尾部条款不再漏检
+    chunks = split_chunks(full_text, MAX_COMPARE_CHARS)
+    if len(chunks) > 1:
+        logger.info("条款比对：合同 %d 字超过单块上限，分为 %d 块", len(full_text), len(chunks))
+
+    merged = []
+    for chunk in chunks:
+        merged.extend(_compare_chunk(chunk, contract_type, standards))
+
+    clauses = _merge_clause_results(merged)
+    if clauses:
+        cov = sum(1 for c in clauses if c.get("status") == "covered")
+        par = sum(1 for c in clauses if c.get("status") == "partial")
+        mis = sum(1 for c in clauses if c.get("status") == "missing")
+        mc = [c.get("title", "") for c in clauses if c.get("status") == "missing" and c.get("priority") == "required"]
+        # 跨条款关联风险（图分析：前置依赖缺失 + 互斥冲突）
+        cross_risks = _cross_clause_risks(clauses, docs)
+        return {
+            "clauses": clauses,
+            "summary": {"total": len(clauses), "covered": cov, "partial": par, "missing": mis, "coverage_rate": round(cov / max(len(clauses), 1), 3)},
+            "missing_critical": mc,
+            "cross_clause_risks": cross_risks,
+        }
     return {"clauses": [], "summary": {"total": 0, "covered": 0, "partial": 0, "missing": 0, "coverage_rate": 0}, "missing_critical": [], "cross_clause_risks": []}

@@ -1,8 +1,12 @@
+from ai.chunker import split_chunks
 from ai.llm_client import llm_client
 import json
 import logging
 
 logger = logging.getLogger(__name__)
+
+# 单块要素抽取文本上限（字符）。超长合同分块抽取后合并，尾部要素不再丢失。
+MAX_EXTRACT_CHARS = 4000
 
 SYSTEM_PROMPT_EXTRACT = """你是一个法律信息抽取专家。请从合同文本中抽取以下关键结构化信息。
 
@@ -59,30 +63,55 @@ def _extract_json(response: str) -> dict:
     return None
 
 
-def extract_elements(full_text: str, contract_type: str) -> dict:
-    truncated = full_text[:4000]
-    prompt = (
-        f"{SYSTEM_PROMPT_EXTRACT}\n\n"
-        f"这是一个{contract_type}。\n\n"
-        f"{FEWSHOT_EXAMPLE}\n\n"
-        f"现在请从以下合同中抽取要素：\n{truncated}"
-    )
+def _merge_elements(results: list[dict]) -> dict:
+    """合并多块抽取结果：字段非 null 优先，parties 内层甲方/乙方逐角色非 null 优先。"""
+    keys = ["parties", "amount", "sign_date", "performance_period", "dispute_resolution", "governing_law"]
+    merged = {k: None for k in keys}
+    for r in results:
+        if not isinstance(r, dict):
+            continue
+        for key in keys:
+            val = r.get(key)
+            if merged[key] is None and val is not None:
+                merged[key] = val
+            elif key == "parties" and isinstance(val, dict) and isinstance(merged[key], dict):
+                for role in ("甲方", "乙方"):
+                    if merged[key].get(role) is None and val.get(role) is not None:
+                        merged[key][role] = val[role]
+    return merged
 
-    try:
-        response = llm_client.chat(prompt=prompt, temperature=0.1)
-        result = _extract_json(response)
-        if result:
-            return {
-                "parties": result.get("parties"),
-                "amount": result.get("amount"),
-                "sign_date": result.get("sign_date"),
-                "performance_period": result.get("performance_period"),
-                "dispute_resolution": result.get("dispute_resolution"),
-                "governing_law": result.get("governing_law"),
-                "fallback": False,
-            }
-    except Exception as e:
-        logger.warning(f"LLM 要素抽取失败: {e}")
+
+def extract_elements(full_text: str, contract_type: str) -> dict:
+    chunks = split_chunks(full_text, MAX_EXTRACT_CHARS)
+    if len(chunks) > 1:
+        logger.info("要素抽取：合同 %d 字超过单块上限，分为 %d 块", len(full_text), len(chunks))
+
+    results = []
+    for chunk in chunks:
+        prompt = (
+            f"{SYSTEM_PROMPT_EXTRACT}\n\n"
+            f"这是一个{contract_type}。\n\n"
+            f"{FEWSHOT_EXAMPLE}\n\n"
+            f"现在请从以下合同中抽取要素：\n{chunk}"
+        )
+        try:
+            response = llm_client.chat(prompt=prompt, temperature=0.1)
+            result = _extract_json(response)
+            if result:
+                results.append({
+                    "parties": result.get("parties"),
+                    "amount": result.get("amount"),
+                    "sign_date": result.get("sign_date"),
+                    "performance_period": result.get("performance_period"),
+                    "dispute_resolution": result.get("dispute_resolution"),
+                    "governing_law": result.get("governing_law"),
+                })
+        except Exception as e:
+            logger.warning(f"LLM 要素抽取失败: {e}")
+
+    if results:
+        merged = _merge_elements(results)
+        return {**merged, "fallback": False}
 
     return {
         "parties": {"甲方": "未知", "乙方": "未知"},

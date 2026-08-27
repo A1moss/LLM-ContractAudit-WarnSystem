@@ -135,6 +135,26 @@ def test_11_corex():
     print(f"  ✅ Corex: {result['completed_agents']}/{result['total_agents']} Agent, {len(result['risks'])} 条终审")
 
 
+@test
+def test_12_chunking():
+    from ai.chunker import split_chunks
+    from ai.auditor.rule_engine import run_rules
+    # 构造超长合同：头部无风险，尾部才有"违约金30%"，验证分块/全文扫描不漏尾部
+    head = "本合同各方本着平等自愿原则达成协议。\n" * 400
+    tail = "\n第20条 违约责任\n若一方违约，应向守约方支付违约金为30%的合同总金额。\n"
+    long_text = head + tail
+    assert len(long_text) > 10000, "测试文本应超过旧截断阈值"
+    # 分块：无丢失、每块不超上限
+    chunks = split_chunks(long_text, 4000)
+    assert len(chunks) > 1
+    assert all(len(c) <= 4000 for c in chunks)
+    assert "".join(c.replace("\n", "") for c in chunks) == long_text.replace("\n", "")
+    # 规则引擎全文扫描：尾部 R01 不被截断漏检
+    types = {r["risk_type"] for r in run_rules(long_text)}
+    assert "R01" in types, "尾部违约金风险应被检出"
+    print(f"  ✅ 分块: {len(long_text)} 字→{len(chunks)} 块，尾部 R01 风险已检出")
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("同学 D — AI 模块完整自测")
@@ -151,6 +171,7 @@ if __name__ == "__main__":
     test_09_ocr_import()
     test_10_knowledge()
     test_11_corex()
+    test_12_chunking()
 
     print("=" * 60)
     print(f"结果: {passed} 通过 / {failed} 失败 / {passed + failed} 总计")

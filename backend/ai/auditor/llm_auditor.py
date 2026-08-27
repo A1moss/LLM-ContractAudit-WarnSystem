@@ -1,3 +1,4 @@
+from ai.chunker import split_chunks
 from ai.llm_client import llm_client
 from ai.confidence import clamp_confidence, LLM_FALLBACK_CONFIDENCE
 import json
@@ -5,8 +6,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# 送入 LLM 的合同文本上限（字符）。超出会截断并告警；
-# 更彻底的分块（chunking）方案见 TODO，避免单次上下文超限。
+# 送入 LLM 的单块文本上限（字符）。超长合同会按条款边界分块逐块审核，
+# 尾部内容不再被截断丢弃。
 MAX_AUDIT_CHARS = 12000
 
 SYSTEM_PROMPT_AUDIT = """你是一位资深合同审核律师。请对以下合同条款逐条审核，识别以下 12 类风险。
@@ -74,11 +75,51 @@ def _extract_json(response: str) -> list:
     return None
 
 
-def audit_with_llm(full_text: str, rag_context: list = None) -> list[dict]:
-    truncated = full_text[:MAX_AUDIT_CHARS]
-    if len(full_text) > MAX_AUDIT_CHARS:
-        logger.warning("合同文本 %d 字超过上限 %d，尾部内容未参与 LLM 审核", len(full_text), MAX_AUDIT_CHARS)
+def _dedup(risks: list[dict]) -> list[dict]:
+    """按 (风险类型, 原文片段前缀) 去重，保留首次出现。"""
+    seen = {}
+    order = []
+    for r in risks:
+        if not isinstance(r, dict):
+            continue
+        key = (r.get("risk_type", ""), (r.get("clause_text") or "")[:30])
+        if key not in seen:
+            seen[key] = r
+            order.append(key)
+    return [seen[k] for k in order]
 
+
+def _audit_chunk(chunk_text: str, system_prompt: str) -> list[dict]:
+    """对单个文本块调用 LLM 审核，返回规范化后的风险列表。"""
+    try:
+        response = llm_client.chat(
+            prompt=f"{system_prompt}\n\n请审核以下合同：\n{chunk_text}",
+            temperature=0.1,
+        )
+        risks = _extract_json(response)
+        if risks is None:
+            return []
+        validated = []
+        for r in risks:
+            if not isinstance(r, dict):
+                continue
+            validated.append({
+                "risk_type": r.get("risk_type", ""),
+                "level": r.get("level", "medium"),
+                "clause_text": r.get("clause_text", ""),
+                "reason": r.get("reason", ""),
+                "suggestion": r.get("suggestion", ""),
+                # LLM 自报置信度优先；缺失时给中性 0.6（诚实标注不确定性），不再硬编码 0.7
+                "confidence": clamp_confidence(r.get("confidence", LLM_FALLBACK_CONFIDENCE)),
+                "detection_method": "llm",
+            })
+        return validated
+    except Exception as e:
+        logger.error(f"LLM 审核失败: {e}")
+        return []
+
+
+def audit_with_llm(full_text: str, rag_context: list = None) -> list[dict]:
     rag_text = ""
     if rag_context:
         rag_items = []
@@ -94,31 +135,15 @@ def audit_with_llm(full_text: str, rag_context: list = None) -> list[dict]:
             f"参考法条和案例（来自知识库）：\n{rag_text}\n\n请以 JSON 数组格式输出"
         )
 
-    try:
-        response = llm_client.chat(
-            prompt=f"{system_prompt}\n\n请审核以下合同：\n{truncated}",
-            temperature=0.1,
-        )
-        risks = _extract_json(response)
-        if risks is not None:
-            validated = []
-            for r in risks:
-                if not isinstance(r, dict):
-                    continue
-                validated.append({
-                    "risk_type": r.get("risk_type", ""),
-                    "level": r.get("level", "medium"),
-                    "clause_text": r.get("clause_text", ""),
-                    "reason": r.get("reason", ""),
-                    "suggestion": r.get("suggestion", ""),
-                    # LLM 自报置信度优先；缺失时给中性 0.6（诚实标注不确定性），不再硬编码 0.7
-                    "confidence": clamp_confidence(r.get("confidence", LLM_FALLBACK_CONFIDENCE)),
-                    "detection_method": "llm",
-                })
-            logger.info(f"LLM 审核完成，检出 {len(validated)} 条风险")
-            return validated
-    except Exception as e:
-        logger.error(f"LLM 审核失败: {e}")
+    # 分块：长合同逐块审核，尾部不再截断
+    chunks = split_chunks(full_text, MAX_AUDIT_CHARS)
+    if len(chunks) > 1:
+        logger.info("合同 %d 字超过单块上限，分为 %d 块逐块 LLM 审核", len(full_text), len(chunks))
 
-    logger.warning("LLM 审核降级：返回空列表")
-    return []
+    all_risks = []
+    for chunk in chunks:
+        all_risks.extend(_audit_chunk(chunk, system_prompt))
+
+    result = _dedup(all_risks)
+    logger.info(f"LLM 审核完成，检出 {len(result)} 条风险（{len(chunks)} 块）")
+    return result

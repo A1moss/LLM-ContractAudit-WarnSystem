@@ -1,3 +1,4 @@
+from ai.chunker import split_chunks
 from ai.llm_client import llm_client
 from ai.corex.agents import (
     LEGAL_AGENT_PROMPT, COMPLIANCE_AGENT_PROMPT,
@@ -9,8 +10,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# 送入每个 Agent 的合同文本上限（字符）。超出会截断并告警；
-# 彻底的分块（chunking）方案见 TODO，避免单次上下文超限。
+# 送入每个 Agent 的单块文本上限（字符）。超长合同按条款边界分块逐块审核，
+# 尾部内容不再被截断丢弃。
 MAX_AGENT_CHARS = 12000
 
 
@@ -59,11 +60,39 @@ def _call_agent(name: str, system_prompt: str, context: str, prev_output: str = 
         return [{"error": str(e), "agent_source": name, "failed": True}]
 
 
-def run_review(full_text: str, initial_risks: list[dict] = None) -> dict:
-    truncated = full_text[:MAX_AGENT_CHARS]
-    if len(full_text) > MAX_AGENT_CHARS:
-        logger.warning("合同文本 %d 字超过上限 %d，尾部内容未参与 Corex 审核", len(full_text), MAX_AGENT_CHARS)
-    context = f"请审核以下合同：\n\n{truncated}"
+def _filter_initial_risks(initial_risks: list[dict], chunk_text: str) -> list[dict] | None:
+    """过滤出与当前文本块相关的规则引擎风险，供该块 Agent 参考。"""
+    if not initial_risks:
+        return None
+    related = []
+    for r in initial_risks:
+        if not isinstance(r, dict):
+            continue
+        probe = (r.get("clause_text") or "").strip()[:20]
+        if probe and probe in chunk_text:
+            related.append(r)
+    return related or None
+
+
+def _dedup_across_chunks(risks: list[dict]) -> list[dict]:
+    """跨块去重：同一 (风险类型, 原文片段前缀) 保留置信度最高者。"""
+    grouped = {}
+    order = []
+    for r in risks:
+        if not isinstance(r, dict):
+            continue
+        key = (r.get("risk_type", ""), (r.get("clause_text") or "")[:30])
+        if key not in grouped:
+            grouped[key] = r
+            order.append(key)
+        elif (r.get("confidence") or 0) > (grouped[key].get("confidence") or 0):
+            grouped[key] = r
+    return [grouped[k] for k in order]
+
+
+def _run_review_impl(chunk_text: str, initial_risks: list[dict] = None) -> dict:
+    """对单个文本块跑 4-Agent 顺序流水线（法务→合规→财务→Self-QA）。"""
+    context = f"请审核以下合同：\n\n{chunk_text}"
     agent_logs = {}
     all_risks = list(initial_risks) if initial_risks else []
     failed = []
@@ -135,8 +164,51 @@ def run_review(full_text: str, initial_risks: list[dict] = None) -> dict:
     return {
         "risks": deduped,
         "agent_logs": agent_logs,
+        "failed_agents": failed,
+    }
+
+
+def run_review(full_text: str, initial_risks: list[dict] = None) -> dict:
+    """多 Agent 审核入口：长合同分块逐块审核，合并去重，尾部不再漏检。"""
+    chunks = split_chunks(full_text, MAX_AGENT_CHARS)
+    if len(chunks) > 1:
+        logger.info("合同 %d 字超过单块上限，分为 %d 块逐块 Corex 审核", len(full_text), len(chunks))
+
+    if len(chunks) == 1:
+        single = _run_review_impl(chunks[0], initial_risks)
+        return {
+            "risks": single["risks"],
+            "agent_logs": single["agent_logs"],
+            "total_agents": 4,
+            "completed_agents": 4 - len(set(single["failed_agents"])),
+            "failed_agents": list(set(single["failed_agents"])),
+            "method": "corex_review",
+        }
+
+    # 多块：逐块跑完整流水线，合并 Agent 计数与失败集合
+    merged_risks = []
+    agent_logs = {name: {"count": 0} for name in ["legal", "compliance", "finance", "self_qa"]}
+    failed = set()
+
+    for chunk in chunks:
+        # 只把与该块相关的规则引擎风险作为参考传入，避免误导后续块
+        related = _filter_initial_risks(initial_risks, chunk)
+        single = _run_review_impl(chunk, related)
+        merged_risks.extend(single["risks"])
+        for name in agent_logs:
+            agent_logs[name]["count"] += (single["agent_logs"].get(name) or {}).get("count", 0)
+        failed.update(single["failed_agents"])
+
+    # 跨块去重：同一 (风险类型, 原文片段) 保留置信度最高者
+    deduped = _dedup_across_chunks(merged_risks)
+
+    return {
+        "risks": deduped,
+        "agent_logs": agent_logs,
         "total_agents": 4,
         "completed_agents": 4 - len(failed),
-        "failed_agents": failed,
+        "failed_agents": list(failed),
         "method": "corex_review",
+        "chunked": True,
+        "chunk_count": len(chunks),
     }

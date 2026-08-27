@@ -111,7 +111,7 @@ def run_rules(text: str) -> list[dict]:
 
     for rule_id, pattern, level, name, suggestion in RISK_RULES:
         if pattern is not None:
-            for match in re.finditer(pattern, text[:10000]):
+            for match in re.finditer(pattern, text):
                 ctx = _extract_context(text, match)
                 if _is_safe(ctx, rule_id):
                     continue
@@ -131,7 +131,7 @@ def run_rules(text: str) -> list[dict]:
                         "related_law": RULE_LAWS.get(rule_id, ""),
                     })
         elif rule_id == "R08":
-            if "验收" not in text[:5000] and "验收标准" not in text[:5000] and "验收方式" not in text[:5000]:
+            if "验收" not in text and "验收标准" not in text and "验收方式" not in text:
                 results.append({
                     "risk_type": "R08", "level": "medium", "name": "验收标准缺失",
                     "clause_text": "全文未定义验收标准或验收方式",
@@ -141,7 +141,7 @@ def run_rules(text: str) -> list[dict]:
                     "related_law": RULE_LAWS.get("R08", ""),
                 })
         elif rule_id == "R09":
-            if "不可抗力" not in text[:5000]:
+            if "不可抗力" not in text:
                 results.append({
                     "risk_type": "R09", "level": "medium", "name": "不可抗力条款缺失",
                     "clause_text": "全文未出现不可抗力相关条款",
