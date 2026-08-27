@@ -46,8 +46,9 @@
             <el-option label="自动识别（推荐）" value="" />
             <el-option label="采购合同" value="采购合同" />
             <el-option label="销售合同" value="销售合同" />
-            <el-option label="保密协议" value="保密协议" />
-            <el-option label="服务外包合同" value="服务外包合同" />
+            <el-option label="买卖合同" value="买卖合同" />
+            <el-option label="保密合同" value="保密合同" />
+            <el-option label="服务合同" value="服务合同" />
             <el-option label="劳动合同" value="劳动合同" />
             <el-option label="其他合同" value="其他合同" />
           </el-select>

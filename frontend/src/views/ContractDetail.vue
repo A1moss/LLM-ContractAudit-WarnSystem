@@ -317,8 +317,11 @@ const contractId = computed(() => route.params.id)
 
 // ── 合同类型映射 ──
 const typeMap = {
-  purchase: '采购合同', sales: '销售合同', nda: '保密协议 (NDA)',
-  outsourcing: '服务外包合同', employment: '劳动合同', other: '其他合同',
+  '采购合同': '采购合同', '销售合同': '销售合同', '买卖合同': '买卖合同',
+  '保密合同': '保密合同', '服务合同': '服务合同', '劳动合同': '劳动合同',
+  '保密协议': '保密合同', '服务外包合同': '服务合同', '其他合同': '其他合同',
+  purchase: '采购合同', sales: '销售合同', trade: '买卖合同', nda: '保密合同',
+  outsourcing: '服务合同', employment: '劳动合同', other: '其他合同',
 }
 function typeLabel(type) { return typeMap[type] || type || '未分类' }
 

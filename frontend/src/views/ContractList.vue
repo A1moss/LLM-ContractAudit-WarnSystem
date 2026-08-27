@@ -30,8 +30,9 @@
           >
             <el-option label="采购合同" value="采购合同" />
             <el-option label="销售合同" value="销售合同" />
-            <el-option label="保密协议" value="保密协议" />
-            <el-option label="服务外包合同" value="服务外包合同" />
+            <el-option label="买卖合同" value="买卖合同" />
+            <el-option label="保密合同" value="保密合同" />
+            <el-option label="服务合同" value="服务合同" />
             <el-option label="劳动合同" value="劳动合同" />
             <el-option label="其他合同" value="其他合同" />
           </el-select>
@@ -253,12 +254,15 @@ function typeLabel(type) {
   const map = {
     '采购合同': '采购合同',
     '销售合同': '销售合同',
-    '保密协议': '保密协议',
-    '服务外包合同': '服务外包合同',
+    '买卖合同': '买卖合同',
+    '保密合同': '保密合同',
+    '服务合同': '服务合同',
     '劳动合同': '劳动合同',
+    '保密协议': '保密合同',
+    '服务外包合同': '服务合同',
     '其他合同': '其他合同',
-    purchase: '采购合同', sales: '销售合同', nda: '保密协议',
-    outsourcing: '服务外包合同', employment: '劳动合同', other: '其他合同',
+    purchase: '采购合同', sales: '销售合同', trade: '买卖合同', nda: '保密合同',
+    outsourcing: '服务合同', employment: '劳动合同', other: '其他合同',
   }
   return map[type] || type || '未分类'
 }

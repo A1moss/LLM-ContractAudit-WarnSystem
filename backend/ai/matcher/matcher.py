@@ -28,6 +28,16 @@ MAX_COMPARE_CHARS = 6000
 _KNOWLEDGE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "knowledge")
 _STANDARD_CLAUSES_FILE = os.path.join(_KNOWLEDGE_DIR, "standard_clauses.json")
 
+# 分类器输出 6 类（采购/销售/买卖/保密/服务/劳动），但标准条款库内部按 5 类组织
+# （采购/销售/保密协议/服务外包/劳动）。此处做别名归一，避免改动 76 条数据、重建向量库：
+#   买卖合同 → 销售合同（中性货物交易，复用销售侧通用条款）
+#   保密合同 → 保密协议；服务合同 → 服务外包合同（名称对齐）
+_TYPE_ALIAS = {
+    "买卖合同": "销售合同",
+    "保密合同": "保密协议",
+    "服务合同": "服务外包合同",
+}
+
 
 SYSTEM_PROMPT_COMPARE = """你是合同条款比对专家。请将以下合同内容与标准条款模板进行逐条比对。
 
@@ -149,8 +159,11 @@ def compare_clauses(full_text: str, contract_type: str) -> dict:
     """将合同全文与对应类型的标准条款模板进行逐条比对（长合同分块）。"""
     all_clauses = _load_standard_clauses()
 
+    # 用户侧 6 类 → 内部条款库 5 类的别名归一（买卖合同→销售合同 等）
+    alias_type = _TYPE_ALIAS.get(contract_type, contract_type)
+
     # 按合同类型结构过滤（PAKTON 结构检索：类型精确匹配，而非语义模糊检索）
-    docs = [c for c in all_clauses if c.get("type") == contract_type]
+    docs = [c for c in all_clauses if c.get("type") == alias_type]
     if not docs:
         # 类型名不匹配（如"其他合同"）时回退到全部条款，避免比对空白
         logger.info("未找到类型 %s 的标准条款，回退到全部 %d 条", contract_type, len(all_clauses))
