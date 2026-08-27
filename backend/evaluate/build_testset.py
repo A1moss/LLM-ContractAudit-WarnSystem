@@ -41,9 +41,11 @@ CATEGORY_DIRS = {
     "服务合同": ["服务合同", "标准库/外包合同-word"],
     "劳动合同": [],
 }
-# 根目录散文件单独登记（文件夹之外的合同）
-LOOSE_FILES = {
-    "劳动合同": ["劳动合同（通用）.doc"],
+# 根目录散文件：按文件名关键词归类（文件夹之外的合同）
+LOOSE_KEYWORDS = {
+    "劳动合同": ["劳动合同"],
+    "买卖合同": ["政府采购货物买卖合同"],
+    "服务合同": ["数据委托处理服务合同", "委托合同"],
 }
 
 # 泄露类型的标记：示范文本 / 文号 GF—xxxx—xxxx / 版本（20xx版）
@@ -125,14 +127,16 @@ def main():
                 seen_stem.add(f.stem)
                 add_entry(f, cat)
 
-    # 2) 根目录散文件
-    for cat, names in LOOSE_FILES.items():
-        for name in names:
-            f = VANBEN_DIR / name
-            if f.exists() and f.suffix.lower() in (".docx", ".pdf"):
+    # 2) 根目录散文件（按文件名关键词归类；.doc 老格式跳过）
+    for f in VANBEN_DIR.iterdir():
+        if not f.is_file() or f.suffix.lower() not in (".docx", ".pdf"):
+            continue
+        for cat, keywords in LOOSE_KEYWORDS.items():
+            if any(k in f.name for k in keywords):
                 if f.stem not in seen_stem:
                     seen_stem.add(f.stem)
                     add_entry(f, cat)
+                break
 
     if not entries:
         logger.error("未生成任何样本，检查范本目录是否存在 .docx/.pdf")
