@@ -12,7 +12,7 @@
         action="#"
         :auto-upload="false"
         :limit="1"
-        :accept="'.docx,.pdf'"
+        :accept="'.docx,.pdf,.jpg,.jpeg,.png,.tiff,.tif,.bmp'"
         :on-change="handleFileChange"
         :on-remove="handleFileRemove"
         :file-list="fileList"
@@ -20,7 +20,7 @@
         <el-icon class="upload-icon"><UploadFilled /></el-icon>
         <div class="upload-text">
           <p>将合同文件拖拽到此处，或 <em>点击选择文件</em></p>
-          <p class="upload-hint">支持 .docx / .pdf 格式，单文件最大 10MB</p>
+          <p class="upload-hint">支持 .docx / .pdf / 图片(jpg/png/tiff) 格式，单文件最大 10MB</p>
         </div>
       </el-upload>
 
@@ -126,8 +126,8 @@ function handleFileChange(file) {
   }
 
   const ext = file.name.split('.').pop().toLowerCase()
-  if (!['docx', 'pdf'].includes(ext)) {
-    ElMessage.error('仅支持 .docx 和 .pdf 格式的合同文件')
+  if (!['docx', 'pdf', 'jpg', 'jpeg', 'png', 'tiff', 'tif', 'bmp'].includes(ext)) {
+    ElMessage.error('仅支持 .docx / .pdf / 图片(jpg/png/tiff) 格式')
     fileList.value = []
     selectedFile.value = null
     return

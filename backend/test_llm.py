@@ -107,7 +107,8 @@ def test_08_parser():
 
 @test
 def test_09_ocr_import():
-    from ai.parser.ocr_parser import parse_image, _ocr_available
+    from ai.parser.ocr_parser import parse_image, _ensure_ocr, _ocr_available
+    _ensure_ocr()
     print(f"  ✅ OCR模块已加载 (PaddleOCR={'可用' if _ocr_available else '未安装'})")
 
 

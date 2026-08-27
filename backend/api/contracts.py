@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models.contract import Contract
 from models.user import User
-from api.deps import get_current_user, require_role
+from api.deps import get_current_user, require_role, ROLE_ADMIN
 from ai.parser import detect_and_parse
 from ai.classifier import classify_contract
 from ai.extractor import extract_elements
@@ -118,8 +118,9 @@ async def upload_contract(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not file.filename or not file.filename.endswith((".pdf", ".docx")):
-        raise HTTPException(status_code=400, detail="only pdf/docx supported")
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in (".pdf", ".docx", ".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp"):
+        raise HTTPException(status_code=400, detail="仅支持 pdf/docx 或图片格式(jpg/png/tiff/bmp)")
 
     ext = os.path.splitext(file.filename)[1]
     saved_name = str(uuid.uuid4()) + ext
@@ -134,6 +135,13 @@ async def upload_contract(
         full_text = parsed.get("full_text", "")
     except Exception as e:
         raise HTTPException(status_code=422, detail="parse failed: " + str(e))
+
+    # OCR（图片）识别失败/无文字时给出明确提示，避免静默产生空合同
+    if not full_text.strip():
+        if parsed.get("error"):
+            raise HTTPException(status_code=422, detail=f"文本提取失败：{parsed['error']}")
+        if ext.lower() in (".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp"):
+            raise HTTPException(status_code=422, detail="图片未识别到文字，请确认图片清晰或上传 PDF/DOCX 格式")
 
     cls_result = {"contract_type": contract_type or "other", "confidence": 0.0}
     try:
@@ -256,13 +264,12 @@ def delete_contract(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    c = (
-        db.query(Contract)
-        .filter(Contract.id == contract_id, Contract.user_id == current_user.id)
-        .first()
-    )
+    c = db.query(Contract).filter(Contract.id == contract_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="contract not found")
+    # 管理员可删除任何合同；上传者只能删除自己的合同；审核人/验收人无权删除
+    if current_user.role != ROLE_ADMIN and c.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权删除该合同")
     c.status = "deleted"
     db.commit()
     return {"code": 0, "message": "ok", "data": None}

@@ -223,6 +223,11 @@
               <p class="converting-hint">首次加载需要 5-10 秒</p>
             </div>
 
+            <!-- 图片模式 -->
+            <div v-else-if="imgReady" class="img-viewer">
+              <img :src="imgSrc" class="img-preview" alt="合同图片预览" />
+            </div>
+
             <!-- PDF 模式 -->
             <template v-else-if="pdfReady">
               <div class="pdf-viewer">
@@ -375,6 +380,8 @@ const zoomLevel = ref(1.0)
 const zoomFit = ref(1.0)
 const jumpPage = ref('')
 const convertingDocx = ref(false)
+const imgReady = ref(false)
+const imgSrc = ref('')
 const loadedFeedbacks = ref([])
 
 let pdfDoc = null
@@ -395,28 +402,46 @@ async function loadPdf() {
     }
   }
 
-  if (fileData) {
-    try {
-      pdfLoadingTask = pdfjsLib.getDocument({ data: new Uint8Array(fileData) })
-      pdfDoc = await pdfLoadingTask.promise
-      totalPages.value = pdfDoc.numPages
-      const firstPage = await pdfDoc.getPage(1)
-      const vp = firstPage.getViewport({ scale: 1.0 })
-      zoomFit.value = +(380 / vp.width).toFixed(2)
-      zoomLevel.value = zoomFit.value
-      // 必须先关掉 convertingDocx，否则模板 v-if="convertingDocx" 会挡住 canvas
-      convertingDocx.value = false
-      pdfReady.value = true
-      await nextTick()
-      renderPage(currentPage.value)
-    } catch (e) {
-      convertingDocx.value = false
-      pdfError.value = 'PDF 加载失败，请确认文件格式正确'
-      console.warn('PDF 渲染失败:', e.message)
-    }
-  } else {
+  if (!fileData) {
     convertingDocx.value = false
     pdfError.value = '后端服务未启动，无法加载文件'
+    return
+  }
+
+  // 图片合同：用 <img> 渲染（pdfjs 无法渲染图片）
+  const fname = (contract.value?.file_name || '').toLowerCase()
+  if (/\.(jpg|jpeg|png|tiff|tif|bmp)$/.test(fname)) {
+    try {
+      const ext = fname.split('.').pop()
+      const mimeMap = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', tiff: 'image/tiff', tif: 'image/tiff', bmp: 'image/bmp' }
+      const blob = new Blob([fileData], { type: mimeMap[ext] || 'image/jpeg' })
+      imgSrc.value = URL.createObjectURL(blob)
+      convertingDocx.value = false
+      imgReady.value = true
+    } catch (e) {
+      convertingDocx.value = false
+      pdfError.value = '图片加载失败'
+    }
+    return
+  }
+
+  try {
+    pdfLoadingTask = pdfjsLib.getDocument({ data: new Uint8Array(fileData) })
+    pdfDoc = await pdfLoadingTask.promise
+    totalPages.value = pdfDoc.numPages
+    const firstPage = await pdfDoc.getPage(1)
+    const vp = firstPage.getViewport({ scale: 1.0 })
+    zoomFit.value = +(380 / vp.width).toFixed(2)
+    zoomLevel.value = zoomFit.value
+    // 必须先关掉 convertingDocx，否则模板 v-if="convertingDocx" 会挡住 canvas
+    convertingDocx.value = false
+    pdfReady.value = true
+    await nextTick()
+    renderPage(currentPage.value)
+  } catch (e) {
+    convertingDocx.value = false
+    pdfError.value = 'PDF 加载失败，请确认文件格式正确'
+    console.warn('PDF 渲染失败:', e.message)
   }
 }
 
@@ -850,6 +875,25 @@ onMounted(() => {
 }
 
 .pdf-viewer { text-align: center; }
+
+/* 图片模式 */
+.img-viewer {
+  min-height: 520px;
+  background: #f5f7fa;
+  border-radius: 4px;
+  padding: 12px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  overflow: auto;
+}
+
+.img-preview {
+  max-width: 100%;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  background: #fff;
+}
 
 .pdf-scroll-container {
   height: 520px;
