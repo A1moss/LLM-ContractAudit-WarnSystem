@@ -12,6 +12,7 @@ import json
 import logging
 
 from ai.llm_client import llm_client
+from ai.utils import extract_json_dict
 
 logger = logging.getLogger(__name__)
 
@@ -47,42 +48,11 @@ QA_PROMPT = """你是合同修订的「终审复核方」（Self-QA）。请校�
 }"""
 
 
-def _extract_json(text: str) -> dict | None:
-    """三重容错解析：直接解析 → 代码块提取 → 花括号截取。"""
-    if not text:
-        return None
-    t = text.strip()
-    try:
-        r = json.loads(t)
-        if isinstance(r, dict):
-            return r
-    except json.JSONDecodeError:
-        pass
-    for marker in ("```json", "```"):
-        if marker in t:
-            try:
-                inner = t.split(marker)[1].split("```")[0]
-                r = json.loads(inner.strip())
-                if isinstance(r, dict):
-                    return r
-            except (IndexError, json.JSONDecodeError):
-                continue
-    try:
-        s = t.index("{")
-        e = t.rindex("}") + 1
-        r = json.loads(t[s:e])
-        if isinstance(r, dict):
-            return r
-    except (ValueError, json.JSONDecodeError):
-        pass
-    return None
-
-
 def _call_agent(system_prompt: str, context: str, name: str) -> dict:
     """调用一次 LLM，返回解析后的 dict；失败返回带 error 的 dict。"""
     try:
         resp = llm_client.chat(prompt=f"{system_prompt}\n\n{context}", temperature=0.1)
-        data = _extract_json(resp)
+        data = extract_json_dict(resp)
         if data is not None:
             return data
         logger.warning("[reviser] %s JSON 解析失败", name)

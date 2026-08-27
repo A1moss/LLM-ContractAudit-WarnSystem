@@ -1,7 +1,7 @@
 from ai.chunker import split_chunks
 from ai.llm_client import llm_client
+from ai.utils import extract_json_list
 from ai.confidence import clamp_confidence, LLM_FALLBACK_CONFIDENCE
-import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -45,36 +45,6 @@ R12 数据隐私缺失 — 涉及数据但无保护条款 → 高风险
 如果未发现风险，输出空数组 []。"""
 
 
-def _extract_json(response: str) -> list:
-    text = response.strip()
-    try:
-        result = json.loads(text)
-        if isinstance(result, list):
-            return result
-        if isinstance(result, dict) and "risks" in result:
-            return result["risks"]
-    except json.JSONDecodeError:
-        pass
-    for marker in ["```json", "```"]:
-        if marker in text:
-            try:
-                inner = text.split(marker)[1].split("```")[0]
-                result = json.loads(inner.strip())
-                if isinstance(result, list):
-                    return result
-                if isinstance(result, dict) and "risks" in result:
-                    return result["risks"]
-            except (IndexError, json.JSONDecodeError):
-                continue
-    try:
-        start = text.index("[")
-        end = text.rindex("]") + 1
-        return json.loads(text[start:end])
-    except (ValueError, json.JSONDecodeError):
-        pass
-    return None
-
-
 def _dedup(risks: list[dict]) -> list[dict]:
     """按 (风险类型, 原文片段前缀) 去重，保留首次出现。"""
     seen = {}
@@ -96,7 +66,7 @@ def _audit_chunk(chunk_text: str, system_prompt: str) -> list[dict]:
             prompt=f"{system_prompt}\n\n请审核以下合同：\n{chunk_text}",
             temperature=0.1,
         )
-        risks = _extract_json(response)
+        risks = extract_json_list(response)
         if risks is None:
             return []
         validated = []

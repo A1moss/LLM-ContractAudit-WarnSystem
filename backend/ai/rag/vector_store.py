@@ -85,8 +85,8 @@ def init_chroma() -> dict:
         # 删除已有集合，重新创建（幂等操作）
         try:
             client.delete_collection(coll_name)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("删除集合 %s 失败（首次创建属正常）: %s", coll_name, e)
         collection = client.create_collection(coll_name)
 
         # 取 content 字段用于检索
@@ -103,8 +103,8 @@ def init_chroma() -> dict:
     # risk_cases 预留空集合
     try:
         client.delete_collection("risk_cases")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("删除 risk_cases 集合失败（首次创建属正常）: %s", e)
     client.create_collection("risk_cases")
     stats["risk_cases"] = 0
 
@@ -159,7 +159,8 @@ def _dense_search(query: str, collection_name: str, top_k: int) -> list[tuple[in
     client = _get_client()
     try:
         collection = client.get_collection(collection_name)
-    except Exception:
+    except Exception as e:
+        logger.debug("集合 %s 不存在或不可用，尝试初始化: %s", collection_name, e)
         if _init_done:
             return []
         with _init_lock:
@@ -172,7 +173,8 @@ def _dense_search(query: str, collection_name: str, top_k: int) -> list[tuple[in
                     return []
         try:
             collection = client.get_collection(collection_name)
-        except Exception:
+        except Exception as e:
+            logger.warning("获取集合 %s 失败，稠密检索降级为空: %s", collection_name, e)
             return []
 
     try:

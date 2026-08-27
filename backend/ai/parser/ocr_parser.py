@@ -43,8 +43,8 @@ def _ensure_ocr():
                     logger.warning(
                         f"PaddlePaddle {paddle.__version__}: 禁用 oneDNN 以规避 PIR 转换 bug"
                     )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("检测 PaddlePaddle 版本失败（跳过 oneDNN 规避）: %s", e)
             # lang="ch" 默认映射到 PP-OCRv6 中英文模型，精度最高
             _ocr = PaddleOCR(**kwargs)
             _ocr_available = True

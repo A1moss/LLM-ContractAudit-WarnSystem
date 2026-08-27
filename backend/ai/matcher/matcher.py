@@ -17,6 +17,7 @@ import logging
 
 from ai.chunker import split_chunks
 from ai.llm_client import llm_client
+from ai.utils import extract_json
 
 logger = logging.getLogger(__name__)
 
@@ -41,21 +42,6 @@ SYSTEM_PROMPT_COMPARE = """你是合同条款比对专家。请将以下合同�
   "summary":{"total":8,"covered":5,"partial":2,"missing":1,"coverage_rate":0.625},
   "missing_critical":["验收标准"]
 }"""
-
-
-def _extract_json(text):
-    for fn in [json.loads, lambda t: json.loads(t.split("```json")[1].split("```")[0]) if "```json" in t else None,
-               lambda t: json.loads(t.split("```")[1].split("```")[0]) if "```" in t else None]:
-        try:
-            r = fn(text.strip())
-            if isinstance(r, dict): return r
-            if isinstance(r, list): return {"clauses": r}
-        except: continue
-    try:
-        s = text.index("{"); e = text.rindex("}") + 1
-        return json.loads(text[s:e])
-    except: pass
-    return None
 
 
 def _load_standard_clauses() -> list[dict]:
@@ -150,7 +136,8 @@ def _compare_chunk(chunk_text: str, contract_type: str, standards: str) -> list[
         resp = llm_client.chat(
             prompt=f"{SYSTEM_PROMPT_COMPARE}\n合同类型:{contract_type}\n标准条款:{standards}\n待比对合同:{chunk_text}\n请逐条比对输出JSON。",
             temperature=0.1)
-        data = _extract_json(resp)
+        r = extract_json(resp)
+        data = r if isinstance(r, dict) else ({"clauses": r} if isinstance(r, list) else None)
         if data and data.get("clauses"):
             return data["clauses"]
     except Exception as e:

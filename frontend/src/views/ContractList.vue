@@ -141,7 +141,7 @@
           :page-sizes="[10, 20, 50]"
           :total="pagination.total"
           layout="total, sizes, prev, pager, next, jumper"
-          @size-change="fetchList"
+          @size-change="handleSizeChange"
           @current-change="fetchList"
         />
       </div>
@@ -213,6 +213,12 @@ function schedulePoll() {
 }
 
 function handleSearch() {
+  pagination.page = 1
+  fetchList()
+}
+
+// 切换每页条数时重置回第 1 页，避免旧页码在新 page_size 下越界返回空列表
+function handleSizeChange() {
   pagination.page = 1
   fetchList()
 }

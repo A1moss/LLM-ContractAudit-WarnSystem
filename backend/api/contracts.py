@@ -146,16 +146,16 @@ async def upload_contract(
     cls_result = {"contract_type": contract_type or "other", "confidence": 0.0}
     try:
         cls_result = classify_contract(full_text)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("合同分类失败，回退为 %s: %s", contract_type or "other", e)
     actual_type = contract_type or cls_result.get("contract_type", "other")
     confidence = cls_result.get("confidence", 0.0)
 
     elements = {}
     try:
         elements = extract_elements(full_text, actual_type)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("要素抽取失败，使用空要素: %s", e)
 
     contract = Contract(
         user_id=current_user.id,

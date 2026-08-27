@@ -1,5 +1,6 @@
 from ai.chunker import split_chunks
 from ai.llm_client import llm_client
+from ai.utils import extract_json_list
 from ai.corex.agents import (
     LEGAL_AGENT_PROMPT, COMPLIANCE_AGENT_PROMPT,
     FINANCE_AGENT_PROMPT, SELF_QA_AGENT_PROMPT,
@@ -15,36 +16,13 @@ logger = logging.getLogger(__name__)
 MAX_AGENT_CHARS = 12000
 
 
-def _extract_json(response: str) -> list | None:
-    text = response.strip()
-    try:
-        result = json.loads(text)
-        if isinstance(result, list): return result
-        if isinstance(result, dict) and "risks" in result: return result["risks"]
-    except json.JSONDecodeError: pass
-    for marker in ["```json", "```"]:
-        if marker in text:
-            try:
-                inner = text.split(marker)[1].split("```")[0]
-                result = json.loads(inner.strip())
-                if isinstance(result, list): return result
-                if isinstance(result, dict) and "risks" in result: return result["risks"]
-            except (IndexError, json.JSONDecodeError): continue
-    try:
-        start = text.index("[")
-        end = text.rindex("]") + 1
-        return json.loads(text[start:end])
-    except (ValueError, json.JSONDecodeError): pass
-    return None
-
-
 def _call_agent(name: str, system_prompt: str, context: str, prev_output: str = "") -> list[dict]:
     full = context
     if prev_output:
         full += f"\n\n前面专家的审核结果供参考：\n{prev_output}"
     try:
         response = llm_client.chat(prompt=f"{system_prompt}\n\n{full}", temperature=0.1)
-        risks = _extract_json(response)
+        risks = extract_json_list(response)
         if risks is not None:
             for r in risks:
                 if isinstance(r, dict):

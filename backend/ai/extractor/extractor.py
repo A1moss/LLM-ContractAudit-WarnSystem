@@ -1,6 +1,6 @@
 from ai.chunker import split_chunks
 from ai.llm_client import llm_client
-import json
+from ai.utils import extract_json_dict
 import logging
 
 logger = logging.getLogger(__name__)
@@ -42,27 +42,6 @@ FEWSHOT_EXAMPLE = """
 }"""
 
 
-def _extract_json(response: str) -> dict:
-    try:
-        return json.loads(response.strip())
-    except json.JSONDecodeError:
-        pass
-    for marker in ["```json", "```"]:
-        if marker in response:
-            try:
-                inner = response.split(marker)[1].split("```")[0]
-                return json.loads(inner.strip())
-            except (IndexError, json.JSONDecodeError):
-                continue
-    try:
-        start = response.index("{")
-        end = response.rindex("}") + 1
-        return json.loads(response[start:end])
-    except (ValueError, json.JSONDecodeError):
-        pass
-    return None
-
-
 def _merge_elements(results: list[dict]) -> dict:
     """合并多块抽取结果：字段非 null 优先，parties 内层甲方/乙方逐角色非 null 优先。"""
     keys = ["parties", "amount", "sign_date", "performance_period", "dispute_resolution", "governing_law"]
@@ -96,7 +75,7 @@ def extract_elements(full_text: str, contract_type: str) -> dict:
         )
         try:
             response = llm_client.chat(prompt=prompt, temperature=0.1)
-            result = _extract_json(response)
+            result = extract_json_dict(response)
             if result:
                 results.append({
                     "parties": result.get("parties"),

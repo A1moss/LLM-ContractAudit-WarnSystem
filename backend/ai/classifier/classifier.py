@@ -1,5 +1,5 @@
 from ai.llm_client import llm_client
-import json
+from ai.utils import extract_json_dict
 import logging
 
 logger = logging.getLogger(__name__)
@@ -19,29 +19,6 @@ SYSTEM_PROMPT_CLASSIFY = f"""你是一个合同分类专家。请阅读以下合
 {{"contract_type": "合同类型", "confidence": 0.0-1.0}}"""
 
 
-def _extract_json(response: str) -> dict:
-    try:
-        return json.loads(response.strip())
-    except json.JSONDecodeError:
-        pass
-    for marker in ["```json", "```"]:
-        if marker in response:
-            try:
-                inner = response.split(marker)[1]
-                if "```" in inner:
-                    inner = inner.split("```")[0]
-                return json.loads(inner.strip())
-            except (IndexError, json.JSONDecodeError):
-                continue
-    try:
-        start = response.index("{")
-        end = response.rindex("}") + 1
-        return json.loads(response[start:end])
-    except (ValueError, json.JSONDecodeError):
-        pass
-    return None
-
-
 def classify_contract(full_text: str) -> dict:
     truncated = full_text[:2000]
 
@@ -50,7 +27,7 @@ def classify_contract(full_text: str) -> dict:
             prompt=f"{SYSTEM_PROMPT_CLASSIFY}\n\n请判断以下合同的类型：\n{truncated}",
             temperature=0.1,
         )
-        result = _extract_json(response)
+        result = extract_json_dict(response)
         if result and "contract_type" in result:
             return {
                 "contract_type": result.get("contract_type", "其他合同"),

@@ -5,6 +5,9 @@ Priority: Word COM -> LibreOffice CLI -> error.
 import os
 import subprocess
 import shutil
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def docx_to_pdf(docx_path: str) -> str:
@@ -48,10 +51,11 @@ def _try_word_com(docx_path: str, pdf_path: str) -> bool:
             if word:
                 try:
                     word.Quit()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Word 退出异常: %s", e)
             pythoncom.CoUninitialize()
-    except Exception:
+    except Exception as e:
+        logger.debug("Word COM 转换失败，降级到 LibreOffice: %s", e)
         return False
 
 
@@ -105,8 +109,8 @@ def _find_soffice():
                                 return p
                     except OSError:
                         pass
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("查询 LibreOffice 注册表安装路径失败: %s", e)
 
     # macOS
     mp = "/Applications/LibreOffice.app/Contents/MacOS/soffice"

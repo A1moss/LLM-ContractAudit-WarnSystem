@@ -192,6 +192,9 @@ const riskTypes = ref([])
 const loading = ref(true)
 const error = ref('')
 
+// 请求序列号：路由快速切换时丢弃过期请求的结果，防止旧报告/PDF 覆盖新内容
+let requestSeq = 0
+
 // ── 文件格式检测 ──
 const isPdf = ref(null)
 const DOCX_W = 602
@@ -218,7 +221,7 @@ function riskLevelTag(level) {
   return 'success'
 }
 
-async function fetchReport() {
+async function fetchReport(seq) {
   const id = contractId.value
   if (!id) {
     error.value = '缺少合同 ID 参数'
@@ -230,6 +233,7 @@ async function fetchReport() {
       getAuditReport(id),
       getAuditResult(id),
     ])
+    if (seq !== undefined && seq !== requestSeq) return
     report.value = reportRes.data
     riskItems.value = resultRes.data?.items || []
 
@@ -239,15 +243,18 @@ async function fetchReport() {
     })
     riskTypes.value = Object.entries(countByType).map(([type, count]) => ({ type, count }))
   } catch (e) {
+    if (seq !== undefined && seq !== requestSeq) return
     error.value = '加载审核报告失败'
     console.warn('报告加载失败:', e)
   } finally {
+    if (seq !== undefined && seq !== requestSeq) return
     loading.value = false
   }
 }
 
 watch(contractId, async (newId, oldId) => {
   if (newId && newId !== oldId) {
+    const seq = ++requestSeq
     disposeCharts()
     pdfLoadingTask?.destroy()
     pdfLoadingTask = null
@@ -257,10 +264,20 @@ watch(contractId, async (newId, oldId) => {
     report.value = null
     riskItems.value = []
     riskTypes.value = []
-    await fetchReport()
+    // 完整重置 PDF 预览状态，避免旧合同的图表/PDF 内容残留
+    pdfReady.value = false
+    pdfError.value = ''
+    convertingDocx.value = false
+    totalPages.value = 0
+    currentSpread.value = 1
+    jumpPage.value = ''
+    isPdf.value = null
+    cachedFileData = null
+    await fetchReport(seq)
+    if (seq !== requestSeq) return
     await nextTick()
     initCharts()
-    loadPdf()
+    loadPdf(seq)
   }
 })
 
@@ -338,29 +355,37 @@ const totalSpreads = computed(() => Math.ceil(totalPages.value / 2))
 const leftPageNum = computed(() => (currentSpread.value - 1) * 2 + 1)
 const rightPageNum = computed(() => Math.min(leftPageNum.value + 1, totalPages.value))
 
-async function loadPdf() {
+async function loadPdf(seq) {
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
   const id = contractId.value
   if (!id) return
 
   let fileData = null
   convertingDocx.value = true
+  pdfReady.value = false
+  pdfError.value = ''
   try {
     fileData = await getContractFile(id)
   } catch {
     console.warn('合同文件 API 加载失败')
   }
+  if (seq !== undefined && seq !== requestSeq) return  // 过期请求，丢弃
 
   if (fileData) {
     try {
       pdfLoadingTask = pdfjsLib.getDocument({ data: new Uint8Array(fileData) })
       pdfDoc = await pdfLoadingTask.promise
+      if (seq !== undefined && seq !== requestSeq) {
+        pdfDoc = null
+        return
+      }
       totalPages.value = pdfDoc.numPages
+      currentSpread.value = 1
       // 每个 page-slot 可用宽度 = 卡片宽度 / 2 - 间隙
       convertingDocx.value = false
       pdfReady.value = true
       await nextTick()
-      renderSpread(currentSpread.value)
+      renderSpread(1)
       return
     } catch (e) {
       convertingDocx.value = false
@@ -427,10 +452,11 @@ function handleJump() {
 function goToPage(pageNum) { if (pageNum < 1 || pageNum > totalPages.value) return; renderPage(pageNum) }
 
 onMounted(async () => {
-  await fetchReport()
+  const seq = ++requestSeq
+  await fetchReport(seq)
   await nextTick()
   initCharts()
-  loadPdf()
+  loadPdf(seq)
 })
 
 onUnmounted(() => {
