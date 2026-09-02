@@ -278,15 +278,17 @@ def init_contract_templates(testset_path: Optional[str] = None) -> int:
         metadata={"hnsw:space": "cosine"},
     )
 
-    texts = [_excerpt(item.get("text", "")) for item in data]
+    # 嵌入用「首尾摘录」（防截断丢判别条款），但 documents 存全文，供检索返回/留一法比对
+    excerpts = [_excerpt(item.get("text", "")) for item in data]
+    full_texts = [item.get("text", "") for item in data]
     ids = [item.get("id", f"T{i}") for i, item in enumerate(data)]
     metadatas = [{"type": item.get("true_type", ""), "file": item.get("file", "")} for item in data]
 
-    embeddings = embedder.encode(texts).tolist()
-    collection.add(embeddings=embeddings, documents=texts, ids=ids, metadatas=metadatas)
+    embeddings = embedder.encode(excerpts).tolist()
+    collection.add(embeddings=embeddings, documents=full_texts, ids=ids, metadatas=metadatas)
 
-    logger.info("[ChromaDB] 合同范本分类库: 写入 %d 条", len(texts))
-    return len(texts)
+    logger.info("[ChromaDB] 合同范本分类库: 写入 %d 条", len(full_texts))
+    return len(full_texts)
 
 
 def search_similar_templates(query: str, top_k: int = 5) -> list[dict]:
