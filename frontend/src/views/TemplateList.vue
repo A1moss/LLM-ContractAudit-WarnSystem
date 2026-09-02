@@ -36,16 +36,11 @@
     <el-dialog v-model="dialog.visible" :title="dialog.isEdit ? '编辑模板' : '新建模板'" width="640px">
       <el-form label-position="top">
         <el-form-item label="模板名称">
-          <el-input v-model="dialog.name" placeholder="如：采购合同标准条款" />
+          <el-input v-model="dialog.name" placeholder="如：买卖合同标准条款" />
         </el-form-item>
         <el-form-item label="合同类型">
           <el-select v-model="dialog.contract_type" style="width: 100%">
-            <el-option label="采购合同" value="采购合同" />
-            <el-option label="销售合同" value="销售合同" />
-            <el-option label="买卖合同" value="买卖合同" />
-            <el-option label="保密合同" value="保密合同" />
-            <el-option label="服务合同" value="服务合同" />
-            <el-option label="劳动合同" value="劳动合同" />
+            <el-option v-for="t in CONTRACT_TYPES" :key="t" :label="t" :value="t" />
           </el-select>
         </el-form-item>
         <el-form-item label="条款内容（JSON）">
@@ -70,6 +65,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { getTemplates, createTemplate, updateTemplate, deleteTemplate } from '../api/template.js'
+import { CONTRACT_TYPES } from '../constants/contractTypes.js'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -80,7 +76,7 @@ const dialog = reactive({
   isEdit: false,
   id: null,
   name: '',
-  contract_type: '采购合同',
+  contract_type: '买卖合同',
   clausesText: '',
 })
 
@@ -108,7 +104,7 @@ function openCreate() {
   dialog.isEdit = false
   dialog.id = null
   dialog.name = ''
-  dialog.contract_type = '采购合同'
+  dialog.contract_type = '买卖合同'
   dialog.clausesText = ''
 }
 

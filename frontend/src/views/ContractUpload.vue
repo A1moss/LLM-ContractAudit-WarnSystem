@@ -44,13 +44,7 @@
         <el-form-item label="合同类型" prop="contract_type">
           <el-select v-model="form.contract_type" placeholder="请选择合同类型" style="width: 100%;">
             <el-option label="自动识别（推荐）" value="" />
-            <el-option label="采购合同" value="采购合同" />
-            <el-option label="销售合同" value="销售合同" />
-            <el-option label="买卖合同" value="买卖合同" />
-            <el-option label="保密合同" value="保密合同" />
-            <el-option label="服务合同" value="服务合同" />
-            <el-option label="劳动合同" value="劳动合同" />
-            <el-option label="其他合同" value="其他合同" />
+            <el-option v-for="t in CONTRACT_TYPES" :key="t" :label="t" :value="t" />
           </el-select>
           <div class="form-hint">选择"自动识别"将由 AI 自动判定合同类型</div>
         </el-form-item>
@@ -91,6 +85,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { UploadFilled } from '@element-plus/icons-vue'
 import { uploadContract, triggerAudit } from '../api/contract.js'
+import { CONTRACT_TYPES } from '../constants/contractTypes.js'
 
 const router = useRouter()
 

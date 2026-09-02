@@ -152,11 +152,12 @@ def compare_clauses(full_text: str, contract_type: str) -> dict:
     """将合同全文与对应类型的标准条款模板进行逐条比对（长合同分块）。"""
     all_clauses = _load_standard_clauses()
 
-    # 用户侧 10 类 → 内部条款库 5 类的别名归一（买卖合同→销售合同 等）
+    # 用户侧 11 类 → 标准条款库 type：直接类型 + 别名类型都查
+    # （如 技术合同 直接命中 TEC 条款；承揽/委托 经别名命中服务外包条款）
     alias_type = TYPE_ALIAS.get(contract_type, contract_type)
 
     # 按合同类型结构过滤（PAKTON 结构检索：类型精确匹配，而非语义模糊检索）
-    docs = [c for c in all_clauses if c.get("type") == alias_type]
+    docs = [c for c in all_clauses if c.get("type") in (contract_type, alias_type)]
     if not docs:
         # 类型名不匹配（如"其他合同"）时回退到全部条款，避免比对空白
         logger.info("未找到类型 %s 的标准条款，回退到全部 %d 条", contract_type, len(all_clauses))

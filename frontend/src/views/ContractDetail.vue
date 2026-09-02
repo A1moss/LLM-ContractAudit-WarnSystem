@@ -301,6 +301,7 @@ import FeedbackPanel from '../components/FeedbackPanel.vue'
 import { ElMessage } from 'element-plus'
 import { getContractDetail, getAuditResult, triggerAudit, getClauseComparison, submitFeedback, getFeedback, deleteFeedback, reviewContract, approveContract, reviseClause, getContractFile } from '../api/contract.js'
 import { formatTime } from '../utils/format.js'
+import { typeLabel } from '../constants/contractTypes.js'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
@@ -314,16 +315,6 @@ const loading = ref(true)
 const error = ref('')
 const contract = ref(null)
 const contractId = computed(() => route.params.id)
-
-// ── 合同类型映射 ──
-const typeMap = {
-  '采购合同': '采购合同', '销售合同': '销售合同', '买卖合同': '买卖合同',
-  '保密合同': '保密合同', '服务合同': '服务合同', '劳动合同': '劳动合同',
-  '保密协议': '保密合同', '服务外包合同': '服务合同', '其他合同': '其他合同',
-  purchase: '采购合同', sales: '销售合同', trade: '买卖合同', nda: '保密合同',
-  outsourcing: '服务合同', employment: '劳动合同', other: '其他合同',
-}
-function typeLabel(type) { return typeMap[type] || type || '未分类' }
 
 // ── 状态映射 ──
 function statusLabel(status) {

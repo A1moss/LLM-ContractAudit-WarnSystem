@@ -28,13 +28,7 @@
             style="width: 150px;"
             @change="handleSearch"
           >
-            <el-option label="采购合同" value="采购合同" />
-            <el-option label="销售合同" value="销售合同" />
-            <el-option label="买卖合同" value="买卖合同" />
-            <el-option label="保密合同" value="保密合同" />
-            <el-option label="服务合同" value="服务合同" />
-            <el-option label="劳动合同" value="劳动合同" />
-            <el-option label="其他合同" value="其他合同" />
+            <el-option v-for="t in CONTRACT_TYPES" :key="t" :label="t" :value="t" />
           </el-select>
         </el-form-item>
         <el-form-item label="审核状态">
@@ -157,6 +151,7 @@ import { ElMessage } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
 import { getContractList, deleteContract } from '../api/contract.js'
 import { formatTime } from '../utils/format.js'
+import { CONTRACT_TYPES, typeLabel } from '../constants/contractTypes.js'
 
 const router = useRouter()
 
@@ -248,23 +243,6 @@ function goToDetail(id) {
 
 function goToResult(id) {
   router.push(`/audit/result/${id}`)
-}
-
-function typeLabel(type) {
-  const map = {
-    '采购合同': '采购合同',
-    '销售合同': '销售合同',
-    '买卖合同': '买卖合同',
-    '保密合同': '保密合同',
-    '服务合同': '服务合同',
-    '劳动合同': '劳动合同',
-    '保密协议': '保密合同',
-    '服务外包合同': '服务合同',
-    '其他合同': '其他合同',
-    purchase: '采购合同', sales: '销售合同', trade: '买卖合同', nda: '保密合同',
-    outsourcing: '服务合同', employment: '劳动合同', other: '其他合同',
-  }
-  return map[type] || type || '未分类'
 }
 
 function statusLabel(status) {

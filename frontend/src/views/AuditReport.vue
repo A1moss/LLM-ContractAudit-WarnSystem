@@ -151,6 +151,7 @@ import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import { getContractList, getAuditResult, getAuditReport } from '../api/contract.js'
 import { formatTime } from '../utils/format.js'
+import { typeLabel } from '../constants/contractTypes.js'
 
 // ── 列表状态 ──
 const contracts = ref([])
@@ -174,16 +175,6 @@ const barChartRef = ref(null)
 let pieChartInstance = null
 let barChartInstance = null
 let selectSeq = 0  // 防止 handleSelect 竞态
-
-// ── 工具函数 ──
-const typeMap = {
-  '采购合同': '采购合同', '销售合同': '销售合同', '买卖合同': '买卖合同',
-  '保密合同': '保密合同', '服务合同': '服务合同', '劳动合同': '劳动合同',
-  '保密协议': '保密合同', '服务外包合同': '服务合同', '其他合同': '其他合同',
-  purchase: '采购合同', sales: '销售合同', trade: '买卖合同', nda: '保密合同',
-  outsourcing: '服务合同', employment: '劳动合同', other: '其他合同',
-}
-function typeLabel(type) { return typeMap[type] || type || '未分类' }
 
 // ── 获取列表 ──
 async function fetchList(page = pagination.page) {

@@ -10,6 +10,7 @@ from api.contracts import router as contracts_router
 from api.feedback import router as feedback_router
 from api.templates import router as templates_router
 from api.stats import router as stats_router
+from ai.taxonomy import to_dict as taxonomy_dict
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +129,12 @@ def root():
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/contract-types")
+def contract_types():
+    """返回合同分类体系（框架全集 + 已启用 11 类），供前端下拉/标签读取。"""
+    return taxonomy_dict()
 app.include_router(auth_router, prefix="/api")
 app.include_router(contracts_router, prefix="/api")
 app.include_router(feedback_router, prefix="/api")
