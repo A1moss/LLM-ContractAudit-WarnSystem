@@ -1,24 +1,23 @@
 """
-build_testset.py — 从 05_合同范本 生成「分类」测试集（脱敏）
+build_testset.py — 从 05_合同/合同范本 生成「分类」测试集（脱敏）
 
-用途：把 05_合同范本 里 6 类合同（采购/销售/买卖/保密/服务/劳动）抽成
-      {id, file, true_type, text} 的 JSON 测试集，供 evaluate_classifier.py 算分类准确率。
+类别来源：ai.taxonomy.ENABLED_TYPES（11 类），归档目录名与类别名一一对应；
+无样本的目录（服务外包等）会被跳过并告警。
 
-脱敏规则（防止分类器"读标题/文件名"作弊，保证准确率是真实语义判断）：
-  1. 删除首行标题（含"合同/协议"且较短的一行）；
-  2. 删除"示范文本"、文号"GF—xxxx—xxxx"、版本"（20xx版）"等泄露类型的标记。
+文本抽取三级策略：
+  1. 真 .docx（zip 容器）→ python-docx；
+  2. 老 .doc/.wps（OLE 魔数 D0CF11E0，含被改名成 .docx 的）→ WPS/Word COM（子进程+超时隔离）；
+  3. .pdf → pdfplumber。
+覆盖归档里「.doc 老格式被改名成 .docx」的情况，避免大量样本漏抽。
 
-说明：
-  - 标准库里的 word/pdf 是同一份合同的两种格式，只取 word（优先 docx），不重复计数；
-  - .doc/.wps 老格式需 LibreOffice 转换，这里先跳过并告警（劳动合同目前只有 .doc，会缺样本）。
-
-用法（任意位置运行，脚本自动定位路径）：
-    python backend/evaluate/build_testset.py
+脱敏规则（防止分类器"读标题/文件名"作弊）：
+  删除泄露类型的标题行（短行以「合同/协议」结尾，或含「XX合同/XX协议」）
+  + 删除"示范文本"/文号/版本标记。
 """
-import os
 import re
 import sys
 import json
+import subprocess
 import logging
 from pathlib import Path
 from collections import Counter
@@ -28,77 +27,128 @@ logger = logging.getLogger("build_testset")
 
 # backend/evaluate/ → backend/ → LLM-ContractAudit-WarnSystem/ → 服务外包/
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
-_SERVICE_DIR = _BACKEND_DIR.parent.parent  # 服务外包/（05_合同范本、03_数据集 都在这一层）
-VANBEN_DIR = _SERVICE_DIR / "05_合同范本"
+_SERVICE_DIR = _BACKEND_DIR.parent.parent
+VANBEN_DIR = _SERVICE_DIR / "05_合同" / "合同范本"
 OUT_DIR = _SERVICE_DIR / "03_数据集" / "测试集"
+_HELPER = Path(__file__).parent / "_extract_doc.py"
 
-# 6 类 → 范本子目录（相对 05_合同范本）。外包合同归入"服务合同"。
-CATEGORY_DIRS = {
-    "采购合同": ["采购合同", "标准库/采购合同-word"],
-    "销售合同": ["销售合同", "标准库/销售合同-word"],
-    "买卖合同": ["买卖合同"],
-    "保密合同": ["保密合同"],
-    "服务合同": ["服务合同", "标准库/外包合同-word"],
-    "劳动合同": [],
-}
-# 根目录散文件：按文件名关键词归类（文件夹之外的合同）
-LOOSE_KEYWORDS = {
-    "劳动合同": ["劳动合同"],
-    "买卖合同": ["政府采购货物买卖合同"],
-    "服务合同": ["数据委托处理服务合同", "委托合同"],
-}
+sys.path.insert(0, str(_BACKEND_DIR))
+from ai.taxonomy import ENABLED_TYPES, KIND_TYPICAL, KIND_UNNAMED, kind_of  # noqa: E402
+
+CATEGORIES = ENABLED_TYPES
+
+# OLE 复合文档魔数（老 .doc 二进制格式）
+_OLE_MAGIC = bytes.fromhex("D0CF11E0A1B11AE1")
 
 # 泄露类型的标记：示范文本 / 文号 GF—xxxx—xxxx / 版本（20xx版）
 _MARKER_RE = re.compile(
-    r"[（(]?示范文本[)）]?"          # 「示范文本」
-    r"|[A-Z]{2}[—-]\d{4}[—-]\d{4}"   # 文号 GF—2021—0136 / SF-2021-0118
-    r"|[（(]20\d{2}[^)）]*[)）]"      # 版本「（2021版）」
+    r"[（(]?示范文本[)）]?"
+    r"|[A-Z]{2}[—-]\d{4}[—-]\d{4}"
+    r"|[（(]20\d{2}[^)）]*[)）]"
 )
-# 类型标题行：短行内出现「XX合同/XX协议」会直接泄露类型
+# 类型词（19典型+无名+特别法），识别「XX合同/XX协议」标题
 _TYPE_TITLE_RE = re.compile(
-    r"(采购|销售|买卖|保密|服务|劳动|委托|外包|技术|承揽|运输|仓储|租赁|借款|担保)\s*(合同|协议)"
+    r"(买卖|租赁|承揽|建设工程|建设|技术|委托|中介|服务外包|外包|保密|劳动"
+    r"|采购|销售|服务|供用电|赠与|借款|保证|融资租赁|保理|运输|保管|仓储|物业|行纪|合伙)"
+    r"\s*(合同|协议)"
 )
+
+
+def _archive_dir(cat: str) -> Path:
+    """按法理归属定位归档目录：典型→民事合同/典型合同/<名>，无名→…/无名合同/<名>，特别法→顶层/<名>。"""
+    k = kind_of(cat)
+    if k == KIND_TYPICAL:
+        return VANBEN_DIR / "民事合同" / "典型合同" / cat
+    if k == KIND_UNNAMED:
+        return VANBEN_DIR / "民事合同" / "无名合同" / cat
+    return VANBEN_DIR / cat  # 劳动合同 在顶层；其它兜底
+
+
+def _is_ole(path: Path) -> bool:
+    """判断文件是否为 OLE 老 .doc 二进制（与扩展名无关）。"""
+    try:
+        return path.read_bytes()[:8] == _OLE_MAGIC
+    except Exception:
+        return False
+
+
+def _kill_office():
+    """清理超时后残留的 Office 进程。"""
+    for img in ("wps.exe", "WINWORD.EXE"):
+        try:
+            subprocess.run(["taskkill", "/F", "/IM", img],
+                           capture_output=True, timeout=10)
+        except Exception:
+            pass
+
+
+def _extract_doc(path: Path) -> str | None:
+    """用独立子进程 + 超时抽取 .doc/.wps 文本，避免 Office 挂死拖垮主流程。"""
+    try:
+        r = subprocess.run(
+            [sys.executable, str(_HELPER), str(path)],
+            capture_output=True, timeout=25, text=True, encoding="utf-8", errors="replace",
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout
+        logger.warning("Office 抽取失败 %s: %s", path.name, (r.stderr or "").strip()[:100])
+        return None
+    except subprocess.TimeoutExpired:
+        logger.warning("Office 抽取超时，跳过 %s", path.name)
+        _kill_office()
+        return None
+
+
+def extract_text(path: Path) -> str | None:
+    """按真实格式抽文本。"""
+    suffix = path.suffix.lower()
+
+    # 老 .doc 二进制（可能被改名成 .docx）→ Office COM
+    if _is_ole(path) or suffix in (".doc", ".wps"):
+        return _extract_doc(path)
+
+    if suffix == ".docx":
+        try:
+            from docx import Document
+            doc = Document(str(path))
+            return "\n".join(p.text.strip() for p in doc.paragraphs if p.text.strip())
+        except Exception:
+            return _extract_doc(path)  # 兜底：可能仍是其它 Office 格式
+
+    if suffix == ".pdf":
+        try:
+            import pdfplumber
+            with pdfplumber.open(str(path)) as pdf:
+                return "\n".join((page.extract_text() or "") for page in pdf.pages)
+        except Exception as e:
+            logger.warning("pdf 解析失败 %s: %s", path.name, e)
+            return None
+
+    return None
 
 
 def deidentify(text: str) -> str:
-    """脱敏：删除泄露类型的标题行（短行含"XX合同/XX协议"）+ 示范文本/文号/版本标记。"""
+    """脱敏：删标题行 + 删示范文本/文号/版本标记。"""
     out = []
     for raw in text.split("\n"):
         line = _MARKER_RE.sub("", raw).strip()
         if not line:
             continue
-        # 短行内出现「采购合同/销售合同/…」这类类型词 → 视为标题，删除
-        if len(line) <= 40 and _TYPE_TITLE_RE.search(line):
+        stripped = line.rstrip("）)")
+        if len(line) <= 40 and (stripped.endswith(("合同", "协议")) or _TYPE_TITLE_RE.search(line)):
             continue
         out.append(line)
     return "\n".join(out)
 
 
-def extract_text(path: Path):
-    """抽取 docx/pdf 文本；.doc/.wps 暂不支持返回 None。"""
-    suffix = path.suffix.lower()
-    try:
-        if suffix == ".docx":
-            from docx import Document
-            doc = Document(str(path))
-            return "\n".join(p.text.strip() for p in doc.paragraphs if p.text.strip())
-        if suffix == ".pdf":
-            import pdfplumber
-            with pdfplumber.open(str(path)) as pdf:
-                return "\n".join((page.extract_text() or "") for page in pdf.pages)
-    except Exception as e:
-        logger.warning("解析失败 %s: %s", path.name, e)
-    return None
-
-
 def main():
     if not VANBEN_DIR.exists():
-        logger.error("找不到范本目录：%s", VANBEN_DIR)
+        logger.error("找不到归档目录：%s", VANBEN_DIR)
         sys.exit(1)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     entries = []
-    seen_stem = set()  # 同一份合同的 word/pdf 只取一次（优先 docx）
+    seen_stem = set()
 
     def add_entry(path: Path, cat: str):
         text = extract_text(path)
@@ -111,35 +161,21 @@ def main():
             "text": deidentify(text),
         })
 
-    # 1) 目录内的合同（含标准库 word）
-    for cat, rels in CATEGORY_DIRS.items():
-        for rel in rels:
-            d = VANBEN_DIR / rel
-            if not d.exists():
-                continue
-            # 同 stem 优先 docx，其次 pdf；其余跳过（.doc/.wps）
-            files = sorted(d.rglob("*"))
-            for f in files:
-                if f.suffix.lower() not in (".docx", ".pdf"):
-                    continue
-                if f.stem in seen_stem:
-                    continue
-                seen_stem.add(f.stem)
-                add_entry(f, cat)
-
-    # 2) 根目录散文件（按文件名关键词归类；.doc 老格式跳过）
-    for f in VANBEN_DIR.iterdir():
-        if not f.is_file() or f.suffix.lower() not in (".docx", ".pdf"):
+    for cat in CATEGORIES:
+        d = _archive_dir(cat)
+        if not d.exists():
+            logger.warning("缺「%s」目录，跳过（待补样本）", cat)
             continue
-        for cat, keywords in LOOSE_KEYWORDS.items():
-            if any(k in f.name for k in keywords):
-                if f.stem not in seen_stem:
-                    seen_stem.add(f.stem)
-                    add_entry(f, cat)
-                break
+        for f in sorted(d.rglob("*")):
+            if f.suffix.lower() not in (".docx", ".pdf", ".doc", ".wps"):
+                continue
+            if f.stem in seen_stem:
+                continue
+            seen_stem.add(f.stem)
+            add_entry(f, cat)
 
     if not entries:
-        logger.error("未生成任何样本，检查范本目录是否存在 .docx/.pdf")
+        logger.error("未生成任何样本")
         sys.exit(1)
 
     out = OUT_DIR / "testset.json"
@@ -147,7 +183,7 @@ def main():
 
     cnt = Counter(e["true_type"] for e in entries)
     logger.info("生成 %d 条测试样本 → %s", len(entries), out)
-    for cat in CATEGORY_DIRS:
+    for cat in CATEGORIES:
         logger.info("  %s: %d 条", cat, cnt.get(cat, 0))
 
 

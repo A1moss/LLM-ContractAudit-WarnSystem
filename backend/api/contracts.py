@@ -405,7 +405,7 @@ def trigger_audit(
         # 失败时不阻断审核（风险审核结果已入库），报告会标注"待重试"。
         compare_result = None
         try:
-            compare_result = compare_clauses(full_text, c.contract_type or "采购合同")
+            compare_result = compare_clauses(full_text, c.contract_type or "买卖合同")
             logger.info("条款比对完成: %s", compare_result.get("summary") if compare_result else None)
         except Exception as e:
             logger.warning("条款比对失败，报告将标注待重试: %s", e)
@@ -675,7 +675,7 @@ def get_clause_comparison(
 
     try:
         from ai.matcher import compare_clauses
-        result = compare_clauses(c.parsed_text, c.contract_type or "采购合同")
+        result = compare_clauses(c.parsed_text, c.contract_type or "买卖合同")
         if report:
             report.missing_clauses = result
             db.commit()
@@ -700,7 +700,7 @@ def trigger_clause_comparison(
 
     try:
         from ai.matcher import compare_clauses
-        result = compare_clauses(c.parsed_text, c.contract_type or "采购合同")
+        result = compare_clauses(c.parsed_text, c.contract_type or "买卖合同")
     except Exception as e:
         logger.warning("条款比对失败: %s", e)
         return {"code": 0, "message": "ok", "data": None}
