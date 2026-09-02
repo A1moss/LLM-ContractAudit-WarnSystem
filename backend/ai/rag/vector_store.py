@@ -35,7 +35,13 @@ COLLECTIONS = {
     "laws": "法律法规库",
     "standard_clauses": "标准条款库",
     "risk_cases": "风险案例库",
+    "contract_templates": "合同范本分类库",
 }
+
+# 合同范本测试集路径（服务外包/03_数据集/测试集/testset.json）
+_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+_SERVICE_DIR = os.path.dirname(os.path.dirname(_BACKEND_DIR))
+TESTSET_PATH = os.path.join(_SERVICE_DIR, "03_数据集", "测试集", "testset.json")
 
 
 def _get_client() -> chromadb.PersistentClient:
@@ -226,3 +232,88 @@ def search_knowledge(query: str, collection_name: str = "laws", top_k: int = 5) 
     ranked = sorted(fused.items(), key=lambda x: x[1], reverse=True)[:top_k]
 
     return [_to_result(data[idx], score) for idx, score in ranked if 0 <= idx < len(data)]
+
+
+def init_contract_templates(testset_path: Optional[str] = None) -> int:
+    """初始化「合同范本」分类向量库。
+
+    读取 testset.json（[{id, file, true_type, text}]），把范本正文向量化写入
+    ChromaDB 的 contract_templates 集合，metadata 存 type（法理分类）+ file。
+    供分类 RAG（kNN 投票 / RAG 少样本）检索最相似范本使用。
+
+    Returns:
+        写入的范本数量。
+    """
+    client = _get_client()
+    embedder = _get_embedder()
+    path = testset_path or TESTSET_PATH
+
+    if not os.path.exists(path):
+        logger.warning("合同范本测试集不存在：%s，跳过分类向量库初始化", path)
+        return 0
+
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, list) or not data:
+        return 0
+
+    try:
+        client.delete_collection("contract_templates")
+    except Exception as e:
+        logger.debug("删除 contract_templates 失败（首次创建属正常）: %s", e)
+    collection = client.create_collection(
+        "contract_templates",
+        metadata={"hnsw:space": "cosine"},
+    )
+
+    texts = [item.get("text", "") for item in data]
+    ids = [item.get("id", f"T{i}") for i, item in enumerate(data)]
+    metadatas = [{"type": item.get("true_type", ""), "file": item.get("file", "")} for item in data]
+
+    embeddings = embedder.encode(texts).tolist()
+    collection.add(embeddings=embeddings, documents=texts, ids=ids, metadatas=metadatas)
+
+    logger.info("[ChromaDB] 合同范本分类库: 写入 %d 条", len(texts))
+    return len(texts)
+
+
+def search_similar_templates(query: str, top_k: int = 5) -> list[dict]:
+    """检索与 query 最相似的合同范本，返回 [{type, file, text, score}]。
+
+    用于分类 RAG：拿到 top-K 相似范本后，可做 kNN 投票或作为 LLM 少样本示例。
+    """
+    client = _get_client()
+    try:
+        collection = client.get_collection("contract_templates")
+    except Exception:
+        try:
+            init_contract_templates()
+        except Exception as e:
+            logger.warning("合同范本分类库初始化失败: %s", e)
+            return []
+        try:
+            collection = client.get_collection("contract_templates")
+        except Exception as e:
+            logger.warning("获取 contract_templates 集合失败: %s", e)
+            return []
+
+    try:
+        embedder = _get_embedder()
+        q_emb = embedder.encode([query]).tolist()
+        results = collection.query(query_embeddings=q_emb, n_results=min(top_k, 10))
+    except Exception as e:
+        logger.warning("范本相似检索失败: %s", e)
+        return []
+
+    out = []
+    if results and results.get("documents"):
+        for i, doc in enumerate(results["documents"][0]):
+            meta = (results.get("metadatas") or [{}])[0][i] if results.get("metadatas") else {}
+            dist = (results.get("distances") or [[1.0]])[0][i] if results.get("distances") else 1.0
+            out.append({
+                "type": meta.get("type", ""),
+                "file": meta.get("file", ""),
+                "text": doc,
+                "score": round(1.0 - dist, 5),
+            })
+    return out
