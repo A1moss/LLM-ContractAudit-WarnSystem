@@ -59,7 +59,19 @@ def _get_embedder() -> SentenceTransformer:
     global _embedder
     if _embedder is None:
         _embedder = SentenceTransformer("shibing624/text2vec-base-chinese")
+        # 默认 max_seq_length=128（约128汉字）对长合同太短，提到 512（BERT 上限）
+        _embedder.max_seq_length = 512
     return _embedder
+
+
+def _excerpt(text: str, head: int = 256, tail: int = 256) -> str:
+    """长文本摘录：首部(head)+尾部(tail)，控制在嵌入模型上下文内，
+    首部含主体/目的条款，尾部含违约/争议/成果归属等判别性条款。"""
+    if not text:
+        return ""
+    if len(text) <= head + tail:
+        return text
+    return text[:head] + "\n…\n" + text[-tail:]
 
 
 def init_chroma() -> dict:
@@ -266,7 +278,7 @@ def init_contract_templates(testset_path: Optional[str] = None) -> int:
         metadata={"hnsw:space": "cosine"},
     )
 
-    texts = [item.get("text", "") for item in data]
+    texts = [_excerpt(item.get("text", "")) for item in data]
     ids = [item.get("id", f"T{i}") for i, item in enumerate(data)]
     metadatas = [{"type": item.get("true_type", ""), "file": item.get("file", "")} for item in data]
 
@@ -299,7 +311,7 @@ def search_similar_templates(query: str, top_k: int = 5) -> list[dict]:
 
     try:
         embedder = _get_embedder()
-        q_emb = embedder.encode([query]).tolist()
+        q_emb = embedder.encode([_excerpt(query)]).tolist()
         results = collection.query(query_embeddings=q_emb, n_results=min(top_k, 10))
     except Exception as e:
         logger.warning("范本相似检索失败: %s", e)
