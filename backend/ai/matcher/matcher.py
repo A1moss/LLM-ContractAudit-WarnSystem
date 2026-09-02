@@ -148,16 +148,25 @@ def _compare_chunk(chunk_text: str, contract_type: str, standards: str) -> list[
     return []
 
 
-def compare_clauses(full_text: str, contract_type: str) -> dict:
-    """将合同全文与对应类型的标准条款模板进行逐条比对（长合同分块）。"""
+def compare_clauses(full_text: str, contract_type: str, is_outsourcing: bool = False) -> dict:
+    """将合同全文与对应类型的标准条款模板进行逐条比对（长合同分块）。
+
+    Args:
+        contract_type: 法理分类（10 类）
+        is_outsourcing: 业务标签——是否属服务外包；为真时叠加服务外包标准条款。
+    """
     all_clauses = _load_standard_clauses()
 
-    # 用户侧 11 类 → 标准条款库 type：直接类型 + 别名类型都查
+    # 用户侧 10 类法理 → 标准条款库 type：直接类型 + 别名类型都查
     # （如 技术合同 直接命中 TEC 条款；承揽/委托 经别名命中服务外包条款）
     alias_type = TYPE_ALIAS.get(contract_type, contract_type)
+    match_types = {contract_type, alias_type}
+    # 服务外包业务标签：叠加服务外包标准条款（SLA/知识产权/源代码/人员独立性）
+    if is_outsourcing:
+        match_types.add("服务外包合同")
 
     # 按合同类型结构过滤（PAKTON 结构检索：类型精确匹配，而非语义模糊检索）
-    docs = [c for c in all_clauses if c.get("type") in (contract_type, alias_type)]
+    docs = [c for c in all_clauses if c.get("type") in match_types]
     if not docs:
         # 类型名不匹配（如"其他合同"）时回退到全部条款，避免比对空白
         logger.info("未找到类型 %s 的标准条款，回退到全部 %d 条", contract_type, len(all_clauses))

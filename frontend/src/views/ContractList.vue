@@ -76,12 +76,13 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="contract_type" label="合同类型" width="130">
+        <el-table-column prop="contract_type" label="合同类型" width="170">
           <template #default="{ row }">
             <el-tag v-if="row.contract_type" size="small">
               {{ typeLabel(row.contract_type) }}
             </el-tag>
             <span v-else style="color: #909399;">—</span>
+            <el-tag v-if="row.is_outsourcing" size="small" type="warning" style="margin-left: 4px;">服务外包</el-tag>
           </template>
         </el-table-column>
 

@@ -78,6 +78,9 @@ def _ensure_columns():
         if "stored_path" not in existing:
             db.execute("ALTER TABLE contracts ADD COLUMN stored_path VARCHAR(500)")
             db.commit()
+        if "is_outsourcing" not in existing:
+            db.execute("ALTER TABLE contracts ADD COLUMN is_outsourcing BOOLEAN DEFAULT 0")
+            db.commit()
         # audit_records 新增 evidence 列（证据链）
         try:
             existing_ar = {row[1] for row in db.execute("PRAGMA table_info(audit_records)")}

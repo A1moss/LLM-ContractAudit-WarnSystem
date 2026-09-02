@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import String, Integer, Float, Text, DateTime, JSON, ForeignKey, func
+from sqlalchemy import String, Integer, Float, Text, DateTime, JSON, ForeignKey, func, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -14,6 +14,7 @@ class Contract(Base):
     file_name: Mapped[str] = mapped_column(String(500), nullable=False)
     contract_type: Mapped[str] = mapped_column(String(50), nullable=True, default=None)
     type_confidence: Mapped[float] = mapped_column(Float, nullable=True, default=None)
+    is_outsourcing: Mapped[bool] = mapped_column(Boolean, nullable=True, default=False)
     parsed_text: Mapped[str] = mapped_column(Text, nullable=True, default=None)
     extracted_elements: Mapped[dict] = mapped_column(JSON, nullable=True, default=None)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="uploaded")

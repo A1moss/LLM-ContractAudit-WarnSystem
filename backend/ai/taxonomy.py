@@ -49,9 +49,15 @@ TYPICAL_CONTRACTS: List[Dict[str, Any]] = [
 # ── 无名合同：民法典第467条（适用合同编通则 + 参照最相类似有名合同）──
 # refer_to = 风险条款判断时参照的最相类似有名合同
 UNNAMED_CONTRACTS: List[Dict[str, Any]] = [
-    {"name": "服务外包合同", "enabled": True, "refer_to": ["技术合同", "委托合同"]},
     {"name": "保密协议", "enabled": True, "refer_to": []},
     {"name": "无名合同", "enabled": True, "refer_to": []},  # 兜底（培训/养老/电商/医疗美容等）
+]
+
+# ── 业务标签（多值、可叠加，非法理分类）──
+# 服务外包是业务逻辑判断：一个合同法理上可能落成承揽/技术/委托（甚至假外包真派遣），
+# 但业务上同属服务外包。故不占法理分类位，作为可叠加标签单独输出。
+BUSINESS_TAGS: List[Dict[str, Any]] = [
+    {"name": "服务外包", "refer_to": ["技术合同", "委托合同", "承揽合同"]},
 ]
 
 # ── 特别法合同（独立于民事合同）──
@@ -79,6 +85,11 @@ def enabled_names() -> List[str]:
 ENABLED_TYPES: List[str] = enabled_names()
 
 
+def business_tag_names() -> List[str]:
+    """业务标签名（多值、可叠加）。"""
+    return [t["name"] for t in BUSINESS_TAGS]
+
+
 def kind_of(name: str) -> str:
     """返回某类别名的法理归属大类（典型/无名/特别法）。"""
     for c in TYPICAL_CONTRACTS:
@@ -101,17 +112,10 @@ def refer_to(name: str) -> List[str]:
     return []
 
 
-# ── 别名映射：分类器类别 → 标准条款库内部 type ──
-# 标准条款库(standard_clauses.json)已重打为 11 类口径：买卖/服务外包/保密协议/
-# 技术合同/劳动合同 各有独立 type；承揽/委托/建设/中介/租赁 尚未单列，
-# 暂用最相近的 type 做条款比对（后续补齐后移除本映射）。
-TYPE_ALIAS: Dict[str, str] = {
-    "承揽合同": "服务外包合同",      # 定制开发 → 服务类条款
-    "委托合同": "服务外包合同",      # 委托 → 服务类条款
-    "建设工程合同": "服务外包合同",  # 暂用服务类，待补建设类条款
-    "中介合同": "服务外包合同",      # 居间 → 服务类条款
-    "租赁合同": "买卖合同",          # 暂用买卖条款，待补租赁类条款
-}
+# ── 别名映射（已空置）──
+# 标准条款库(standard_clauses.json)现已按 11 类口径补齐：买卖/租赁/承揽/建设/技术/
+# 委托/中介 各有独立条款，不再需要别名过渡。保留空字典以兼容 matcher 的通用逻辑。
+TYPE_ALIAS: Dict[str, str] = {}
 
 
 def to_dict() -> Dict[str, Any]:
@@ -125,4 +129,5 @@ def to_dict() -> Dict[str, Any]:
             "劳动合同": SPECIAL_CONTRACTS,
         },
         "enabled": ENABLED_TYPES,
+        "business_tags": BUSINESS_TAGS,
     }

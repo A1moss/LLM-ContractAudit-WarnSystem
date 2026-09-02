@@ -13,7 +13,10 @@
     <template v-else-if="contract">
       <el-descriptions title="合同详情" :column="5" border class="meta-descriptions">
         <el-descriptions-item label="文件名"><el-tag type="primary" size="small">{{ contract.file_name }}</el-tag></el-descriptions-item>
-        <el-descriptions-item label="合同类型">{{ typeLabel(contract.contract_type) }}</el-descriptions-item>
+        <el-descriptions-item label="合同类型">
+          {{ typeLabel(contract.contract_type) }}
+          <el-tag v-if="contract.is_outsourcing" type="warning" size="small" style="margin-left: 4px;">服务外包</el-tag>
+        </el-descriptions-item>
         <el-descriptions-item label="上传时间">{{ formatTime(contract.created_at) }}</el-descriptions-item>
         <el-descriptions-item label="页数">{{ totalPages }} 页</el-descriptions-item>
         <el-descriptions-item label="审核状态">

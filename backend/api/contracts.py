@@ -143,13 +143,14 @@ async def upload_contract(
         if ext.lower() in (".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp"):
             raise HTTPException(status_code=422, detail="图片未识别到文字，请确认图片清晰或上传 PDF/DOCX 格式")
 
-    cls_result = {"contract_type": contract_type or "other", "confidence": 0.0}
+    cls_result = {"contract_type": contract_type or "other", "confidence": 0.0, "is_outsourcing": False}
     try:
         cls_result = classify_contract(full_text)
     except Exception as e:
         logger.warning("合同分类失败，回退为 %s: %s", contract_type or "other", e)
     actual_type = contract_type or cls_result.get("contract_type", "other")
     confidence = cls_result.get("confidence", 0.0)
+    is_outsourcing = bool(cls_result.get("is_outsourcing", False))
 
     elements = {}
     try:
@@ -163,6 +164,7 @@ async def upload_contract(
         stored_path=file_path,
         contract_type=actual_type,
         type_confidence=confidence,
+        is_outsourcing=is_outsourcing,
         parsed_text=full_text,
         extracted_elements=elements,
         status="parsed",
@@ -235,6 +237,7 @@ def list_contracts(
             "id": c.id,
             "file_name": c.file_name,
             "contract_type": c.contract_type,
+            "is_outsourcing": c.is_outsourcing,
             "type_confidence": c.type_confidence,
             "status": c.status,
             "audit_mode": c.audit_mode,
@@ -405,7 +408,7 @@ def trigger_audit(
         # 失败时不阻断审核（风险审核结果已入库），报告会标注"待重试"。
         compare_result = None
         try:
-            compare_result = compare_clauses(full_text, c.contract_type or "买卖合同")
+            compare_result = compare_clauses(full_text, c.contract_type or "买卖合同", c.is_outsourcing or False)
             logger.info("条款比对完成: %s", compare_result.get("summary") if compare_result else None)
         except Exception as e:
             logger.warning("条款比对失败，报告将标注待重试: %s", e)
@@ -650,7 +653,7 @@ def compare_contract_clauses(
     if not c.parsed_text:
         raise HTTPException(status_code=400, detail="contract has no parsed text")
     
-    result = compare_clauses(c.parsed_text, c.contract_type or "other")
+    result = compare_clauses(c.parsed_text, c.contract_type or "other", c.is_outsourcing or False)
     return {"code": 0, "message": "ok", "data": result}
 
 
@@ -675,7 +678,7 @@ def get_clause_comparison(
 
     try:
         from ai.matcher import compare_clauses
-        result = compare_clauses(c.parsed_text, c.contract_type or "买卖合同")
+        result = compare_clauses(c.parsed_text, c.contract_type or "买卖合同", c.is_outsourcing or False)
         if report:
             report.missing_clauses = result
             db.commit()
@@ -700,7 +703,7 @@ def trigger_clause_comparison(
 
     try:
         from ai.matcher import compare_clauses
-        result = compare_clauses(c.parsed_text, c.contract_type or "买卖合同")
+        result = compare_clauses(c.parsed_text, c.contract_type or "买卖合同", c.is_outsourcing or False)
     except Exception as e:
         logger.warning("条款比对失败: %s", e)
         return {"code": 0, "message": "ok", "data": None}
@@ -745,7 +748,7 @@ def get_contract(
         "code": 0, "message": "ok",
         "data": {
             "id": c.id, "user_id": c.user_id, "file_name": c.file_name, "stored_path": c.stored_path,
-            "contract_type": c.contract_type, "type_confidence": c.type_confidence, "status": c.status,
+            "contract_type": c.contract_type, "is_outsourcing": c.is_outsourcing, "type_confidence": c.type_confidence, "status": c.status,
             "audit_mode": c.audit_mode, "template_version": c.template_version,
             "parsed_text": c.parsed_text, "extracted_elements": c.extracted_elements,
             "created_at": _iso(c.created_at), "updated_at": _iso(c.updated_at),
