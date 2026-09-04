@@ -38,10 +38,15 @@ COLLECTIONS = {
     "contract_templates": "合同范本分类库",
 }
 
-# 合同范本测试集路径（服务外包/03_数据集/测试集/testset.json）
+# ── 建库源 与 评测测试集 分离（防同源泄漏，见 02_项目文档/检索库改造交接.md）──
+# TESTSET_PATH（testset.json）：合同范本样本集，由 build_testset.py 从 05_合同/合同范本 抽取生成，
+#   按法理类型（taxonomy.ENABLED_TYPES）归类，作为「范本检索库」的唯一建库源。
+# REALTEST_PATH（realtest.json）：评测测试集 = 真实合同 + 人工标注，与建库源不同源，
+#   供 kNN/RAG 分类做「跨域泛化」评估，防止「用范本考范本」导致指标虚高。
 _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 _SERVICE_DIR = os.path.dirname(os.path.dirname(_BACKEND_DIR))
-TESTSET_PATH = os.path.join(_SERVICE_DIR, "03_数据集", "测试集", "testset.json")
+TESTSET_PATH = os.path.join(_SERVICE_DIR, "03_数据集", "测试集", "testset.json")      # 建库源（范本样本集）
+REALTEST_PATH = os.path.join(_SERVICE_DIR, "03_数据集", "测试集", "realtest.json")    # 评测测试集（真实合同，待收集+标注）
 
 
 def _get_client() -> chromadb.PersistentClient:

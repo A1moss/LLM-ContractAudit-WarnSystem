@@ -56,6 +56,9 @@ UNNAMED_CONTRACTS: List[Dict[str, Any]] = [
 # ── 业务标签（多值、可叠加，非法理分类）──
 # 服务外包是业务逻辑判断：一个合同法理上可能落成承揽/技术/委托（甚至假外包真派遣），
 # 但业务上同属服务外包。故不占法理分类位，作为可叠加标签单独输出。
+# 说明：standard_clauses.json 中的「服务外包合同」类型是【业务补充条款集】（SLA/知识产权/
+# 数据安全/人员独立性等），仅当 is_outsourcing=True 时由 matcher.compare_clauses 叠加匹配，
+# 并非独立的法理类型；它与 ENABLED_TYPES（10 类法理，单一互斥）并行、不冲突。
 BUSINESS_TAGS: List[Dict[str, Any]] = [
     {"name": "服务外包", "refer_to": ["技术合同", "委托合同", "承揽合同"]},
 ]

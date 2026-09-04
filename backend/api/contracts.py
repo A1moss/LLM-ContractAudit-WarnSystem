@@ -25,6 +25,7 @@ from ai.rag import search_knowledge
 from ai.reporter import generate_report, compute_heatmap
 from ai.matcher import compare_clauses
 from ai.reviser import revise_clause
+from ai.taxonomy import business_tag_names
 from models.audit_record import AuditRecord
 from services.docx_converter import docx_to_pdf
 from models.audit_report import AuditReport
@@ -42,6 +43,21 @@ def _iso(ts) -> str | None:
     if ts is None:
         return None
     return ts.isoformat() + "Z"
+
+
+def _business_tag_label(is_outsourcing: bool):
+    """业务属性命名：服务外包合同返回业务标签名（如"服务外包"），否则 None。"""
+    if not is_outsourcing:
+        return None
+    tags = business_tag_names()
+    return "、".join(tags) if tags else "服务外包"
+
+
+def _type_label(contract_type, is_outsourcing):
+    """双属性组合命名：法理类型 + 业务标签。如「承揽合同（服务外包）」。"""
+    base = contract_type or "未分类"
+    tag = _business_tag_label(is_outsourcing)
+    return f"{base}（{tag}）" if tag else base
 
 
 WORKFLOW_ROLES = {"reviewer", "approver", "admin"}
@@ -238,6 +254,8 @@ def list_contracts(
             "file_name": c.file_name,
             "contract_type": c.contract_type,
             "is_outsourcing": c.is_outsourcing,
+            "business_tag": _business_tag_label(c.is_outsourcing),
+            "type_label": _type_label(c.contract_type, c.is_outsourcing),
             "type_confidence": c.type_confidence,
             "status": c.status,
             "audit_mode": c.audit_mode,
@@ -748,7 +766,9 @@ def get_contract(
         "code": 0, "message": "ok",
         "data": {
             "id": c.id, "user_id": c.user_id, "file_name": c.file_name, "stored_path": c.stored_path,
-            "contract_type": c.contract_type, "is_outsourcing": c.is_outsourcing, "type_confidence": c.type_confidence, "status": c.status,
+            "contract_type": c.contract_type, "is_outsourcing": c.is_outsourcing,
+            "business_tag": _business_tag_label(c.is_outsourcing), "type_label": _type_label(c.contract_type, c.is_outsourcing),
+            "type_confidence": c.type_confidence, "status": c.status,
             "audit_mode": c.audit_mode, "template_version": c.template_version,
             "parsed_text": c.parsed_text, "extracted_elements": c.extracted_elements,
             "created_at": _iso(c.created_at), "updated_at": _iso(c.updated_at),

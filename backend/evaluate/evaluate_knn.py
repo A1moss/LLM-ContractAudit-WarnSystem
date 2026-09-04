@@ -16,10 +16,21 @@ sys.path.insert(0, str(_BACKEND_DIR))
 from ai.classifier.knn_classifier import classify_by_knn
 from ai.taxonomy import ENABLED_TYPES
 
-TESTSET = _SERVICE_DIR / "03_数据集" / "测试集" / "testset.json"
+TESTSET_REAL = _SERVICE_DIR / "03_数据集" / "测试集" / "realtest.json"   # 真实合同测试集（人工标注，待收集）
+TESTSET_FALLBACK = _SERVICE_DIR / "03_数据集" / "测试集" / "testset.json"  # 范本样本集（与检索库同源，仅冒烟参考）
+
+
+def _resolve_testset():
+    """评测测试集优先取真实合同；未收集到时回退范本样本集并告警。"""
+    if TESTSET_REAL.exists():
+        return TESTSET_REAL
+    print("[提示] 未找到真实合同测试集 realtest.json（待收集+人工标注），回退用范本样本集 testset.json。")
+    print("[提示] 注意：范本样本集与检索库 contract_templates 同源，结果仅作冒烟/回归参考，不作为正式泛化指标。")
+    return TESTSET_FALLBACK
 
 
 def main():
+    TESTSET = _resolve_testset()
     entries = json.loads(TESTSET.read_text(encoding="utf-8"))
     top_k = 5
 
