@@ -30,6 +30,8 @@ RISK_RULES = [
      "建议增加合同期满前30日书面通知是否续约的条款"),
     ("R12", r"(数据|隐私|个人信息).*?(共享|提供|转让|披露)", "high", "数据隐私条款不当",
      "建议增加数据使用限制、用户授权和安全保护义务条款"),
+    ("R13", None, "high", "疑似假外包真派遣",
+     "建议明确承包方独立组织、管理其工作人员并自行承担工资社保，避免被认定为《劳动合同法》禁止的假外包真派遣"),
 ]
 
 SAFE_PATTERNS = [
@@ -55,6 +57,7 @@ RULE_LAWS = {
     "R10": "劳动合同法第24条",
     "R11": "民法典第563/564条",
     "R12": "个人信息保护法第23条",
+    "R13": "劳动合同法第57/66/67条",
 }
 
 
@@ -98,6 +101,7 @@ def _build_reason(rule_id: str, clause_text: str, level: str) -> str:
         "R10": "竞业限制范围过宽，可能因不合理而被认定无效",
         "R11": "自动续约无提前通知机制，可能被动续约产生额外成本",
         "R12": "涉及数据共享但未定义保护条款，存在合规风险",
+        "R13": "合同名义为服务外包但存在劳务派遣三方关系特征，可能构成假外包真派遣",
     }
     return reasons.get(rule_id, f"合同存在{rule_id}类型风险")
 
@@ -149,6 +153,20 @@ def run_rules(text: str) -> list[dict]:
                     "suggestion": suggestion, "detection_method": "rule",
                     "confidence": rule_confidence("R09"),
                     "related_law": RULE_LAWS.get("R09", ""),
+                })
+        elif rule_id == "R13":
+            # 名实不符：名义外包 + 劳务派遣三方特征（用工单位/被派遣/派遣单位）
+            has_out = bool(re.search(r"服务外包|业务外包|人力外包|外包", text))
+            has_dispatch = bool(re.search(r"劳务派遣|派遣单位|用工单位|被派遣", text))
+            if has_out and has_dispatch:
+                results.append({
+                    "risk_type": "R13", "level": "high", "name": "疑似假外包真派遣",
+                    "clause_text": "合同同时出现「外包」与「派遣/用工单位/被派遣」特征",
+                    "reason": "合同名义为服务外包，但出现劳务派遣三方关系特征（用工单位/被派遣劳动者），"
+                             "可能构成《劳动合同法》第66/67条禁止的假外包真派遣，用工单位与派遣单位承担连带责任",
+                    "suggestion": suggestion, "detection_method": "rule",
+                    "confidence": rule_confidence("R13"),
+                    "related_law": RULE_LAWS.get("R13", ""),
                 })
 
     logger.info(f"规则引擎检出 {len(results)} 条风险")
