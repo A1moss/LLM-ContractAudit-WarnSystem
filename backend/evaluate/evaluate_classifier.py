@@ -73,13 +73,14 @@ def main():
     wrong = []
 
     for e in entries:
-        key = _text_key(e["text"])
+        body = e.get("content") or e.get("text", "")
+        key = _text_key(body)
         if key not in cache:
-            cache[key] = classify_contract(e["text"])["contract_type"]
+            cache[key] = classify_contract(body)["contract_type"]
         pred = cache[key]
         conf[e["true_type"]].append(pred)
         if pred != e["true_type"]:
-            wrong.append((e["id"], e["file"], e["true_type"], pred))
+            wrong.append((e["id"], e.get("file", e.get("source_file", "")), e["true_type"], pred))
 
     cache_path.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
 

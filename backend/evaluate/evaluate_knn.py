@@ -37,7 +37,8 @@ def main():
     conf = defaultdict(list)
     wrong = []
     for e in entries:
-        pred = classify_by_knn(e["text"], top_k=top_k, exclude_self=e["text"])["contract_type"]
+        body = e.get("content") or e.get("text", "")
+        pred = classify_by_knn(body, top_k=top_k, exclude_self=body)["contract_type"]
         conf[e["true_type"]].append(pred)
         if pred != e["true_type"]:
             wrong.append((e["id"], e["true_type"], pred))
