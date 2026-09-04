@@ -32,7 +32,21 @@ RISK_RULES = [
      "建议增加数据使用限制、用户授权和安全保护义务条款"),
     ("R13", None, "high", "疑似假外包真派遣",
      "建议明确承包方独立组织、管理其工作人员并自行承担工资社保，避免被认定为《劳动合同法》禁止的假外包真派遣"),
+    ("R14", None, "high", "名为买卖实为借贷",
+     "建议核实交易实质：名为买卖但约定固定回报/回购，可能构成借贷关系，应明确真实法律关系"),
+    ("R15", None, "high", "名为投资实为借贷(明股实债)",
+     "建议核实：名为投资/入股但约定固定收益、到期回购，可能构成明股实债，应按借贷处理"),
+    ("R16", None, "high", "名为合作实为租赁",
+     "建议核实：名为合作但约定固定租金/保底收益，可能实质为租赁关系"),
 ]
+
+# 名实不符（名为X实为Y）家族：风险编号 -> (名义信号正则, 实质信号正则, 名义提示, 实质提示)
+NAME_REALITY_SIGNALS = {
+    "R13": (r"服务外包|业务外包|人力外包|外包", r"劳务派遣|派遣单位|用工单位|被派遣", "外包", "派遣/用工单位"),
+    "R14": (r"买卖|购销|采购|销售", r"回购|保底|固定回报|固定收益|年化|本息", "买卖", "固定回报/回购"),
+    "R15": (r"投资|入股|增资|股权", r"固定收益|到期回购|保本|固定分红|年化", "投资/入股", "固定收益/到期回购"),
+    "R16": (r"合作|联营|联合经营", r"固定租金|保底收益|固定费用", "合作", "固定租金/保底"),
+}
 
 SAFE_PATTERNS = [
     (r"违约金.*?(不超过|不高于|≤|≤).*?(\d{1,2})\s*[%\％]", "R01"),
@@ -58,6 +72,9 @@ RULE_LAWS = {
     "R11": "民法典第563/564条",
     "R12": "个人信息保护法第23条",
     "R13": "劳动合同法第57/66/67条",
+    "R14": "民法典第146条",
+    "R15": "民法典第146条",
+    "R16": "民法典第146条",
 }
 
 
@@ -102,6 +119,9 @@ def _build_reason(rule_id: str, clause_text: str, level: str) -> str:
         "R11": "自动续约无提前通知机制，可能被动续约产生额外成本",
         "R12": "涉及数据共享但未定义保护条款，存在合规风险",
         "R13": "合同名义为服务外包但存在劳务派遣三方关系特征，可能构成假外包真派遣",
+        "R14": "合同名为买卖但约定固定回报/回购，可能实质为借贷关系（通谋虚伪表示）",
+        "R15": "合同名为投资/入股但约定固定收益、到期回购，可能构成明股实债",
+        "R16": "合同名为合作但约定固定租金/保底收益，可能实质为租赁关系",
     }
     return reasons.get(rule_id, f"合同存在{rule_id}类型风险")
 
@@ -154,19 +174,17 @@ def run_rules(text: str) -> list[dict]:
                     "confidence": rule_confidence("R09"),
                     "related_law": RULE_LAWS.get("R09", ""),
                 })
-        elif rule_id == "R13":
-            # 名实不符：名义外包 + 劳务派遣三方特征（用工单位/被派遣/派遣单位）
-            has_out = bool(re.search(r"服务外包|业务外包|人力外包|外包", text))
-            has_dispatch = bool(re.search(r"劳务派遣|派遣单位|用工单位|被派遣", text))
-            if has_out and has_dispatch:
+        elif rule_id in NAME_REALITY_SIGNALS:
+            # 名实不符（名为X实为Y）家族：名义信号 + 实质信号 同时命中才触发
+            nominal_re, actual_re, nh, ah = NAME_REALITY_SIGNALS[rule_id]
+            if re.search(nominal_re, text) and re.search(actual_re, text):
                 results.append({
-                    "risk_type": "R13", "level": "high", "name": "疑似假外包真派遣",
-                    "clause_text": "合同同时出现「外包」与「派遣/用工单位/被派遣」特征",
-                    "reason": "合同名义为服务外包，但出现劳务派遣三方关系特征（用工单位/被派遣劳动者），"
-                             "可能构成《劳动合同法》第66/67条禁止的假外包真派遣，用工单位与派遣单位承担连带责任",
+                    "risk_type": rule_id, "level": "high", "name": name,
+                    "clause_text": f"合同同时出现「{nh}」名义与「{ah}」实质特征",
+                    "reason": _build_reason(rule_id, "", "high"),
                     "suggestion": suggestion, "detection_method": "rule",
-                    "confidence": rule_confidence("R13"),
-                    "related_law": RULE_LAWS.get("R13", ""),
+                    "confidence": rule_confidence(rule_id),
+                    "related_law": RULE_LAWS.get(rule_id, ""),
                 })
 
     logger.info(f"规则引擎检出 {len(results)} 条风险")
