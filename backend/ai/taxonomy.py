@@ -40,7 +40,10 @@ TYPICAL_CONTRACTS: List[Dict[str, Any]] = [
     {"name": "保管合同", "chapter": "第21章", "enabled": False},
     {"name": "仓储合同", "chapter": "第22章", "enabled": False},
     {"name": "委托合同", "chapter": "第23章", "enabled": True},
-    {"name": "物业服务合同", "chapter": "第24章", "enabled": False},
+    # 2026-09-04 启用：真实合同测试集含 10 份政府物业服务合同（长沙采购网），
+    # 物业服务合同系民法典第24章有名合同，此前归无名/委托均不严谨；启用为第 11 类法理。
+    # 待办：standard_clauses.json 需补「物业服务合同」标准条款集，否则 matcher 该类型无条款可比对。
+    {"name": "物业服务合同", "chapter": "第24章", "enabled": True},
     {"name": "行纪合同", "chapter": "第25章", "enabled": False},
     {"name": "中介合同", "chapter": "第26章", "enabled": True},
     {"name": "合伙合同", "chapter": "第27章", "enabled": False},

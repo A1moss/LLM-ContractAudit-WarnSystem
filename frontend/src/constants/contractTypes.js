@@ -1,7 +1,7 @@
 /**
  * 合同分类体系（对齐后端 ai.taxonomy）
  * 前端唯一数据源：类型下拉、标签映射统一从这里取，改类别只改这一处。
- * CONTRACT_TYPES = 法理分类（10 类，单一互斥）
+ * CONTRACT_TYPES = 法理分类（11 类，单一互斥）
  * BUSINESS_TAGS  = 业务标签（多值、可叠加，如"服务外包"）
  */
 export const CONTRACT_TYPES = [
@@ -11,6 +11,7 @@ export const CONTRACT_TYPES = [
   '建设工程合同',
   '技术合同',
   '委托合同',
+  '物业服务合同',
   '中介合同',
   '保密协议',
   '无名合同',
