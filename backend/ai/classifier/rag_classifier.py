@@ -8,7 +8,6 @@ ai.classifier.rag_classifier — RAG 少样本分类
 import logging
 
 from ai.llm_client import llm_client
-from ai.rag.vector_store import search_similar_templates, _excerpt
 from ai.taxonomy import ENABLED_TYPES
 from ai.utils import extract_json_dict
 
@@ -22,10 +21,26 @@ SYSTEM_PROMPT_RAG = f"""你是一个合同分类专家。先阅读下面给出�
 
 法理分类（{len(ENABLED_TYPES)} 类，选择其一）：{', '.join(ENABLED_TYPES)}
 
-判断规则：
-1. 优先参照「与待分类合同最相似的示例」及其类型；
-2. 示例只是参照，最终以待分类合同正文的实质内容为准；
-3. is_outsourcing 单独判断（业务标签，不影响法理分类）：一方把软件开发/运维/业务流程整体外包给另一方完成（两方：发包方+承包方，承包方自行管理员工）则 true；劳务派遣（三方：派遣单位+用工单位+劳动者）不是服务外包，false。
+判断标准（按正文条款的实质内容判断，不要仅凭标题或首行文字；示例只是参照，最终以正文实质内容为准）：
+- 买卖合同：货物买卖/购销/采购/销售，含交付、价款、质量、验收、售后（采购方、销售方、中性买卖都归此类，不区分买卖方向）
+- 租赁合同：租赁物使用，含租期、租金、押金、维修、返还
+- 承揽合同：定作加工/定制开发，含定作要求、材料、交付验收、报酬
+- 建设工程合同：工程总承包/施工/勘察设计/监理，含工期、价款、竣工验收、质量保修
+- 技术合同：技术开发/转让/许可/服务/咨询，含技术成果归属、验收、后续改进
+- 委托合同：委托代理/委托事务，含委托权限、费用、报告义务
+- 物业服务合同：物业管理服务（清洁/绿化/安保/维修/秩序维护），含物业服务范围、物业费、服务标准
+- 中介合同：居间/中介服务，含居间报酬、促成交易
+- 保密协议：以保密义务为核心，约定保密范围、期限、违约责任，不涉及交易标的本身
+- 无名合同：不属于上述任何有名合同的其它合同（培训、养老、电商平台、医疗美容、能源托管等）
+- 劳动合同：以建立劳动关系为核心，含岗位、薪酬、社保、竞业限制、离职；劳务派遣合同（三方：派遣单位+用工单位+劳动者）也归此类
+
+若同时具备多类特征，按「合同的核心标的」判断：
+- 标的为现成货物→买卖合同；标的为定制加工物/定作物→承揽合同；
+- 委托开发软件/技术成果→技术合同；
+- 委托他人办理事务→委托合同；只为促成交易收居间费→中介合同；
+- 培训/养老/电商/医疗美容等其它服务→无名合同。
+
+is_outsourcing 单独判断（业务标签，不影响法理分类）：一方把软件开发/运维/业务流程整体外包给另一方完成（两方：发包方+承包方，承包方自行管理员工）则 true；劳务派遣（三方：派遣单位+用工单位+劳动者）不是服务外包，false。
 
 只输出 JSON（不要加任何前缀或后缀）：
 {{"contract_type": "合同类型", "is_outsourcing": true/false, "confidence": 0.0-1.0, "reason": "一句话判断依据"}}"""
@@ -47,6 +62,8 @@ def classify_by_rag(full_text: str, top_k: int = 3, exclude_self: str = "") -> d
         return {"contract_type": "其他合同", "is_outsourcing": False, "confidence": 0.0,
                 "method": "rag", "reason": "合同文本为空", "top_matches": [], "fallback": True}
 
+    # 懒加载 RAG 向量库（避免启动链拖入 chromadb/sentence_transformers）
+    from ai.rag.vector_store import search_similar_templates, _excerpt
     matches = search_similar_templates(full_text[:MAX_QUERY_CHARS], top_k + 1)
     if exclude_self:
         matches = [m for m in matches if m.get("text") != exclude_self]
