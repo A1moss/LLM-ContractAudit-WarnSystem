@@ -147,8 +147,12 @@ def _is_empty(v) -> bool:
 
 def extract_evidence(full_text: str) -> dict:
     body, supplement = _split_supplement(full_text)
-    body_ev = _extract_one(body)
     if supplement.strip():
-        supp_ev = _extract_one(supplement)
+        # 正文与补全条款并行抽取（各自动分块），缩短审核等待
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            body_fut = ex.submit(_extract_one, body)
+            supp_fut = ex.submit(_extract_one, supplement)
+            body_ev = body_fut.result()
+            supp_ev = supp_fut.result()
         return _merge_override(body_ev, supp_ev)
-    return body_ev
+    return _extract_one(body)

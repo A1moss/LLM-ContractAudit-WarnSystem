@@ -25,7 +25,6 @@ from ai.auditor.evidence_adjudicator import adjudicate_risks
 from ai.auditor.recommendation_engine import build_recommendations
 from ai.confidence import enrich_confidences
 from ai.corex import run_review
-from ai.rag import search_knowledge
 from ai.reporter import generate_report, compute_heatmap
 from ai.matcher import compare_clauses
 from ai.reviser import revise_clause
@@ -163,20 +162,25 @@ async def upload_contract(
         if ext.lower() in (".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp"):
             raise HTTPException(status_code=422, detail="图片未识别到文字，请确认图片清晰或上传 PDF/DOCX 格式")
 
+    # 分类与要素抽取并行（要素抽取对 contract_type 不敏感，用中性词占位，不必等分类结果）
+    from concurrent.futures import ThreadPoolExecutor
     cls_result = {"contract_type": contract_type or "other", "confidence": 0.0, "is_outsourcing": False}
-    try:
-        cls_result = classify_contract(full_text)
-    except Exception as e:
-        logger.warning("合同分类失败，回退为 %s: %s", contract_type or "other", e)
+    elements = {}
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        cls_fut = ex.submit(classify_contract, full_text)
+        ele_fut = ex.submit(extract_elements, full_text, contract_type or "合同")
+        try:
+            cls_result = cls_fut.result()
+        except Exception as e:
+            logger.warning("合同分类失败，回退为 %s: %s", contract_type or "other", e)
+        try:
+            elements = ele_fut.result()
+        except Exception as e:
+            logger.warning("要素抽取失败，使用空要素: %s", e)
+
     actual_type = contract_type or cls_result.get("contract_type", "other")
     confidence = cls_result.get("confidence", 0.0)
     is_outsourcing = bool(cls_result.get("is_outsourcing", False))
-
-    elements = {}
-    try:
-        elements = extract_elements(full_text, actual_type)
-    except Exception as e:
-        logger.warning("要素抽取失败，使用空要素: %s", e)
 
     contract = Contract(
         user_id=current_user.id,
@@ -577,9 +581,10 @@ def revise_contract_clause(
     if not body.instruction.strip():
         raise HTTPException(status_code=400, detail="instruction is required")
 
-    # 检索相关法条作为修订依据
+    # 检索相关法条作为修订依据（懒加载 RAG，避免启动时拖入 chromadb/torch）
     rag_context = None
     try:
+        from ai.rag import search_knowledge
         rag_context = search_knowledge(body.instruction, "laws", 3)
     except Exception as e:
         logger.warning("改条款法条检索失败: %s", e)

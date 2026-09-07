@@ -14,6 +14,7 @@ LegalGraphRAG 的图检索增强）：
 import os
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 from ai.chunker import split_chunks
 from ai.llm_client import llm_client
@@ -181,14 +182,18 @@ def compare_clauses(full_text: str, contract_type: str, is_outsourcing: bool = F
         for i, c in enumerate(docs)
     )
 
-    # 分块：长合同逐块比对，尾部条款不再漏检
+    # 分块：长合同逐块比对，尾部条款不再漏检（分块并行，缩短审核等待）
     chunks = split_chunks(full_text, MAX_COMPARE_CHARS)
     if len(chunks) > 1:
         logger.info("条款比对：合同 %d 字超过单块上限，分为 %d 块", len(full_text), len(chunks))
 
     merged = []
-    for chunk in chunks:
-        merged.extend(_compare_chunk(chunk, contract_type, standards))
+    if len(chunks) > 1:
+        with ThreadPoolExecutor(max_workers=min(len(chunks), 6)) as ex:
+            for clauses in ex.map(lambda c: _compare_chunk(c, contract_type, standards), chunks):
+                merged.extend(clauses)
+    else:
+        merged.extend(_compare_chunk(chunks[0], contract_type, standards))
 
     clauses = _merge_clause_results(merged)
     if clauses:
