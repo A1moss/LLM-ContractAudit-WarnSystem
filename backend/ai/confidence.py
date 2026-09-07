@@ -15,7 +15,7 @@
        —— 缺失型规则：R08/R09 依赖"某词未出现"，证据是缺席，置信度较低
 
     2) LLM 语义置信度 (llm_confidence)
-       —— 直接采用 LLM 在 temperature=0.1 下输出的 confidence 字段
+       —— 直接采用 LLM 在 temperature=0 下输出的 confidence 字段
        —— 模型未给出时给中性 0.6（诚实标注不确定性），不再假装 0.7
 
     3) 多 Agent 一致性置信度 (agent_confidence)

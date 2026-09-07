@@ -4,14 +4,15 @@ import os
 import re
 import uuid
 import mimetypes
+import html
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, status, BackgroundTasks
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 
-from database import get_db
+from database import get_db, SessionLocal
 from models.contract import Contract
 from models.user import User
 from api.deps import get_current_user, require_role, ROLE_ADMIN
@@ -19,6 +20,9 @@ from ai.parser import detect_and_parse
 from ai.classifier import classify_contract
 from ai.extractor import extract_elements
 from ai.auditor import run_rules, audit_with_llm
+from ai.auditor.evidence_extractor import extract_evidence
+from ai.auditor.evidence_adjudicator import adjudicate_risks
+from ai.auditor.recommendation_engine import build_recommendations
 from ai.confidence import enrich_confidences
 from ai.corex import run_review
 from ai.rag import search_knowledge
@@ -130,7 +134,7 @@ async def upload_contract(
     file: UploadFile = File(...),
     name: str = Form(None),
     contract_type: str = Form(None),
-    audit_mode: str = Form("fast"),
+    audit_mode: str = Form("precise"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -330,64 +334,35 @@ def get_contract_file(
     )
 
 
-@router.post("/{contract_id}/audit")
-def trigger_audit(
-    contract_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    c = db.query(Contract).filter(Contract.id == contract_id, Contract.user_id == current_user.id).first()
-    if not c:
-        raise HTTPException(status_code=404, detail="contract not found")
-    if not c.parsed_text:
-        raise HTTPException(status_code=400, detail="contract has no parsed text, upload first")
-
-    # Mark auditing
-    c.status = "auditing"
-    db.commit()
-
-    audit_batch = str(uuid.uuid4())
-    full_text = c.parsed_text
-
+def _run_audit(contract_id: int):
+    """后台执行完整审核流水线（独立 DB session，供 BackgroundTasks 调用）。"""
+    db = SessionLocal()
     try:
-        # 1. Rule engine (always runs)
+        c = db.query(Contract).filter(Contract.id == contract_id).first()
+        if not c or not c.parsed_text:
+            return
+
+        audit_batch = str(uuid.uuid4())
+        full_text = c.parsed_text
+
+        # 1. Rule engine (fast 基线，始终先跑)
         rule_results = run_rules(full_text)
-        all_risks = list(rule_results)
-        rag_ctx = None  # 供证据链使用，precise 模式下会被赋值为检索到的法条
 
-        # 2. LLM auditor (precise mode only)
+        # 2. 证据抽取 + 确定性裁决（precise 主口径，v6.4 架构）
         if c.audit_mode == "precise":
-            # RAG-enhanced LLM audit
             try:
-                rag_ctx = search_knowledge(full_text, "laws", 3)
-                if not rag_ctx:
-                    rag_ctx = search_knowledge(full_text, "standard_clauses", 3)
+                evidence = extract_evidence(full_text)
+                adjudicated = adjudicate_risks(evidence)
+                # v6.5 建议层：只消费裁决结果，不反向影响 R01-R12 判定
+                all_risks = build_recommendations(adjudicated, evidence) if adjudicated else list(rule_results)
             except Exception as e:
-                logger.warning("RAG search failed: %s", e)
-                rag_ctx = None
+                logger.warning("证据裁决失败，退回规则引擎: %s", e)
+                all_risks = list(rule_results)
+        else:
+            all_risks = list(rule_results)
 
-            try:
-                llm_results = audit_with_llm(full_text, rag_ctx if rag_ctx else None)
-                for r in llm_results:
-                    r["detection_method"] = "rag"
-                all_risks.extend(llm_results)
-            except Exception as e:
-                logger.warning("LLM auditor unavailable, fall back to rule-only: %s", e)
-
-            # 3. Corex multi-agent review (precise mode only)
-            try:
-                corex_result = run_review(full_text, rule_results)
-                # 只保存各 Agent 的检出数量，避免完整日志与风险列表互相引用导致 JSON 序列化循环引用
-                corex_agent_log = {
-                    name: {"count": info.get("count", 0)}
-                    for name, info in (corex_result.get("agent_logs") or {}).items()
-                }
-                for r in corex_result.get("risks", []):
-                    r["detection_method"] = "corex_review"
-                    r["corex_agent_log"] = corex_agent_log
-                all_risks.extend(corex_result.get("risks", []))
-            except Exception as e:
-                logger.warning("Corex review unavailable, continue with rule/LLM results: %s", e)
+        # 删除该合同历史审核记录，避免新旧批次混杂（重新审核 = 覆盖旧结果）
+        db.query(AuditRecord).filter(AuditRecord.contract_id == contract_id).delete()
 
         # 跨来源置信度融合：规则/LLM/多Agent 独立检出同一风险时交叉验证上调
         enrich_confidences(all_risks)
@@ -412,7 +387,13 @@ def trigger_audit(
                 detection_method=r.get("detection_method", "rule"),
                 confidence=r.get("confidence", 0.5),
                 corex_agent_log=r.get("corex_agent_log"),
-                evidence=_build_evidence(r, rag_ctx),
+                evidence=_build_evidence(r, None),
+                recommendation={
+                    "risk_description": r.get("risk_description"),
+                    "example": r.get("example"),
+                    "legal_basis": r.get("legal_basis"),
+                    "grounding": r.get("grounding"),
+                } if r.get("risk_description") or r.get("example") else None,
                 feedback_status="pending",
             )
             db.add(record)
@@ -440,7 +421,7 @@ def trigger_audit(
         # Generate report HTML（风险表 + 条款比对章节）
         risk_rows = "".join(
             f"<tr><td>{r.get('risk_type','')}</td><td>{r.get('level','')}</td>"
-            f"<td>{r.get('reason','')[:80]}</td><td>{r.get('suggestion','')[:80]}</td></tr>"
+            f"<td>{html.escape(r.get('reason','') or '')[:80]}</td><td>{html.escape(r.get('suggestion','') or '')[:80]}</td></tr>"
             for r in all_risks
         )
 
@@ -450,8 +431,8 @@ def trigger_audit(
             cov_rate = s.get("coverage_rate") or 0
             miss_cnt = s.get("missing") or 0
             compare_rows = "".join(
-                f"<tr><td>{cl.get('title','')}</td><td>{cl.get('status','')}</td>"
-                f"<td>{cl.get('deviation','') or ''}</td><td>{cl.get('completion','') or ''}</td></tr>"
+                f"<tr><td>{html.escape(cl.get('title','') or '')}</td><td>{cl.get('status','')}</td>"
+                f"<td>{html.escape(cl.get('deviation','') or '')}</td><td>{html.escape(cl.get('completion','') or '')}</td></tr>"
                 for cl in compare_result["clauses"]
             )
             compare_section = (
@@ -500,10 +481,38 @@ def trigger_audit(
         }
     except Exception as e:
         db.rollback()
-        c.status = "parsed"
-        db.commit()
-        logger.exception("Audit failed, contract reset to parsed: %s", e)
-        raise HTTPException(status_code=500, detail=f"audit failed: {e}")
+        c2 = db.query(Contract).filter(Contract.id == contract_id).first()
+        if c2:
+            c2.status = "parsed"
+            db.commit()
+        logger.exception("后台审核失败，合同重置为 parsed: %s", e)
+    finally:
+        db.close()
+
+
+@router.post("/{contract_id}/audit")
+def trigger_audit(
+    contract_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    c = db.query(Contract).filter(Contract.id == contract_id, Contract.user_id == current_user.id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="contract not found")
+    if not c.parsed_text:
+        raise HTTPException(status_code=400, detail="contract has no parsed text, upload first")
+
+    # 异步审核：立即返回，后台执行完整流水线
+    c.status = "auditing"
+    db.commit()
+
+    background_tasks.add_task(_run_audit, contract_id)
+    return {
+        "code": 0,
+        "message": "审核已提交，后台处理中",
+        "data": {"contract_id": contract_id, "status": "auditing"},
+    }
 
 
 @router.post("/{contract_id}/review")
@@ -613,6 +622,7 @@ def get_audit_result(
                     "detection_method": r.detection_method,
                     "confidence": r.confidence,
                     "evidence": r.evidence,
+                    "recommendation": r.recommendation,
                     "feedback_status": r.feedback_status,
                 }
                 for r in records

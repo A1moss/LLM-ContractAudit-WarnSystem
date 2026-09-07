@@ -239,3 +239,7 @@ dify-workflows/
 # LLM ÆÀ²â»º´æ£¨±¾µØ£©
 cache.json
 cache_elements.json
+
+# eval caches and pilot intermediates
+cache_risks_llm.json
+backend/evaluate/_pilot5/

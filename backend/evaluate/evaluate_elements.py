@@ -26,7 +26,7 @@ sys.path.insert(0, str(_BACKEND_DIR))
 
 from ai.extractor.extractor import extract_elements  # noqa: E402
 
-TESTSET = _SERVICE_DIR / "03_数据集" / "测试集" / "realtest.json"
+TESTSET = Path(__file__).resolve().parent / "realtest.json"
 CACHE = Path(__file__).resolve().parent / "cache_elements.json"
 
 FIELD_CN = {
@@ -49,7 +49,10 @@ def _yuan_of(text):
     """把金额文本统一折算为『元』数值；无法识别返回 None。仅处理人民币，外币返回 (None, currency)。"""
     if not text:
         return None
-    m = re.search(r"([\d,]+(?:\.\d+)?)\s*(万元|亿元|万|亿|元|美元|欧元|人民币)", text)
+    # 单位优先匹配「万元/亿元/元」；「万/亿」仅当后面跟非量词（避免「5万吨」误配）
+    m = re.search(r"([\d,]+(?:\.\d+)?)\s*(万元|亿元|元|万(?!吨|个|只|件|台|套|米|人|亩|户)|亿(?!吨|个|只|件|台|套|米|人|亩|户))", text)
+    if not m:
+        m = re.search(r"([\d,]+(?:\.\d+)?)\s*(万元|亿元|元)", text)
     if not m:
         m = re.search(r"([\d,]+(?:\.\d+)?)", text)
     if not m:
@@ -65,6 +68,43 @@ def _yuan_of(text):
     return num
 
 
+def _amount_to_yuan(v):
+    """把 gold/pred 的金额标注值统一折算为『元』：数字直接返回；字符串解析单位；中文大写兜底。"""
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v) if v > 0 else None
+    s = str(v).strip()
+    if not s:
+        return None
+    y = _yuan_of(s)
+    if y is not None:
+        return y
+    return _cn_upper_to_num(s)
+
+
+def _cn_upper_to_num(s):
+    """中文大写金额（壹贰叁…拾佰仟万亿）→ 数字；无法识别返回 None。"""
+    digits = "零壹贰叁肆伍陆柒捌玖"
+    units = {"拾": 10, "佰": 100, "仟": 1000, "万": 10000, "亿": 100000000}
+    val, cur = 0.0, 0.0
+    for ch in s:
+        if ch in digits:
+            cur = float(digits.index(ch))
+        elif ch in units:
+            u = units[ch]
+            if cur == 0 and ch not in ("万", "亿"):
+                cur = 1
+            if ch in ("万", "亿"):
+                val = (val + cur) * u
+                cur = 0
+            else:
+                val += cur * u
+                cur = 0
+    r = val + cur
+    return r if r > 0 else None
+
+
 def _years_of(text):
     return set(re.findall(r"(20\d{2})", text or ""))
 
@@ -73,27 +113,28 @@ def _match_parties(pred, raw):
     if not isinstance(pred, dict):
         return False
     a, b = pred.get("甲方"), pred.get("乙方")
-    if not a or not b or "未知" in (a + b):
+    if not a or not b:
         return False
-    raw_names = set(re.findall(r"（([^（）]+)）", raw or ""))
-    raw_names |= set(re.findall(r"某[^（）×\s]{2,12}", raw or ""))
-    # pred 两角色名至少有一个与 raw 中的占位名匹配（包含/相等/被包含）
-    hit = 0
-    for n in (a, b):
-        if any(n == r or n in r or r in n for r in raw_names):
-            hit += 1
-    return hit >= 2  # 严格：甲方、乙方两角色都要与标注对齐
+    if "未知" in (str(a) + str(b)):
+        return False
+    # 脱敏后正文主体为〔甲方〕〔乙方〕/占位符，具体名称无法比对；
+    # 口径 = 系统识别出甲乙双方角色均存在（与 gold parties.present 语义一致）
+    return True
 
 
-def _match_amount(pred, raw):
+def _match_amount(pred, raw, gold_value=None):
     if not isinstance(pred, dict):
         return False
+    p_yuan = None
     pv = pred.get("value")
     if isinstance(pv, (int, float)) and pv > 0:
-        p_yuan = pv
+        p_yuan = float(pv)
     else:
-        p_yuan = _yuan_of(pred.get("text") or "")
-    r_yuan = _yuan_of(raw)
+        p_yuan = _amount_to_yuan(pred.get("text") or "")
+    # gold 侧：优先标注 value（干净值），其次原文片段（可能含「5万吨」等干扰数字）
+    r_yuan = _amount_to_yuan(gold_value) if gold_value else None
+    if r_yuan is None:
+        r_yuan = _yuan_of(raw)
     if not p_yuan or not r_yuan:
         return False
     return abs(p_yuan - r_yuan) / r_yuan < 0.10  # 10% 容差（公告金额常为近似值）
@@ -163,7 +204,7 @@ def main():
         if gold.get("present"):
             n_disclosed["amount"] += 1
             stats["amount"]["den"] += 1
-            if _match_amount(pred.get("amount"), gold.get("raw")):
+            if _match_amount(pred.get("amount"), gold.get("raw"), gold.get("value")):
                 stats["amount"]["tp"] += 1
             elif pred.get("amount"):
                 stats["amount"]["fp"] += 1

@@ -18,7 +18,7 @@ class Contract(Base):
     parsed_text: Mapped[str] = mapped_column(Text, nullable=True, default=None)
     extracted_elements: Mapped[dict] = mapped_column(JSON, nullable=True, default=None)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="uploaded")
-    audit_mode: Mapped[str] = mapped_column(String(10), nullable=False, default="fast")
+    audit_mode: Mapped[str] = mapped_column(String(10), nullable=False, default="precise")
     template_version: Mapped[int] = mapped_column(Integer, nullable=True, default=None)
     stored_path: Mapped[str] = mapped_column(String(500), nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

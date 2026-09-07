@@ -167,7 +167,7 @@ watch(() => props.loadedFeedbacks, (list) => {
 const LEVEL_MAP = { high: '高风险', medium: '中风险', low: '低风险' }
 function levelLabel(level) { return LEVEL_MAP[level] || level || '未知' }
 
-const TYPE_LABELS = { R01:'违约金过高',R02:'无限责任',R03:'单方解约权',R04:'保密期限不合理',R05:'知识产权归属不清',R06:'争议管辖不利',R07:'付款期限不合理',R08:'缺失验收标准',R09:'缺失不可抗力',R10:'缺失数据保护',R11:'SLA罚则过高',R12:'源代码托管缺失' }
+const TYPE_LABELS = { R01:'违约金过高',R02:'无限责任',R03:'单方解约权',R04:'管辖条款不利',R05:'保密期间不合理',R06:'知识产权归属不清',R07:'付款条件不公平',R08:'验收标准缺失',R09:'不可抗力条款缺失',R10:'竞业限制过宽',R11:'自动续约陷阱',R12:'数据隐私条款不当',R13:'疑似名实不符' }
 function riskTypeLabel(type) { return TYPE_LABELS[type] || type || '未分类' }
 
 const METHOD_LABELS = { rule:'规则引擎',rag:'RAG语义',llm:'LLM分析',corex_review:'Corex交叉验证',dify_fallback:'Dify备用' }

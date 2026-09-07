@@ -16,7 +16,7 @@ sys.path.insert(0, str(_BACKEND_DIR))
 from ai.classifier.knn_classifier import classify_by_knn
 from ai.taxonomy import ENABLED_TYPES
 
-TESTSET_REAL = _SERVICE_DIR / "03_数据集" / "测试集" / "realtest.json"   # 真实合同测试集（人工标注，待收集）
+TESTSET_REAL = Path(__file__).resolve().parent / "realtest.json"   # 真实合同测试集（人工标注，待收集）
 TESTSET_FALLBACK = _SERVICE_DIR / "03_数据集" / "测试集" / "testset.json"  # 范本样本集（与检索库同源，仅冒烟参考）
 
 

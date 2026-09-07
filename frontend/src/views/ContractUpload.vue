@@ -51,10 +51,10 @@
 
         <el-form-item label="审核模式" prop="audit_mode">
           <el-radio-group v-model="form.audit_mode">
-            <el-radio value="fast">快速审核</el-radio>
-            <el-radio value="precise">精细审核</el-radio>
+            <el-radio value="precise">精细审核（推荐）</el-radio>
+            <el-radio value="fast">快速初筛</el-radio>
           </el-radio-group>
-          <div class="form-hint">快速 ~5s（规则引擎 + LLM 初筛）｜精细 ~20s（含多 Agent 交叉验证，复杂合同自动启用深度辩论）</div>
+          <div class="form-hint">精细审核（证据抽取 + 规则裁决，准确）｜快速初筛（纯规则引擎，仅作粗筛、误报较多）</div>
         </el-form-item>
 
         <el-form-item>
@@ -103,7 +103,7 @@ const progressText = ref('')
 const form = reactive({
   name: '',
   contract_type: '',
-  audit_mode: 'fast',
+  audit_mode: 'precise',
 })
 
 const rules = {
@@ -199,7 +199,7 @@ function handleReset() {
   formRef.value?.resetFields()
   form.name = ''
   form.contract_type = ''
-  form.audit_mode = 'fast'
+  form.audit_mode = 'precise'
   selectedFile.value = null
   progress.value = 0
   progressStatus.value = ''

@@ -23,5 +23,7 @@ class AuditRecord(Base):
     corex_agent_log: Mapped[dict] = mapped_column(JSON, nullable=True, default=None)
     # 可溯源证据链：本风险所依据的知识库条目（法条/标准条款），支持答辩"可解释性"
     evidence: Mapped[dict] = mapped_column(JSON, nullable=True, default=None)
+    # v6.5 建议层：风险说明/修改示例/法律依据/接地检查（与裁决解耦）
+    recommendation: Mapped[dict] = mapped_column(JSON, nullable=True, default=None)
     feedback_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

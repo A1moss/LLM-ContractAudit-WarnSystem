@@ -699,10 +699,25 @@ async function handleTriggerAudit() {
   try {
     await triggerAudit(route.params.id)
     contract.value.status = 'auditing'
-    await fetchAuditResult()
-    await fetchClauseComparison()
-    await fetchDetail()
-    ElMessage.success('审核完成')
+    ElMessage.info('审核已提交，后台处理中…')
+    // 轮询直到审核完成（后端已改为异步 BackgroundTasks）
+    const deadline = Date.now() + 180000  // 最多 3 分钟
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 2000))
+      await fetchDetail()
+      const st = contract.value.status
+      if (st === 'completed') {
+        await fetchAuditResult()
+        await fetchClauseComparison()
+        ElMessage.success('审核完成')
+        return
+      }
+      if (st === 'parsed') {
+        ElMessage.error('审核失败，合同已重置为已解析状态')
+        return
+      }
+    }
+    ElMessage.warning('审核超时，请稍后在列表页查看结果')
   } catch (e) {
     ElMessage.error('审核触发失败')
   } finally { auditing.value = false }

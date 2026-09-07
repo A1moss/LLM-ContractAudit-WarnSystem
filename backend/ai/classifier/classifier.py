@@ -10,6 +10,7 @@ ai.classifier — 合同类型分类（法理维度）+ 业务标签（服务外
 """
 import logging
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 
 from ai.chunker import split_chunks
 from ai.llm_client import llm_client
@@ -117,8 +118,14 @@ def classify_contract(full_text: str) -> dict:
     type_reason: dict[str, str] = {}       # 各类型最近一次判断依据
     outsourcing_votes = Counter()          # 服务外包业务标签得票数
 
-    for chunk in sampled:
-        r = _classify_one_chunk(chunk)
+    # 并行分类采样块（LLM 调用并发，缩短上传等待）
+    if len(sampled) > 1:
+        with ThreadPoolExecutor(max_workers=min(len(sampled), 5)) as ex:
+            results = list(ex.map(_classify_one_chunk, sampled))
+    else:
+        results = [_classify_one_chunk(sampled[0])]
+
+    for r in results:
         if not r:
             continue
         ct = r["contract_type"]

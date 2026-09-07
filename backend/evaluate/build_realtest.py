@@ -23,7 +23,7 @@ logger = logging.getLogger("build_realtest")
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 _SERVICE_DIR = _BACKEND_DIR.parent.parent
 REAL_DIR = _SERVICE_DIR / "05_合同" / "现实合同"
-OUT_PATH = _SERVICE_DIR / "03_数据集" / "测试集" / "realtest.json"
+OUT_PATH = Path(__file__).resolve().parent / "realtest.json"
 
 sys.path.insert(0, str(_BACKEND_DIR))
 from ai.taxonomy import ENABLED_TYPES, KIND_TYPICAL, KIND_UNNAMED, kind_of  # noqa: E402

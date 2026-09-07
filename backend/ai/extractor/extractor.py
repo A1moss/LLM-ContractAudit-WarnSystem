@@ -2,6 +2,7 @@ from ai.chunker import split_chunks
 from ai.llm_client import llm_client
 from ai.utils import extract_json_dict
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +22,12 @@ SYSTEM_PROMPT_EXTRACT = """你是一个法律信息抽取专家。请从合同�
 }
 
 规则：
-1. 双方信息从合同首部提取，识别公司全称和角色（甲方/乙方）
-2. 金额取合同总金额，数字类型，注意区分含税/不含税
+1. 双方信息从合同首部提取。不同合同的双方称谓不同——甲方/乙方、采购人/供应商、买方/卖方、
+   委托方/受托方、发包方/承包方、出租方/承租方、用人单位/劳动者、披露方/接收方、需方/供方等，
+   一律归一化到「甲方」「乙方」两栏（首部先出现/承担主要给付义务的一方为甲方，另一方为乙方）。
+   若正文已脱敏（〔甲方〕/〔乙方〕/<公司>/〈公司〉等占位符），原样输出该占位符，
+   表示已识别到该方存在，不得填「未知」或 null。
+2. 金额取合同总金额，数字类型，注意区分含税/不含税；正文金额被脱敏为「<金额>」等占位符时填 null
 3. 日期统一 YYYY-MM-DD，如"自签署之日"需结合签署日期推算
 4. 争议解决提取仲裁机构或管辖法院全称
 5. 未出现的字段填 null"""
@@ -60,33 +65,42 @@ def _merge_elements(results: list[dict]) -> dict:
     return merged
 
 
+def _extract_chunk(chunk: str, contract_type: str):
+    """抽取单个文本块的要素，失败返回 None。"""
+    prompt = (
+        f"{SYSTEM_PROMPT_EXTRACT}\n\n"
+        f"这是一个{contract_type}。\n\n"
+        f"{FEWSHOT_EXAMPLE}\n\n"
+        f"现在请从以下合同中抽取要素：\n{chunk}"
+    )
+    try:
+        response = llm_client.chat(prompt=prompt, temperature=0.0)
+        result = extract_json_dict(response)
+        if result:
+            return {
+                "parties": result.get("parties"),
+                "amount": result.get("amount"),
+                "sign_date": result.get("sign_date"),
+                "performance_period": result.get("performance_period"),
+                "dispute_resolution": result.get("dispute_resolution"),
+                "governing_law": result.get("governing_law"),
+            }
+    except Exception as e:
+        logger.warning(f"LLM 要素抽取失败: {e}")
+    return None
+
+
 def extract_elements(full_text: str, contract_type: str) -> dict:
     chunks = split_chunks(full_text, MAX_EXTRACT_CHARS)
     if len(chunks) > 1:
         logger.info("要素抽取：合同 %d 字超过单块上限，分为 %d 块", len(full_text), len(chunks))
 
-    results = []
-    for chunk in chunks:
-        prompt = (
-            f"{SYSTEM_PROMPT_EXTRACT}\n\n"
-            f"这是一个{contract_type}。\n\n"
-            f"{FEWSHOT_EXAMPLE}\n\n"
-            f"现在请从以下合同中抽取要素：\n{chunk}"
-        )
-        try:
-            response = llm_client.chat(prompt=prompt, temperature=0.1)
-            result = extract_json_dict(response)
-            if result:
-                results.append({
-                    "parties": result.get("parties"),
-                    "amount": result.get("amount"),
-                    "sign_date": result.get("sign_date"),
-                    "performance_period": result.get("performance_period"),
-                    "dispute_resolution": result.get("dispute_resolution"),
-                    "governing_law": result.get("governing_law"),
-                })
-        except Exception as e:
-            logger.warning(f"LLM 要素抽取失败: {e}")
+    # 并行抽取各块（LLM 调用并发，缩短上传等待）
+    if len(chunks) > 1:
+        with ThreadPoolExecutor(max_workers=min(len(chunks), 6)) as ex:
+            results = [r for r in ex.map(lambda c: _extract_chunk(c, contract_type), chunks) if r]
+    else:
+        results = [r for r in [_extract_chunk(chunks[0], contract_type)] if r]
 
     if results:
         merged = _merge_elements(results)
