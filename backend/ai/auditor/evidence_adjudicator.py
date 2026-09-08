@@ -39,6 +39,58 @@ LEVELS = {
 }
 
 
+def _num(v):
+    """数值归一化：int/float 直接转 float；str 剥离 %/％/‰ 并换算（"5%"→0.05、"5‰"→0.005）；
+    None/空/无法解析返回 None。用于 R01/R07/R10 阈值判定，避免 LLM 输出字符串被 isinstance 静默跳过。"""
+    if v is None or isinstance(v, bool) or v == "":
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        s = v.strip().replace(",", "")
+        if s.endswith("%") or s.endswith("％"):
+            try:
+                return float(s[:-1].strip()) / 100.0
+            except ValueError:
+                return None
+        if s.endswith("‰"):
+            try:
+                return float(s[:-1].strip()) / 1000.0
+            except ValueError:
+                return None
+        try:
+            return float(s)
+        except ValueError:
+            return None
+    return None
+
+
+def _normalize_scope(v):
+    """R10 scope 同义归一化：全国范围/全球/境内/不限地域 等 → 全国；主营 → 主营业务。"""
+    if not isinstance(v, str):
+        return v
+    s = v.strip()
+    if any(k in s for k in ("全国", "全球", "境内", "不限地域", "不限地区", "所有区域")):
+        return "全国"
+    if "主营" in s:
+        return "主营业务"
+    if "全行业" in s or "所有行业" in s:
+        return "全行业"
+    return s
+
+
+def _normalize_mode(v):
+    """R11 mode 中英同义归一化：中文「沉默/自动续约」→ silence_auto_renewal。"""
+    if not isinstance(v, str):
+        return v
+    s = v.strip()
+    if s in ("silence_auto_renewal", "沉默自动续约", "沉默续约", "自动续约", "到期自动续", "期满自动续"):
+        return "silence_auto_renewal"
+    if s in ("主动续签", "主动续约", "active_renewal"):
+        return "主动续签"
+    return s
+
+
 def _clause(txt):
     return (txt or "").strip()
 
@@ -84,8 +136,8 @@ def adjudicate_risks(evidence: dict) -> list[dict]:
     # R01 违约金过高：日 ≥ 5‰
     r = evidence.get("R01_违约金") or {}
     if r.get("exists") and r.get("unit") == "daily":
-        rate = r.get("rate")
-        if isinstance(rate, (int, float)) and rate >= 0.005:
+        rate = _num(r.get("rate"))
+        if rate is not None and rate >= 0.005:
             add("R01", r.get("clause_text") or r.get("basis") or "违约金条款")
 
     # R02 无限责任：scope/absolute_text 含超可预见标记
@@ -119,11 +171,11 @@ def adjudicate_risks(evidence: dict) -> list[dict]:
 
     # R07 付款失衡：预付≥80% 或 尾款≥30% 且无里程碑
     r = evidence.get("R07_付款") or {}
-    prepay = r.get("prepay_ratio") or 0
-    tail = r.get("tail_ratio") or 0
-    if isinstance(prepay, (int, float)) and prepay >= 0.8:
+    prepay = _num(r.get("prepay_ratio"))
+    tail = _num(r.get("tail_ratio"))
+    if prepay is not None and prepay >= 0.8:
         add("R07", r.get("payment_evidence") or "付款条款")
-    elif isinstance(tail, (int, float)) and tail >= 0.3 and not r.get("has_milestone"):
+    elif tail is not None and tail >= 0.3 and not r.get("has_milestone"):
         add("R07", r.get("payment_evidence") or "付款条款")
 
     # R08 验收缺失：交付型 + 无客观依据
@@ -140,17 +192,17 @@ def adjudicate_risks(evidence: dict) -> list[dict]:
     if is_delivery and not valid:
         add("R09", evidence_text or "全文未出现不可抗力相关条款")
 
-    # R10 竞业过宽：≥5年 + 全国/主营/全行业
+    # R10 竞业过宽：≥5年 + 全国/主营/全行业（scope 同义归一化）
     r = evidence.get("R10_竞业") or {}
     if r.get("has_noncompete"):
-        dur = r.get("duration_years") or 0
-        scope = r.get("scope") or ""
-        if isinstance(dur, (int, float)) and dur >= 5 and scope in ("全国", "主营业务", "全行业"):
+        dur = _num(r.get("duration_years"))
+        scope = _normalize_scope(r.get("scope"))
+        if dur is not None and dur >= 5 and scope in ("全国", "主营业务", "全行业"):
             add("R10", r.get("clause_text") or "竞业条款")
 
-    # R11 自动续约：沉默自动续约
+    # R11 自动续约：沉默自动续约（mode 中英同义归一化）
     r = evidence.get("R11_续约") or {}
-    if r.get("mode") == "silence_auto_renewal":
+    if _normalize_mode(r.get("mode")) == "silence_auto_renewal":
         add("R11", r.get("clause_text") or "续约条款")
 
     # R12 数据隐私：有个人信息处理 + 无授权边界
