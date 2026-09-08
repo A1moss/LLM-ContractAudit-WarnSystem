@@ -181,6 +181,7 @@ watch(() => props.loadedFeedbacks, (list) => {
 
 // ── 映射 ──
 const LEVEL_MAP = { high: '高风险', medium: '中风险', low: '低风险' }
+const reverseLevelMap = { '高风险': 'high', '中风险': 'medium', '低风险': 'low' }
 function levelLabel(level) { return LEVEL_MAP[level] || level || '未知' }
 
 const TYPE_LABELS = { R01:'违约金过高',R02:'无限责任',R03:'单方解约权',R04:'管辖条款不利',R05:'保密期间不合理',R06:'知识产权归属不清',R07:'付款条件不公平',R08:'验收标准缺失',R09:'不可抗力条款缺失',R10:'竞业限制过宽',R11:'自动续约陷阱',R12:'数据隐私条款不当',R13:'疑似名实不符' }
@@ -254,7 +255,7 @@ async function handleFalsePositive(item) {
 const correctDialog = reactive({ visible: false, recordId: null, level: 'medium', comment: '' })
 function openCorrect(item) {
   correctDialog.recordId = item.id
-  correctDialog.level = item.risk_level || 'medium'
+  correctDialog.level = item.risk_level || reverseLevelMap[item.level] || 'medium'
   correctDialog.comment = ''
   correctDialog.visible = true
 }
