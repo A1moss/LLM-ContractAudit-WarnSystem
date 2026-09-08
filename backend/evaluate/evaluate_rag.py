@@ -6,6 +6,7 @@ evaluate_rag.py — RAG 少样本分类评测（含 LLM 调用）
 """
 import sys
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from collections import defaultdict
 
@@ -18,6 +19,7 @@ from ai.taxonomy import ENABLED_TYPES
 
 TESTSET_REAL = Path(__file__).resolve().parent / "realtest.json"   # 真实合同测试集（人工标注，待收集）
 TESTSET_FALLBACK = _SERVICE_DIR / "03_数据集" / "测试集" / "testset.json"  # 范本样本集（与检索库同源，仅冒烟参考）
+PRED_FILE = Path(__file__).resolve().parent / "rag_predictions.json"  # 预测快照（可离线复核）
 
 
 def _resolve_testset():
@@ -36,16 +38,44 @@ def main():
 
     conf = defaultdict(list)
     wrong = []
+    predictions = []  # 预测快照（可离线复核 82/84 等结果）
     for e in entries:
         body = e.get("content") or e.get("text", "")
-        pred = classify_by_rag(body, top_k=top_k, exclude_self=body)["contract_type"]
+        r = classify_by_rag(body, top_k=top_k, exclude_self=body)
+        pred = r.get("contract_type", "")
         conf[e["true_type"]].append(pred)
         if pred != e["true_type"]:
             wrong.append((e["id"], e["true_type"], pred))
+        predictions.append({
+            "contract_id": e["id"],
+            "gold": e["true_type"],
+            "prediction": pred,
+            "correct": pred == e["true_type"],
+            "retrieved_templates": r.get("top_matches", []),
+            "reason": r.get("reason", ""),
+        })
 
     total = sum(len(v) for v in conf.values())
     correct = sum(v.count(k) for k, v in conf.items())
     acc = correct / total if total else 0.0
+
+    # 保存预测快照，使分类结果可离线复核（含每条检索到的范本 + 判错样本）
+    snapshot = {
+        "meta": {
+            "script": "evaluate_rag.py",
+            "model": "deepseek-chat",
+            "prompt": "SYSTEM_PROMPT_RAG",
+            "top_k": top_k,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "total": total,
+            "correct": correct,
+            "accuracy": round(acc, 4),
+            "wrong": [{"contract_id": w[0], "gold": w[1], "prediction": w[2]} for w in wrong],
+        },
+        "predictions": predictions,
+    }
+    PRED_FILE.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"预测快照已保存: {PRED_FILE.name}（{correct}/{total}）")
 
     print(f"\n=== RAG 少样本分类准确率 (top_k={top_k}) ===\n样本数 {total}，正确 {correct}，准确率 {acc:.2%}\n")
 
