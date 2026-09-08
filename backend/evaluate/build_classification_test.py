@@ -19,6 +19,7 @@ _SERVICE_DIR = _BACKEND_DIR.parent.parent
 sys.path.insert(0, str(_BACKEND_DIR))
 
 from ai.taxonomy import ENABLED_TYPES  # noqa: E402
+from evaluate.deidentify import deidentify  # noqa: E402
 
 ROOT = _SERVICE_DIR
 REALTEST = _BACKEND_DIR / "evaluate" / "realtest.json"
@@ -55,7 +56,7 @@ def main():
         entries.append({
             "id": e.get("id", ""),
             "true_type": e.get("true_type", ""),
-            "content": strip_meta(e.get("content", "")),  # 第一批 content 也含 > 法理类型 等元信息，一并剥掉
+            "content": deidentify(strip_meta(e.get("content", ""))),  # 第一批 content 也含 > 法理类型 等元信息，一并剥掉 + 脱敏
             "source": "第一批",
             "source_file": e.get("source_file", ""),
             "is_manual": False,
@@ -73,7 +74,7 @@ def main():
             if t not in ENABLED:
                 continue
             is_manual = f.startswith("边界样本")
-            body = strip_meta(Path(full).read_text(encoding="utf-8"))
+            body = deidentify(strip_meta(Path(full).read_text(encoding="utf-8")))
             entries.append({
                 "id": ("manual_" if is_manual else "batch2_") + f[:-3],
                 "true_type": t,
