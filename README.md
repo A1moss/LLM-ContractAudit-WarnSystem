@@ -16,7 +16,7 @@
 | 风险识别精准率 | ≥75% | **76.6%** | ✅ |
 | 风险识别召回率 | ≥75% | **80.1%** | ✅ |
 
-> 测试集口径：**分类**正式测试集 **147 份**（第一批 84 + 第二批 55 + 人工构造困难样本 8，Gold 冻结，去掉答案元信息后评测）；**风险/要素**仍基于 **84 份**真实合同 / 152 条 gold 风险标注（组员背对背标注 + AI 辅助法理审核裁定）。
+> 测试集口径：**分类**正式测试集 **147 份**（第一批 84 + 第二批 55 + 人工构造困难样本 8，Gold 冻结，去掉答案元信息后评测）；**风险/要素**仍基于 **84 份**真实合同 / 152 条 gold 风险标注（组员背对背标注 + 争议案例人工复核定标）。
 > 分类历史冻结口径：97.62%（82/84，84 份原测试集）——保留作版本对照，现正式口径升级为 147 集 98.6%。详见 [docs/测试集说明.md](docs/测试集说明.md)。
 
 ---
@@ -26,7 +26,7 @@
 | 层 | 技术 |
 |---|---|
 | 后端 | FastAPI + SQLAlchemy + SQLite（开发）/ MySQL（生产） |
-| AI 引擎 | DeepSeek（`deepseek-chat`，temperature=0） |
+| AI 引擎 | DeepSeek（`deepseek-chat`；分类/比对/改条款 temperature=0.1，要素/证据/建议 temperature=0.0） |
 | 前端 | Vue 3 + Element Plus + ECharts + Vite |
 | 向量库 | ChromaDB（RAG 法律知识检索） |
 
@@ -49,22 +49,13 @@
 ## 四、目录结构
 
 ```
-backend/
-  ai/
-    parser/       文档解析（docx / pdf / ocr）
-    classifier/   法理分类（11 类 + is_outsourcing）
-    extractor/    要素抽取（双方/金额/期限/争议解决）
-    auditor/      规则引擎 + 证据抽取 + 确定性裁决 + 建议层（核心）
-    knowledge/    法条库 laws.json / 风险案例 / 标准条款
-    matcher/      标准条款比对
-    rag/          ChromaDB / BM25 检索
-  api/            FastAPI 路由（含后台审核流水线 _run_audit）
-  models/         SQLAlchemy 模型
-  evaluate/       评测脚本 + 测试集 realtest.json + gold
-frontend/         Vue 3 前端
-docs/             说明文档（测试集 / 审核流程 / 风险标注口径）
-data/             上传合同存储（运行时生成，git 忽略）
+backend/    FastAPI 后端 + AI 引擎
+frontend/   Vue 3 前端
+docs/       说明文档（系统架构 / 审核流程 / 数据集 / 评测 / 风险规则 / 部署 / 目录 / 参考论文）
+data/       上传合同存储（运行时生成，git 忽略）
 ```
+
+> 完整目录职责见 [docs/项目目录说明.md](docs/项目目录说明.md)。
 
 ---
 
@@ -78,7 +69,7 @@ start-backend.bat
 start-frontend.bat
 ```
 
-环境变量见 `.env.example`：`DEEPSEEK_API_KEY`、`DIFY_API_KEY`、`DATABASE_URL`、`SECRET_KEY`、`CORS_ORIGINS`。
+环境变量见 `.env.example`：`DEEPSEEK_API_KEY`、`DATABASE_URL`、`SECRET_KEY`、`CORS_ORIGINS`。
 
 ---
 
@@ -86,10 +77,16 @@ start-frontend.bat
 
 | 文档 | 说明 |
 |---|---|
-| `README.md`（本文件） | 项目总览 |
-| `A24-详细设计文档-v4.0.md` | 详细设计文档（申报交付物，对齐实现） |
-| [docs/测试集说明.md](docs/测试集说明.md) | 测试集构成、字段结构、标注口径、三大硬指标、复现方式 |
+| [docs/系统架构.md](docs/系统架构.md) | 四层架构、技术栈、模块划分、审核主链路 |
 | [docs/审核流程.md](docs/审核流程.md) | 审核流水线逐步说明（含对应代码文件） |
-| [docs/风险标注口径.md](docs/风险标注口径.md) | R01–R13 风险标注口径（v1.2.4，权威盲标标准） |
+| [docs/数据集说明.md](docs/数据集说明.md) | 数据来源、构建、划分、Gold 与泄漏排查 |
+| [docs/评测方法.md](docs/评测方法.md) | 分类/要素/风险三套评测公式与冻结指标 |
+| [docs/风险规则说明.md](docs/风险规则说明.md) | R01–R13 风险规则（正则 + 硬阈值 + 法条） |
+| [docs/部署与复现.md](docs/部署与复现.md) | 环境、启动、.env、LLM/RAG/OCR/DOCX→PDF、复现命令 |
+| [docs/项目目录说明.md](docs/项目目录说明.md) | 代码目录职责 |
+| [docs/参考论文与技术依据.md](docs/参考论文与技术依据.md) | 公开文献与技术点映射 |
+| [docs/风险标注与Gold规范.md](docs/风险标注与Gold规范.md) | R01–R13 Gold 标注规范（盲标原则 + 边界规则 + 一致性控制） |
+| [docs/测试集说明.md](docs/测试集说明.md) | 测试集字段结构（简版，详见数据集说明） |
+| `A24-详细设计文档-v4.0.md` | 详细设计文档（申报交付物） |
 
-> 更完整的评测过程、FP 归因、设计演进记录在仓库外的 `../02_项目文档/`（`盲标与gold/`、`评测与FP归因/`、`设计文档/`、`风险标注口径/` 等子目录）。
+> 更完整的评测过程、FP 归因、设计演进记录在仓库外的 `../02_项目文档/`。
