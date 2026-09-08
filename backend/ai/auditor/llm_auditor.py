@@ -1,15 +1,18 @@
-"""llm_auditor.py —— 已归档（非生产路径）。
+"""llm_auditor.py —— 已归档（非生产路径，归档状态 final）。
 
-旧「precise = 规则 + LLM 直审」引擎（v5-v124 口径）。生产链路已切换为
-evidence_extractor + evidence_adjudicator（v6.4 冻结），本模块不再被生产调用，
-也不再从 ai.auditor 包命名空间再导出。
+归档最终定义（Batch C 裁定 A）：
+1. 非生产：生产链路已切换为 evidence_extractor + evidence_adjudicator（v6.4 冻结），
+   本模块不参与生产审核，也不再从 ai.auditor 包命名空间再导出。
+2. 不允许重新进入生产 import graph。
+3. 不作为当前正式评测链路：正式风险评测口径 = adjudicate_risks（v6.4 冻结，
+   P76.6 / R80.1 / F1 78.3）；本模块的旧「precise = 规则 + LLM 直审」口径
+   （v5-v124）不参与正式指标。
+4. 保留目的：历史 baseline 与旧实验复现。
 
-当前唯一引用方（均为开发验证 / 旧基线，非生产）：
+当前唯一引用方（开发验证 / 旧基线，非生产）：
 - evaluate/evaluate_risks.py（旧 precise 引擎基线）
 - evaluate/export_fp.py（旧 FP 导出）
 - test_llm.py（冒烟 test_07）
-
-请勿重新接回生产链路。
 """
 from ai.chunker import split_chunks
 from ai.llm_client import llm_client
