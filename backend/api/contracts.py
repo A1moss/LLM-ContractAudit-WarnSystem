@@ -122,6 +122,26 @@ def _build_evidence(r: dict, rag_ctx: list | None) -> dict | None:
     return None
 
 
+_CN_NUM = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+
+
+def _cn_to_int(s: str) -> int | None:
+    """中文数字 → 整数（一~九十九），无法解析返回 None。"""
+    s = (s or "").strip()
+    if not s:
+        return None
+    if s.isdigit():
+        return int(s)
+    if s == "十":
+        return 10
+    if "十" in s:
+        parts = s.split("十")
+        tens = _CN_NUM.get(parts[0], 1) if parts[0] else 1
+        ones = _CN_NUM.get(parts[1], 0) if len(parts) > 1 and parts[1] else 0
+        return tens * 10 + ones
+    return _CN_NUM.get(s)
+
+
 def _locate_clause(full_text: str, clause_text: str) -> dict | None:
     """定位条款位置，返回 {clause_no, clause_title}。
 
@@ -142,11 +162,15 @@ def _locate_clause(full_text: str, clause_text: str) -> dict | None:
     if idx < 0:
         return None
     before = full_text[:idx]
-    headings = list(re.finditer(r'第\s*[一二三四五六七八九十百千\d]+\s*[条款]', before))
+    # 只匹配"第X条"（不含"款"），并捕获编号本身——从最后一个标题解析出真实条号，
+    # 而非用"标题出现次数"当条号（避免目录/条款混排导致计数错位，BUG-023）。
+    headings = list(re.finditer(r'第\s*([一二三四五六七八九十百千\d]+)\s*条', before))
     if not headings:
         return None
     last = headings[-1]
-    clause_no = len(headings)
+    clause_no = _cn_to_int(last.group(1))
+    if clause_no is None:
+        clause_no = len(headings)  # 编号无法解析时退回计数（罕见）
     # 提取标题：从"第X条"之后到下一个换行/全角空格/标点为止
     seg = full_text[last.end():last.end() + 30]
     parts = [p for p in re.split(r'[\n　\s。；;：，,]', seg) if p.strip()]
