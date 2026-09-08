@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 import mimetypes
 import html
@@ -10,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Q
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import func, case
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from database import get_db, SessionLocal
@@ -366,6 +368,37 @@ def get_contract_file(
     )
 
 
+def _recover_contract_status(contract_id: int):
+    """主审核流程失败后，用独立会话 best-effort 恢复合同状态为 parsed（BUG-010）。
+
+    - 独立 SessionLocal（独立事务，不受主 session 失败状态影响）；
+    - database is locked 退避重试 3 次（配合 busy_timeout=30s，恢复窗口充足）；
+    - 恢复自身异常不外泄、不覆盖原始异常；全部重试仍失败时显式 error 日志，
+      合同停在 auditing 由 BUG-011 重启复位兜底——绝不静默吞错。
+    """
+    for attempt in range(3):
+        db = SessionLocal()
+        try:
+            c = db.query(Contract).filter(Contract.id == contract_id).first()
+            if c and c.status == "auditing":
+                c.status = "parsed"
+                db.commit()
+            return
+        except OperationalError as e:
+            db.rollback()
+            if "locked" in str(e).lower() and attempt < 2:
+                time.sleep(0.5 * (attempt + 1))
+                continue
+            logger.error("合同状态恢复失败（database error）: contract_id=%s, %s", contract_id, e)
+            return
+        except Exception as e:
+            db.rollback()
+            logger.error("合同状态恢复异常: contract_id=%s, %s", contract_id, e)
+            return
+        finally:
+            db.close()
+
+
 def _run_audit(contract_id: int):
     """后台执行完整审核流水线（独立 DB session，供 BackgroundTasks 调用）。"""
     db = SessionLocal()
@@ -529,12 +562,10 @@ def _run_audit(contract_id: int):
             },
         }
     except Exception as e:
-        db.rollback()
-        c2 = db.query(Contract).filter(Contract.id == contract_id).first()
-        if c2:
-            c2.status = "parsed"
-            db.commit()
-        logger.exception("后台审核失败，合同重置为 parsed: %s", e)
+        # 原始异常先记录，绝不丢失；恢复异常由 _recover_contract_status 独立处理，不覆盖（BUG-010）
+        logger.exception("后台审核失败（原始异常）: %s", e)
+        db.rollback()  # 释放主 session 可能持有的写锁，避免阻塞 recovery 的独立 session
+        _recover_contract_status(contract_id)
     finally:
         db.close()
 
