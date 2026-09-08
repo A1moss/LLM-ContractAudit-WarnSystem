@@ -4,6 +4,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import Base, engine
+from sqlalchemy import text
 from config import CORS_ORIGINS
 from api.auth import router as auth_router
 from api.contracts import router as contracts_router
@@ -116,6 +117,13 @@ def _ensure_columns():
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     _ensure_columns()
+    # 启动时复位遗留的 auditing 状态：BackgroundTasks 不持久化，进程重启后任务蒸发，
+    # 若不复位，合同会永久卡在"审核中"且无法再次触发（BUG-011）。
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("UPDATE contracts SET status='parsed' WHERE status='auditing'"))
+    except Exception as e:
+        logger.warning("启动复位 auditing 状态失败: %s", e)
     yield
 
 
