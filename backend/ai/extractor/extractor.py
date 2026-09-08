@@ -48,7 +48,22 @@ FEWSHOT_EXAMPLE = """
 
 
 def _merge_elements(results: list[dict]) -> dict:
-    """合并多块抽取结果：字段非 null 优先，parties 内层甲方/乙方逐角色非 null 优先。"""
+    """合并多块抽取结果（BUG-007 收口：通用嵌套 dict 逐字段非空优先，不依赖块顺序）。
+
+    合并规则（显式声明，不靠隐式行为）：
+    1. 顶层标量字段（sign_date/dispute_resolution/governing_law）：首个非 None 值生效，
+       后续非 None 不覆盖（first-wins，空不覆盖非空）。
+    2. 嵌套 dict（parties/amount/performance_period）：逐字段合并，同样「空不覆盖非空」——
+       某字段在任一块出现非 None 值即生效，其它块该字段为 None 不覆盖。
+    3. "空"仅指 None（抽取约定缺失字段填 null）；""/0/False 视为已有值，不被覆盖。
+    4. 非 dict 的块结果（None / 异常产物）跳过。
+    5. 顺序无关性：对「空 vs 非空」这一真实场景，交换块顺序合并结果完全一致；
+       仅当两块的同一字段都给出「非 None 且不一致」的值时由先出现者决定
+       （同一合同分块覆盖不同段落，不会出现同字段冲突，属确定性兜底）。
+
+    修复 BUG-007：原实现只对 parties 做内层合并，amount/performance_period 等嵌套 dict
+    首块返回全 null 的 dict 时会挡住后续块的正确值（长合同金额/期限显示"—"）。
+    """
     keys = ["parties", "amount", "sign_date", "performance_period", "dispute_resolution", "governing_law"]
     merged = {k: None for k in keys}
     for r in results:
@@ -56,12 +71,13 @@ def _merge_elements(results: list[dict]) -> dict:
             continue
         for key in keys:
             val = r.get(key)
-            if merged[key] is None and val is not None:
+            if merged[key] is None:
                 merged[key] = val
-            elif key == "parties" and isinstance(val, dict) and isinstance(merged[key], dict):
-                for role in ("甲方", "乙方"):
-                    if merged[key].get(role) is None and val.get(role) is not None:
-                        merged[key][role] = val[role]
+            elif isinstance(val, dict) and isinstance(merged[key], dict):
+                # 嵌套 dict（parties/amount/performance_period）：逐字段非空优先合并
+                for kk, vv in val.items():
+                    if merged[key].get(kk) is None and vv is not None:
+                        merged[key][kk] = vv
     return merged
 
 

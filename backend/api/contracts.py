@@ -20,7 +20,7 @@ from ai.parser import detect_and_parse
 from ai.classifier import classify_contract
 from ai.extractor import extract_elements
 from ai.auditor import run_rules, audit_with_llm
-from ai.auditor.evidence_extractor import extract_evidence
+from ai.auditor.evidence_extractor import extract_evidence_detailed
 from ai.auditor.evidence_adjudicator import adjudicate_risks
 from ai.auditor.recommendation_engine import build_recommendations
 from ai.confidence import enrich_confidences
@@ -355,12 +355,29 @@ def _run_audit(contract_id: int):
         # 2. 证据抽取 + 确定性裁决（precise 主口径，v6.4 架构）
         if c.audit_mode == "precise":
             try:
-                evidence = extract_evidence(full_text)
-                adjudicated = adjudicate_risks(evidence)
-                # v6.5 建议层：只消费裁决结果，不反向影响 R01-R12 判定
-                all_risks = build_recommendations(adjudicated, evidence) if adjudicated else list(rule_results)
+                res = extract_evidence_detailed(full_text)
+                evidence = res["evidence"]
+                status = res["status"]
+                if status == "failed":
+                    # 全部块抽取失败：显式降级为规则引擎粗筛，绝不伪装成 0 风险（BUG-003）
+                    logger.error(
+                        "证据抽取完全失败（%d/%d 块），降级为规则引擎粗筛: contract_id=%s",
+                        res["failed_chunks"], res["total_chunks"], contract_id,
+                    )
+                    all_risks = list(rule_results)
+                else:
+                    if status == "partial":
+                        # 部分块失败：保留成功块证据继续裁决，但显式记录（不静默、不丢弃成功结果，BUG-008）
+                        logger.warning(
+                            "证据抽取部分失败（%d/%d 块），保留成功块证据继续裁决: contract_id=%s",
+                            res["failed_chunks"], res["total_chunks"], contract_id,
+                        )
+                    adjudicated = adjudicate_risks(evidence)
+                    # v6.5 建议层：只消费裁决结果，不反向影响 R01-R12 判定。
+                    # 裁决为空 = 合同干净（12 类风险均不成立），如实报 0 风险，绝不回退规则引擎误报。
+                    all_risks = build_recommendations(adjudicated, evidence)
             except Exception as e:
-                logger.warning("证据裁决失败，退回规则引擎: %s", e)
+                logger.error("证据裁决异常，退回规则引擎: %s", e)
                 all_risks = list(rule_results)
         else:
             all_risks = list(rule_results)

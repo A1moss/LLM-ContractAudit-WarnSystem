@@ -64,33 +64,60 @@ def _split_supplement(full_text: str):
     return full_text[:idx], full_text[idx:]
 
 
-def _extract_chunk(chunk: str) -> dict:
-    """对单个文本块抽取证据，失败返回空 dict。"""
+def _extract_chunk(chunk: str):
+    """对单个文本块抽取证据。
+
+    返回语义（BUG-008 收口：失败与「成功但无风险事实」不再混用 {}）：
+    - 成功：返回 dict（含空 dict {} = 成功但该块无任何风险事实）
+    - 失败：返回 None（LLM 调用异常 / JSON 解析失败 / 返回非 dict）
+
+    之前失败与空结果都返回 {}，下游无法区分「failed」与「success + empty」，
+    失败块会被当成正常空结果静默吞掉。现改为 None 表达失败，由 _extract_one 统计。
+    """
     try:
         resp = llm_client.chat(
             prompt=SYSTEM_PROMPT_EVIDENCE + "\n\n请抽取以下合同的事实：\n" + chunk,
             temperature=0.0,
         )
         ev = extract_json(resp)
-        return ev if isinstance(ev, dict) else {}
+        if isinstance(ev, dict):
+            return ev
+        logger.warning("证据抽取：块返回非 dict（解析为 %s），视为失败", type(ev).__name__)
+        return None
     except Exception as e:
         logger.error("证据抽取失败: %s", e)
-        return {}
+        return None
 
 
 def _extract_one(text: str) -> dict:
-    """对一段文本抽取证据（超长分块并行合并，缩短审核等待）。"""
+    """对一段文本抽取证据（超长分块并行合并）。
+
+    返回 {"evidence", "failed_chunks", "total_chunks"}（BUG-008 收口）：
+    - 失败块（_extract_chunk 返回 None）不计入 evidence，但计入 failed_chunks，失败可统计、可识别；
+    - 成功块结果全部保留（一个块失败不丢弃其它成功块结果，要求4）；
+    - 成功但无风险事实的块返回 {}（dict），与失败块 None 语义不同，不会与失败混淆（要求3）；
+    - 空文本（0 块）返回 evidence={} 且 total=0，由上层按 failed 处理，不静默当 0 风险。
+    """
     chunks = split_chunks(text, MAX_CHARS)
     if not chunks:
-        return {}
+        return {"evidence": {}, "failed_chunks": 0, "total_chunks": 0}
     if len(chunks) == 1:
-        return _extract_chunk(chunks[0])
+        ev = _extract_chunk(chunks[0])
+        if ev is None:
+            logger.warning("证据抽取：单块失败（可能超时/限流/JSON 解析失败），该块风险要素丢失")
+            return {"evidence": {}, "failed_chunks": 1, "total_chunks": 1}
+        return {"evidence": ev, "failed_chunks": 0, "total_chunks": 1}
     merged = {}
+    fail = 0
     with ThreadPoolExecutor(max_workers=min(len(chunks), 6)) as ex:
         for ev in ex.map(_extract_chunk, chunks):
-            if ev:
+            if ev is None:
+                fail += 1
+            else:
                 merged = _merge(merged, ev)
-    return merged
+    if fail:
+        logger.warning("证据抽取：%d/%d 块失败（可能超时/限流/JSON 解析失败），相关风险要素可能丢失", fail, len(chunks))
+    return {"evidence": merged, "failed_chunks": fail, "total_chunks": len(chunks)}
 
 
 def _merge(base: dict, new: dict) -> dict:
@@ -145,14 +172,49 @@ def _is_empty(v) -> bool:
     return v is None or v == "" or v is False
 
 
-def extract_evidence(full_text: str) -> dict:
+def _status_for(failed: int, total: int) -> str:
+    """由失败块数推导抽取状态：success / partial / failed。"""
+    if total <= 0 or failed >= total:
+        return "failed"
+    if failed == 0:
+        return "success"
+    return "partial"
+
+
+def extract_evidence_detailed(full_text: str) -> dict:
+    """抽取证据并返回状态信封（BUG-003/BUG-008 收口）。
+
+    返回 {"evidence", "status", "failed_chunks", "total_chunks"}：
+    - status == "success"：全部块抽取成功（evidence 可能为空 dict = 无风险证据，属正常 0 风险）
+    - status == "partial"：部分块失败，保留成功块结果继续裁决（不静默吞失败、不丢弃成功结果）
+    - status == "failed"：全部块失败，evidence 为空 dict（上层必须降级，不得当 0 风险）
+
+    正文与补全条款（"## 补全风险条款"段）各自分块并行抽取，失败块数跨两者累加。
+    """
     body, supplement = _split_supplement(full_text)
     if supplement.strip():
         # 正文与补全条款并行抽取（各自动分块），缩短审核等待
         with ThreadPoolExecutor(max_workers=2) as ex:
             body_fut = ex.submit(_extract_one, body)
             supp_fut = ex.submit(_extract_one, supplement)
-            body_ev = body_fut.result()
-            supp_ev = supp_fut.result()
-        return _merge_override(body_ev, supp_ev)
-    return _extract_one(body)
+            body_r = body_fut.result()
+            supp_r = supp_fut.result()
+        evidence = _merge_override(body_r["evidence"], supp_r["evidence"])
+        total = body_r["total_chunks"] + supp_r["total_chunks"]
+        failed = body_r["failed_chunks"] + supp_r["failed_chunks"]
+    else:
+        r = _extract_one(body)
+        evidence = r["evidence"]
+        total = r["total_chunks"]
+        failed = r["failed_chunks"]
+    return {
+        "evidence": evidence,
+        "status": _status_for(failed, total),
+        "failed_chunks": failed,
+        "total_chunks": total,
+    }
+
+
+def extract_evidence(full_text: str) -> dict:
+    """兼容旧调用（评测脚本 run_evidence / ab_normalize 等）：仅返回合并后的 evidence dict。"""
+    return extract_evidence_detailed(full_text)["evidence"]
