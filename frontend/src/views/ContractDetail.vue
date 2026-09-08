@@ -511,17 +511,8 @@ const pageEllipsisRange = computed(() => {
   return [...new Set(range)]
 })
 
-// ── 页码摘要 ──
-const pageSummary = ref('点击页码浏览各页合同条款')
-const pageSummaries = {
-  1: '保密协议定义条款：明确保密信息的范围，包括技术资料、商业计划、客户信息、财务数据等，采用概括+列举的定义方式。',
-  2: '保密义务条款：乙方不得向第三方披露、仅可用于约定目的、需采取不低于保护自身同类信息的注意程度。',
-  3: '保密期限条款：保密义务有效期 5 年，自保密信息披露之日起计算。',
-  4: '违约责任与争议解决：违约责任条款约定赔偿计算方式，争议提交甲方所在地法院管辖。',
-}
-watch(currentPage, (p) => {
-  pageSummary.value = pageSummaries[p] || '本页无摘要信息'
-})
+// ── 页码摘要 ──（BUG-019：移除硬编码的保密协议样例，改为诚实提示，避免展示虚构内容）
+const pageSummary = ref('本页为合同原文，摘要功能待接入')
 
 // ── 风险详情 ──
 const riskItems = ref([])
