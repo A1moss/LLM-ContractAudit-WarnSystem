@@ -19,7 +19,8 @@ KNOWLEDGE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "knowle
 _BM25_K1 = 1.5
 _BM25_B = 0.75
 
-# 每个 collection 的 BM25 索引缓存（文档内容变才需重建，此处按 collection 名缓存）
+# 每个 collection 的 BM25 索引缓存，按 (collection_name, version) 键控；
+# version 由调用方传入（知识库源 JSON 的 mtime/size），源文件变化即自动失效重建（BUG-033）。
 _index_cache: dict = {}
 
 
@@ -66,13 +67,18 @@ class BM25:
         return score
 
 
-def bm25_search(query: str, collection_name: str, docs: list[dict], top_k: int = 5) -> list[tuple[int, float]]:
-    """对知识库文档集做 BM25 检索，返回 [(文档下标, 分数)]，按分数降序取 top_k。"""
+def bm25_search(query: str, collection_name: str, docs: list[dict], top_k: int = 5, version=None) -> list[tuple[int, float]]:
+    """对知识库文档集做 BM25 检索，返回 [(文档下标, 分数)]，按分数降序取 top_k。
+
+    version 为调用方传入的知识库版本号（mtime/size）；变化时自动重建索引，避免旧索引
+    与新 docs 长度/内容错位（BUG-033）。
+    """
     if not docs:
         return []
-    if collection_name not in _index_cache:
-        _index_cache[collection_name] = BM25([d.get("content", "") for d in docs])
-    bm25 = _index_cache[collection_name]
+    key = (collection_name, version)
+    if key not in _index_cache:
+        _index_cache[key] = BM25([d.get("content", "") for d in docs])
+    bm25 = _index_cache[key]
     scored = [(i, bm25.score(query, i)) for i in range(len(docs))]
     scored = [s for s in scored if s[1] > 0]
     scored.sort(key=lambda x: x[1], reverse=True)

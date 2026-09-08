@@ -24,6 +24,7 @@ CHROMA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file
 KNOWLEDGE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "knowledge")
 
 # 知识库 JSON 缓存（用于 BM25 词面检索 + 元数据回填）
+# 值结构：{"version": (mtime_ns, size), "data": list}；版本号随源文件变化，用于失效（BUG-033）。
 _json_cache: dict = {}
 
 _client: Optional[chromadb.PersistentClient] = None
@@ -79,6 +80,30 @@ def _excerpt(text: str, head: int = 256, tail: int = 256) -> str:
     return text[:head] + "\n…\n" + text[-tail:]
 
 
+def _build_metadatas(data: list[dict]) -> list[dict]:
+    """构建写入 Chroma 的检索身份元数据（clause_id/title/source 等）。
+
+    BUG-033 修复：原 init_chroma 只写 documents+ids，检索只能靠 content 反查；
+    现写入标量元数据，_dense_search 直接按 clause_id 关联 JSON 下标。
+    注意 Chroma metadata 只接受标量（str/int/float/bool），列表字段（如 laws.tags）不写入。
+    """
+    metadatas = []
+    for i, item in enumerate(data):
+        meta = {
+            "clause_id": str(item.get("id", i)),
+            "title": item.get("title", ""),
+        }
+        if "law" in item:  # 法律法规库
+            meta["law"] = item.get("law", "")
+            meta["article"] = item.get("article", "")
+            meta["source"] = f"{item.get('law', '')}{item.get('article', '')}"
+        if "type" in item:  # 标准条款库
+            meta["type"] = item.get("type", "")
+            meta["source"] = item.get("source", "") or item.get("related_law", "")
+        metadatas.append(meta)
+    return metadatas
+
+
 def init_chroma() -> dict:
     """初始化所有知识库：读取 JSON → 向量化 → 写入 ChromaDB。首次启动时调用一次即可。"""
     client = _get_client()
@@ -115,10 +140,12 @@ def init_chroma() -> dict:
         # 取 content 字段用于检索
         texts = [item.get("content", "") for item in data]
         ids = [f"{coll_name}_{item.get('id', i)}" for i, item in enumerate(data)]
+        # 写入检索身份元数据，_dense_search 按 clause_id 关联 JSON 下标，不再靠 content 反查（BUG-033）
+        metadatas = _build_metadatas(data)
 
         # 编码 + 写入
         embeddings = embedder.encode(texts).tolist()
-        collection.add(embeddings=embeddings, documents=texts, ids=ids)
+        collection.add(embeddings=embeddings, documents=texts, ids=ids, metadatas=metadatas)
 
         stats[coll_name] = len(texts)
         logger.info(f"[ChromaDB] {COLLECTIONS.get(coll_name, coll_name)}: 写入 {len(texts)} 条")
@@ -134,23 +161,44 @@ def init_chroma() -> dict:
     return stats
 
 
+def _knowledge_version(collection_name: str) -> tuple:
+    """知识库源 JSON 的 (mtime_ns, size) 版本号，用于缓存失效判断（BUG-033）。"""
+    file_map = {"laws": "laws.json", "standard_clauses": "standard_clauses.json"}
+    filename = file_map.get(collection_name)
+    if not filename:
+        return (0, 0)
+    path = os.path.join(KNOWLEDGE_DIR, filename)
+    try:
+        st = os.stat(path)
+        return (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return (0, 0)
+
+
 def _load_knowledge_json(collection_name: str) -> list[dict]:
-    """加载知识库 JSON（用于 BM25 词面检索 + 元数据回填），带缓存。"""
-    if collection_name in _json_cache:
-        return _json_cache[collection_name]
+    """加载知识库 JSON（用于 BM25 词面检索 + 元数据回填），带 mtime/size 失效缓存。
+
+    BUG-033 修复：原 _json_cache 永不失效，运行期改 JSON 不生效；现按源文件
+    (mtime_ns, size) 版本号判断，文件变化后自动重载。
+    """
     file_map = {"laws": "laws.json", "standard_clauses": "standard_clauses.json"}
     filename = file_map.get(collection_name)
     if not filename:
         return []
     path = os.path.join(KNOWLEDGE_DIR, filename)
+    version = _knowledge_version(collection_name)
+    cached = _json_cache.get(collection_name)
+    if cached and cached.get("version") == version:
+        return cached["data"]
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        _json_cache[collection_name] = data if isinstance(data, list) else []
+        data = data if isinstance(data, list) else []
     except Exception as e:
         logger.warning("知识库 JSON 加载失败 %s: %s", filename, e)
-        _json_cache[collection_name] = []
-    return _json_cache[collection_name]
+        data = []
+    _json_cache[collection_name] = {"version": version, "data": data}
+    return data
 
 
 def _to_result(item: dict, score: float) -> dict:
@@ -174,6 +222,41 @@ def _to_result(item: dict, score: float) -> dict:
         result["related_law"] = item.get("related_law", "")
         result["source"] = item.get("source", "") or item.get("related_law", "")
     return result
+
+
+def _map_dense_hits(data: list[dict], results: dict, collection_name: str) -> list[tuple[int, float]]:
+    """把 Chroma 查询结果映射回 JSON 下标空间（BUG-033 收口）。
+
+    优先用 Chroma 返回的 metadata.clause_id 判断身份；无 metadata 时回退解析 Chroma id
+    （"{coll}_{id}"）。不再用 content 反查——content 有重复（如 NDA-011 / PUR-018 相同），
+    反查会张冠李戴。映射不到的命中记 warning（不静默丢弃）。
+    """
+    id_index = {str(item.get("id", i)): i for i, item in enumerate(data)}
+    docs = (results.get("documents") or [[]])[0]
+    ids = (results.get("ids") or [[]])[0] if results.get("ids") else []
+    metas = (results.get("metadatas") or [{}])[0] if results.get("metadatas") else []
+    dists = (results.get("distances") or [[1.0]])[0] if results.get("distances") else []
+
+    hits = []
+    prefix = collection_name + "_"
+    for i in range(len(docs)):
+        dist = dists[i] if i < len(dists) else 1.0
+        score = 1.0 - dist
+        meta = metas[i] if i < len(metas) and isinstance(metas[i], dict) else {}
+        clause_id = meta.get("clause_id")
+        idx = id_index.get(str(clause_id)) if clause_id is not None else None
+        if idx is None and i < len(ids):
+            raw_id = ids[i] or ""
+            if raw_id.startswith(prefix):
+                idx = id_index.get(raw_id[len(prefix):])
+        if idx is not None:
+            hits.append((idx, score))
+        else:
+            logger.warning(
+                "稠密检索命中无法映射到知识库条目（Chroma 与 JSON 可能不同步，建议重跑 init_chroma）: clause_id=%s",
+                clause_id,
+            )
+    return hits
 
 
 def _dense_search(query: str, collection_name: str, top_k: int) -> list[tuple[int, float]]:
@@ -208,19 +291,9 @@ def _dense_search(query: str, collection_name: str, top_k: int) -> list[tuple[in
         logger.warning("稠密检索失败: %s", e)
         return []
 
-    # 用 content 反查文档下标，便于与 BM25 在同一个下标空间里做 RRF
+    # 按 metadata.clause_id / Chroma id 关联 JSON 下标（不再用 content 反查），与 BM25 共用下标空间做 RRF
     data = _load_knowledge_json(collection_name)
-    content_index = {d.get("content", ""): i for i, d in enumerate(data)}
-
-    hits = []
-    if results and results.get("documents"):
-        for i, doc in enumerate(results["documents"][0]):
-            dist = results.get("distances", [[1.0]])[0][i] if results.get("distances") else 1.0
-            score = 1.0 - dist
-            idx = content_index.get(doc)
-            if idx is not None:
-                hits.append((idx, score))
-    return hits
+    return _map_dense_hits(data, results, collection_name)
 
 
 def search_knowledge(query: str, collection_name: str = "laws", top_k: int = 5) -> list[dict]:
@@ -242,7 +315,7 @@ def search_knowledge(query: str, collection_name: str = "laws", top_k: int = 5) 
 
     # 两路检索（稠密可能因模型未就绪而失败，BM25 始终可用）
     dense_hits = _dense_search(query, collection_name, fetch_k)
-    sparse_hits = bm25_search(query, collection_name, data, fetch_k)
+    sparse_hits = bm25_search(query, collection_name, data, fetch_k, version=_knowledge_version(collection_name))
 
     # RRF 融合
     fused = rrf_fuse([dense_hits, sparse_hits])
