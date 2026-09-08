@@ -41,6 +41,27 @@ UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
+def _archive_deleted_file(stored_path: str | None):
+    """软删除时把落盘文件移到 data/deleted/ 归档目录（BUG-038）。
+
+    不删除文件（保留可恢复性），只从活跃 data/ 目录移走，消除「deleted 但文件散落」。
+    文件不存在时静默跳过（历史上传失败/已清理）；归档失败只告警、不阻断删除。
+    """
+    if not stored_path or not os.path.isfile(stored_path):
+        return
+    try:
+        archive_dir = os.path.join(UPLOAD_DIR, "deleted")
+        os.makedirs(archive_dir, exist_ok=True)
+        dest = os.path.join(archive_dir, os.path.basename(stored_path))
+        # 归档目录同名冲突（uuid 碰撞极小）：追加短哈希，避免覆盖既有文件
+        if os.path.exists(dest):
+            dest = os.path.join(archive_dir, f"{os.path.basename(stored_path)}.{uuid.uuid4().hex[:6]}")
+        os.replace(stored_path, dest)
+        logger.info("软删除归档文件: %s -> %s", stored_path, dest)
+    except Exception as e:
+        logger.warning("软删除归档文件失败（保留原文件）: %s", e)
+
+
 def _iso(ts) -> str | None:
     """把应用层写入的 naive UTC 时间序列化为带 Z 的 ISO 字符串（前端按 UTC 解析再转本地）。"""
     if ts is None:
@@ -153,6 +174,11 @@ async def upload_contract(
         parsed = detect_and_parse(file_path)
         full_text = parsed.get("full_text", "")
     except Exception as e:
+        # 解析异常也清理已落盘文件，避免孤儿（BUG-038）
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
         raise HTTPException(status_code=422, detail="parse failed: " + str(e))
 
     # OCR（图片）识别失败/无文字时给出明确提示，避免静默产生空合同
@@ -300,6 +326,8 @@ def delete_contract(
     if current_user.role != ROLE_ADMIN and c.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权删除该合同")
     c.status = "deleted"
+    # 软删除时同步归档文件，不再留「deleted 但文件散落」（BUG-038）
+    _archive_deleted_file(c.stored_path)
     db.commit()
     return {"code": 0, "message": "ok", "data": None}
 
