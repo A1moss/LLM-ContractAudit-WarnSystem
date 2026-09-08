@@ -769,7 +769,14 @@ def get_audit_result(
         records = (
             db.query(AuditRecord)
             .filter(AuditRecord.contract_id == contract_id, AuditRecord.audit_batch == latest[0])
-            .order_by(AuditRecord.risk_level.desc())
+            .order_by(
+                case(
+                    (AuditRecord.risk_level == "high", 3),
+                    (AuditRecord.risk_level == "medium", 2),
+                    (AuditRecord.risk_level == "low", 1),
+                    else_=0,
+                ).desc()
+            )
             .all()
         )
 
