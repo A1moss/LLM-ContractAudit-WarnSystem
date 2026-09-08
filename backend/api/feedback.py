@@ -8,10 +8,13 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models.user import User
 from models.audit_record import AuditRecord
+from models.contract import Contract
 from models.feedback_log import FeedbackLog
 from api.deps import get_current_user
 
 router = APIRouter(prefix="/feedback", tags=["feedback"])
+
+WORKFLOW_ROLES = {"reviewer", "approver", "admin"}
 
 ACTION_MAP = {
     "confirmed": "confirmed",
@@ -50,6 +53,12 @@ def create_feedback(
     record = db.query(AuditRecord).filter(AuditRecord.id == body.record_id).first()
     if not record:
         raise HTTPException(status_code=404, detail="audit record not found")
+    # 归属校验：只能标注自己有权查看的合同的记录（BUG-025，防跨用户遍历 record_id 污染他人结果）
+    contract = db.query(Contract).filter(Contract.id == record.contract_id).first()
+    if not contract or contract.status == "deleted":
+        raise HTTPException(status_code=404, detail="contract not found")
+    if current_user.role not in WORKFLOW_ROLES and contract.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权限标注该合同的记录")
 
     original_risk = {
         "risk_type": record.risk_type,
