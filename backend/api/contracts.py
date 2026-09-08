@@ -88,7 +88,9 @@ WORKFLOW_ROLES = {"reviewer", "approver", "admin"}
 
 
 def _can_view_contract(user: User, c: Contract) -> bool:
-    """上传者只能看自己的合同；审核人/验收人/管理员可查看工作流中的全部合同。"""
+    """上传者只能看自己的合同；审核人/验收人/管理员可查看工作流中的全部合同；已删除合同一律不可见。"""
+    if c.status == "deleted":
+        return False
     if user.role in WORKFLOW_ROLES:
         return True
     return c.user_id == user.id
@@ -267,10 +269,8 @@ def list_contracts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = db.query(Contract)
-    if current_user.role in WORKFLOW_ROLES:
-        query = query.filter(Contract.status != "deleted")
-    else:
+    query = db.query(Contract).filter(Contract.status != "deleted")  # 所有角色排除软删除（BUG-026）
+    if current_user.role not in WORKFLOW_ROLES:
         query = query.filter(Contract.user_id == current_user.id)
     if keyword:
         query = query.filter(Contract.file_name.contains(keyword))
