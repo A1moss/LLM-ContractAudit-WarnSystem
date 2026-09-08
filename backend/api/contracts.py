@@ -401,6 +401,18 @@ def _replace_compare_section(report_html: str, new_section: str) -> str:
     return base + _wrap_compare_section(new_section)
 
 
+def _mark_audit_records(db, contract_id: int, from_status: str, to_status: str):
+    """批量更新某合同审核记录的 result_status（BUG-028，业务有效性状态转换）。
+
+    只按 from_status 精确转移，保证「曾被驳回(rejected)」等历史事实不被后续
+    重新审核错误改写。
+    """
+    db.query(AuditRecord).filter(
+        AuditRecord.contract_id == contract_id,
+        AuditRecord.result_status == from_status,
+    ).update({"result_status": to_status}, synchronize_session=False)
+
+
 def _recover_contract_status(contract_id: int):
     """主审核流程失败后，用独立会话 best-effort 恢复合同状态为 parsed（BUG-010）。
 
@@ -485,8 +497,9 @@ def _run_audit(contract_id: int):
         except Exception as e:
             logger.warning("条款比对失败，报告将标注待重试: %s", e)
 
-        # 删除该合同历史审核记录，避免新旧批次混杂（重新审核 = 覆盖旧结果）
-        db.query(AuditRecord).filter(AuditRecord.contract_id == contract_id).delete()
+        # 重新审核：旧「有效」记录置 superseded（曾被驳回 rejected / 已被替代 superseded 保持不变），
+        # 不删物理记录，保留审计轨迹（BUG-028）；下方插入的新记录为 valid。
+        _mark_audit_records(db, contract_id, "valid", "superseded")
 
         # 跨来源置信度融合：规则/LLM/多Agent 独立检出同一风险时交叉验证上调
         enrich_confidences(all_risks)
@@ -638,6 +651,8 @@ def review_contract(
         msg = "复核通过，待验收"
     else:
         c.status = "parsed"
+        # 驳回：当前有效审核记录置 rejected（保留历史，不删物理记录，BUG-028）
+        _mark_audit_records(db, contract_id, "valid", "rejected")
         msg = "已驳回，需重新审核"
     db.commit()
     return {"code": 0, "message": "ok", "data": {"id": contract_id, "status": c.status, "msg": msg}}
@@ -709,12 +724,16 @@ def get_audit_result(
         .all()
     )
 
+    has_current_result = any(r.result_status == "valid" for r in records)
+
     return {
         "code": 0,
         "message": "ok",
         "data": {
             "contract_id": contract_id,
             "total": len(records),
+            # 当前是否存在有效审核结果（是否有 valid 记录）——前端据此判断是否展示「已驳回」，不靠 status 推导（BUG-028）
+            "has_current_result": has_current_result,
             "items": [
                 {
                     "id": r.id,
@@ -730,6 +749,7 @@ def get_audit_result(
                     "evidence": r.evidence,
                     "recommendation": r.recommendation,
                     "feedback_status": r.feedback_status,
+                    "result_status": r.result_status,
                 }
                 for r in records
             ],

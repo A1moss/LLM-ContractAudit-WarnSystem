@@ -90,6 +90,9 @@ def _ensure_columns():
             if existing_ar and "recommendation" not in existing_ar:
                 db.execute("ALTER TABLE audit_records ADD COLUMN recommendation JSON")
                 db.commit()
+            if existing_ar and "result_status" not in existing_ar:
+                db.execute("ALTER TABLE audit_records ADD COLUMN result_status VARCHAR(20) DEFAULT 'valid'")
+                db.commit()
         except Exception as e:
             logger.debug("audit_records 表尚不存在，跳过 evidence 迁移: %s", e)
         # FK 类型对齐：历史遗留 VARCHAR(36) → INTEGER（切 MySQL 前保证一致）

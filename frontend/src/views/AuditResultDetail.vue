@@ -76,7 +76,9 @@
       <el-card shadow="hover" class="risk-card">
         <template #header>
           <span>风险明细</span>
+          <el-tag v-if="!hasCurrentResult" type="danger" size="small" style="margin-left: 8px">已驳回审核结果</el-tag>
         </template>
+        <el-alert v-if="!hasCurrentResult" title="⚠ 上次审核已被驳回，请重新审核（以下为已驳回历史结果）" type="error" show-icon :closable="false" style="margin-bottom: 12px" />
         <el-table :data="riskItems" stripe border>
           <el-table-column prop="level" label="等级" width="100">
             <template #default="{ row }">
@@ -137,6 +139,8 @@ const { feedbackRef, onFeedback, loadFeedback } = useFeedback(contractId)
 
 const contractName = ref('')
 const riskItems = ref([])
+// 是否存在当前有效审核结果（BUG-028）
+const hasCurrentResult = ref(true)
 const loading = ref(true)
 const error = ref('')
 
@@ -166,6 +170,7 @@ async function fetchResult() {
   fetchContractName(id)
   try {
     const res = await getAuditResult(id)
+    hasCurrentResult.value = res.data?.has_current_result ?? true
     riskItems.value = (res.data?.items || []).map(r => ({
       id: r.id,
       level: levelMap[r.risk_level] || r.risk_level,

@@ -61,8 +61,10 @@
                 </div>
 
                 <template v-else-if="riskItems.length > 0">
+                  <el-alert v-if="!hasCurrentResult" title="⚠ 上次审核已被驳回，请重新审核（以下为已驳回历史结果）" type="error" show-icon :closable="false" class="audit-alert" />
                   <el-alert :title="`共检测到 ${riskSummary.total} 条风险，高风险 ${riskSummary.high}、中风险 ${riskSummary.mid}、低风险 ${riskSummary.low}`" type="warning" show-icon :closable="false" class="audit-alert" />
                   <el-table :data="riskItems" stripe size="small" max-height="400">
+                    <el-table-column v-if="!hasCurrentResult" label="结果状态" width="110" align="center"><template #default><el-tag type="danger" size="small">已驳回审核结果</el-tag></template></el-table-column>
                     <el-table-column prop="level" label="等级" width="80" align="center"><template #default="{row}"><el-tag :type="levelTag(row.level)" size="small">{{ row.level }}</el-tag></template></el-table-column>
                     <el-table-column prop="category" label="类别" width="80" align="center" />
                     <el-table-column label="定位" width="90" align="center">
@@ -185,7 +187,10 @@
             </el-tab-pane>
             <el-tab-pane label="审核报告" name="report">
               <div class="tab-content">
-                <el-empty v-if="contract.status !== 'completed'" description="审核完成后将自动生成报告">
+                <el-empty v-if="!hasCurrentResult && riskItems.length > 0" description="⚠ 上次审核已被驳回，当前无有效审核报告">
+                  <el-button type="primary" :loading="auditing" @click="handleTriggerAudit">重新审核</el-button>
+                </el-empty>
+                <el-empty v-else-if="contract.status !== 'completed'" description="审核完成后将自动生成报告">
                   <el-button v-if="contract.status === 'parsed'" type="primary" :loading="auditing" @click="handleTriggerAudit">开始审核</el-button>
                 </el-empty>
                 <template v-else-if="riskItems.length > 0">
@@ -520,6 +525,8 @@ watch(currentPage, (p) => {
 
 // ── 风险详情 ──
 const riskItems = ref([])
+// 是否存在当前有效审核结果（来自 get_audit_result.has_current_result，BUG-028）
+const hasCurrentResult = ref(true)
 const levelMap = { high: '高风险', medium: '中风险', low: '低风险' }
 
 async function fetchAuditResult() {
@@ -527,6 +534,7 @@ async function fetchAuditResult() {
   if (!id) return
   try {
     const res = await getAuditResult(id)
+    hasCurrentResult.value = res.data?.has_current_result ?? true
     riskItems.value = (res.data?.items || []).map(r => ({
       id: r.id, risk_level: r.risk_level, risk_type: r.risk_type, clause_text: r.clause_text,
       level: levelMap[r.risk_level] || r.risk_level, category: r.risk_type, clause: r.clause_text,
