@@ -116,7 +116,9 @@
           ref="feedbackRef"
           :risk-items="riskItems"
           :contract-id="contractId"
+          :loaded-feedbacks="loadedFeedbacks"
           @feedback-change="onFeedback"
+          @feedback-undo="onFeedbackUndo"
         />
       </el-card>
     </template>
@@ -125,9 +127,10 @@
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
-import { getAuditResult, getContractDetail } from '../api/contract.js'
+import { getAuditResult, getContractDetail, getFeedback, deleteFeedback } from '../api/contract.js'
 import { useFeedback } from '../composables/useFeedback.js'
 import FeedbackPanel from '../components/FeedbackPanel.vue'
 
@@ -135,7 +138,31 @@ const route = useRoute()
 const contractId = computed(() => route.params.contractId || '')
 
 // ── 反馈标注 ──
-const { feedbackRef, onFeedback, loadFeedback } = useFeedback(contractId)
+const { feedbackRef, onFeedback } = useFeedback(contractId)
+
+// 反馈回显与撤销（prop 传递方式，与 ContractDetail 一致，避免 restore 依赖 ref 挂载时序，BUG-031）
+const loadedFeedbacks = ref([])
+
+async function fetchFeedback() {
+  const id = contractId.value
+  if (!id) return
+  try {
+    const res = await getFeedback(id)
+    loadedFeedbacks.value = res.data?.items || []
+  } catch { loadedFeedbacks.value = [] }
+}
+
+async function onFeedbackUndo(payload) {
+  try {
+    if (payload.feedback_id) {
+      await deleteFeedback(payload.feedback_id)
+      fetchFeedback()
+    }
+    ElMessage.info('已撤销')
+  } catch (e) {
+    ElMessage.error('撤销失败：' + (e.response?.data?.detail || e.message))
+  }
+}
 
 const contractName = ref('')
 const riskItems = ref([])
@@ -202,14 +229,12 @@ watch(contractId, (newId, oldId) => {
     loading.value = true
     error.value = ''
     riskItems.value = []
-    fetchResult()
-    loadFeedback()
+    fetchResult().then(() => fetchFeedback())
   }
 })
 
 onMounted(() => {
-  fetchResult()
-  loadFeedback()
+  fetchResult().then(() => fetchFeedback())
 })
 </script>
 
