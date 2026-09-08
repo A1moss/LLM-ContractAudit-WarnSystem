@@ -179,7 +179,7 @@ def _retrieve_legal(risk_type: str, risk_name: str, clause_text: str) -> str:
     law_ref = RULE_LAWS.get(risk_type, "")
     hits = []
     # 精确匹配：law 名 + 条文编号
-    for m in re.finditer(r"([\u4e00-\u9fff]+法)第([\d\-\/、]+)条", law_ref):
+    for m in re.finditer(r"([\u4e00-\u9fff]+(?:法|典))第([\d\-\/、]+)条", law_ref):
         law_name = m.group(1)
         nums = re.findall(r"\d+", m.group(2))
         for e in _load_laws():
