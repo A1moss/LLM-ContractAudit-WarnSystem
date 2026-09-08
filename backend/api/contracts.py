@@ -642,8 +642,8 @@ def trigger_audit(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    c = db.query(Contract).filter(Contract.id == contract_id, Contract.user_id == current_user.id).first()
-    if not c:
+    c = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not c or not _can_view_contract(current_user, c):
         raise HTTPException(status_code=404, detail="contract not found")
     if not c.parsed_text:
         raise HTTPException(status_code=400, detail="contract has no parsed text, upload first")
@@ -723,8 +723,8 @@ def revise_contract_clause(
     current_user: User = Depends(get_current_user),
 ):
     """多轮对话式改条款（Leader-Follower 多智能体，参考 RCBSF）"""
-    c = db.query(Contract).filter(Contract.id == contract_id, Contract.user_id == current_user.id).first()
-    if not c:
+    c = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not c or not _can_view_contract(current_user, c):
         raise HTTPException(status_code=404, detail="contract not found")
     if not body.clause_text.strip():
         raise HTTPException(status_code=400, detail="clause_text is required")
