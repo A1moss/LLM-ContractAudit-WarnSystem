@@ -5,9 +5,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "mysql+pymysql://root:root@localhost:3306/contract_audit")
-# 未配置 SECRET_KEY 或仍是弱默认时，生成随机 key，避免线上误用可预测密钥
+# 未配置 SECRET_KEY 或仍是弱默认时启动失败，避免随机 key 导致 --reload/多 worker 下 JWT 失效（BUG-054）
 _SECRET = os.getenv("SECRET_KEY", "").strip()
-SECRET_KEY = _SECRET if (_SECRET and _SECRET != "change-me-to-random-string") else secrets.token_urlsafe(32)
+if not _SECRET or _SECRET == "change-me-to-random-string":
+    raise RuntimeError('必须配置 SECRET_KEY：请在 .env 中设置（生成：python -c "import secrets;print(secrets.token_urlsafe(32))"）')
+SECRET_KEY = _SECRET
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 DIFY_API_KEY = os.getenv("DIFY_API_KEY", "app-your-key-here")
