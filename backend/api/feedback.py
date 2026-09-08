@@ -161,11 +161,19 @@ def delete_feedback(
     if not fb:
         raise HTTPException(status_code=404, detail="feedback not found")
 
-    # 恢复该风险记录的反馈状态
+    # 删除后按剩余反馈重设状态（无剩余才置 pending），避免撤销一条把其他反馈也抹掉（BUG-053）
+    db.delete(fb)
+    db.flush()
+
     record = db.query(AuditRecord).filter(AuditRecord.id == fb.record_id).first()
     if record:
-        record.feedback_status = "pending"
+        remaining = (
+            db.query(FeedbackLog)
+            .filter(FeedbackLog.record_id == fb.record_id)
+            .order_by(FeedbackLog.created_at.desc(), FeedbackLog.id.desc())
+            .first()
+        )
+        record.feedback_status = ACTION_MAP.get(remaining.action_type, "pending") if remaining else "pending"
 
-    db.delete(fb)
     db.commit()
     return {"code": 0, "message": "ok", "data": None}
