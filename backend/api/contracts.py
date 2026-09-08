@@ -410,6 +410,15 @@ def _run_audit(contract_id: int):
         else:
             all_risks = list(rule_results)
 
+        # 条款比对：先于 DB 写事务执行（LLM ~30s，避免在写事务内长时间持有 SQLite 写锁，BUG-009）。
+        # 失败不阻断审核（风险审核结果已入库），报告会标注"待重试"。
+        compare_result = None
+        try:
+            compare_result = compare_clauses(full_text, c.contract_type or "买卖合同", c.is_outsourcing or False)
+            logger.info("条款比对完成: %s", compare_result.get("summary") if compare_result else None)
+        except Exception as e:
+            logger.warning("条款比对失败，报告将标注待重试: %s", e)
+
         # 删除该合同历史审核记录，避免新旧批次混杂（重新审核 = 覆盖旧结果）
         db.query(AuditRecord).filter(AuditRecord.contract_id == contract_id).delete()
 
@@ -451,15 +460,6 @@ def _run_audit(contract_id: int):
         db.commit()
         for record in records:
             db.refresh(record)
-
-        # 条款比对：作为审核流程的一部分同步完成，避免"审核已完成但条款比对仍空白"。
-        # 失败时不阻断审核（风险审核结果已入库），报告会标注"待重试"。
-        compare_result = None
-        try:
-            compare_result = compare_clauses(full_text, c.contract_type or "买卖合同", c.is_outsourcing or False)
-            logger.info("条款比对完成: %s", compare_result.get("summary") if compare_result else None)
-        except Exception as e:
-            logger.warning("条款比对失败，报告将标注待重试: %s", e)
 
         # Calculate report stats
         high = sum(1 for r in all_risks if r.get("level") == "high")

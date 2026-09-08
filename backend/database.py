@@ -1,16 +1,29 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
 from config import DATABASE_URL
+
+_is_sqlite = DATABASE_URL.startswith("sqlite")
 
 engine = create_engine(
     DATABASE_URL,
     pool_size=10,
     pool_recycle=3600,
     pool_pre_ping=True,
+    # 仅 SQLite：busy_timeout=30s，让短暂写竞争等待而非默认 5s 后即 database is locked（BUG-009）
+    connect_args={"timeout": 30} if _is_sqlite else {},
 )
+
+if _is_sqlite:
+    # WAL：读写并发改善、减少部分写锁冲突（SQLite 仍是单写者，不根治并发写）（BUG-009）
+    @event.listens_for(engine, "connect")
+    def _sqlite_wal(dbapi_conn, _record):
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.close()
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
