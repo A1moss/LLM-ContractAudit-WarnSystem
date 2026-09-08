@@ -43,6 +43,15 @@ NAME_REALITY_SIGNALS = [
     (r"合作|联营|联合经营", r"固定租金|保底收益|固定费用"),
 ]
 
+def _is_negated(text, pattern):
+    """检查 pattern 在 text 中的命中是否处于否定语境（命中位置前 8 字内有否定词）。"""
+    for m in re.finditer(pattern, text):
+        before = text[max(0, m.start() - 8):m.start()]
+        if re.search(r"不得|禁止|不属于|非|不应|不得以|不得采用|排除", before):
+            return True
+    return False
+
+
 SAFE_PATTERNS = [
     (r"违约金.*?(不超过|不高于|≤|≤).*?(\d{1,2})\s*[%\％]", "R01"),
     (r"保密.*?(合同.*?终止.*?\d\s*年|期满.*?\d\s*年)", "R05"),
@@ -166,7 +175,8 @@ def run_rules(text: str) -> list[dict]:
         elif rule_id == "R13":
             # 名实不符：任一「名义+实质」信号对同时命中即示警（具体定性交人工）
             for nominal_re, actual_re in NAME_REALITY_SIGNALS:
-                if re.search(nominal_re, text) and re.search(actual_re, text):
+                # 实质信号处于否定语境（如"不得采用劳务派遣"）时不判 R13（BUG-051）
+                if re.search(nominal_re, text) and re.search(actual_re, text) and not _is_negated(text, actual_re):
                     results.append({
                         "risk_type": "R13", "level": "high", "name": name,
                         "clause_text": "合同同时出现名义类型与实质内容不一致的特征",
