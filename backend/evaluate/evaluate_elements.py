@@ -2,7 +2,7 @@
 evaluate_elements.py — 要素抽取严格 F1（pred 抽取值 vs gold 标注值）
 
 对每份合同调 ai.extractor.extract_elements，与 realtest.json 的 elements 标注做**值级比对**，
-只统计 present=true（公告实际披露）的要素，输出每类 P/R/F1 与宏平均。
+只统计 present=true（公告实际披露）的要素，输出每类 P/R/F1 与披露样本加权综合 F1。
 
 口径修正（v2，2026-09-04）：
 - 旧版「四要素是否抽到（非空）」是覆盖率，抽到但值错不扣分。
@@ -259,7 +259,7 @@ def main():
         w_p = sum(x[0] * x[3] for x in prs) / sum(x[3] for x in prs)
         w_r = sum(x[1] * x[3] for x in prs) / sum(x[3] for x in prs)
         w_f = 2 * w_p * w_r / (w_p + w_r) if (w_p + w_r) else 0.0
-        print(f"\n宏平均(按披露样本加权): P={w_p:.1%} R={w_r:.1%} F1={w_f:.1%}")
+        print(f"\n披露样本加权综合 F1（非标准宏平均，按各字段披露样本数加权、用加权 P/R 反推）: P={w_p:.1%} R={w_r:.1%} F1={w_f:.1%}")
         print(f"\n披露率: 双方 {n_disclosed['parties']}/{n_total} | 金额 {n_disclosed['amount']}/{n_total} "
               f"| 期限 {n_disclosed['performance_period']}/{n_total} | 争议 {n_disclosed['dispute_resolution']}/{n_total}")
         print("注：公告型样本期限/争议披露率<100%，严格 F1 仅在披露样本上计算；")
