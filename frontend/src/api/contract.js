@@ -1,4 +1,5 @@
 import request from '../utils/request.js'
+import { REVISE_TIMEOUT, COMPARE_TIMEOUT, FILE_TIMEOUT } from './timeouts.js'
 
 /**
  * 上传合同文件
@@ -71,7 +72,7 @@ export function getAuditReport(id) {
  * @param {number|string} id — 合同 ID
  */
 export function getClauseComparison(id) {
-  return request.get(`/contracts/${id}/clause-comparison`)
+  return request.get(`/contracts/${id}/clause-comparison`, { timeout: COMPARE_TIMEOUT })
 }
 
 /**
@@ -97,7 +98,7 @@ export function approveContract(id) {
  * @param {Object} data — { clause_text, instruction, history }
  */
 export function reviseClause(id, data) {
-  return request.post(`/contracts/${id}/revise`, data)
+  return request.post(`/contracts/${id}/revise`, data, { timeout: REVISE_TIMEOUT })
 }
 
 // ====== 反馈标注 ======
@@ -131,5 +132,5 @@ export function deleteFeedback(feedbackId) {
  * @param {number|string} id — 合同 ID
  */
 export function getContractFile(id) {
-  return request.get(`/contracts/${id}/file`, { responseType: 'arraybuffer' })
+  return request.get(`/contracts/${id}/file`, { responseType: 'arraybuffer', timeout: FILE_TIMEOUT })
 }
