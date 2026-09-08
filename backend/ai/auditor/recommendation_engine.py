@@ -126,25 +126,20 @@ def _evidence_for(risk_type: str, evidence: dict) -> dict:
     return evidence.get(key, {}) if key else {}
 
 
-def _generate_recommendations(contexts: list[dict]) -> dict:
-    """批量调用 LLM 生成建议，返回 {risk_type: {risk_description, suggestion, example}}；失败返回 {}。"""
+def _generate_recommendations(contexts: list[dict]) -> list:
+    """批量调用 LLM 生成建议，返回与 contexts 顺序一致的 list；失败返回 []。"""
     if not contexts:
-        return {}
+        return []
     payload = json.dumps(contexts, ensure_ascii=False)
     for attempt in range(2):  # 超时重试一次
         try:
             resp = llm_client.chat(prompt=SYSTEM_PROMPT_RECOMMENDATION + "\n\n" + payload, temperature=0.0)
             arr = extract_json(resp)
-            if not isinstance(arr, list):
-                return {}
-            out = {}
-            for it in arr:
-                if isinstance(it, dict) and it.get("risk_type"):
-                    out[it["risk_type"]] = it
-            return out
+            if isinstance(arr, list):
+                return arr
         except Exception as e:
             logger.warning("建议层 LLM 生成失败(第%d次): %s", attempt + 1, e)
-    return {}
+    return []
 
 
 def recommendation_grounding_check(rec: dict, evidence: dict, rag_text: str = "") -> dict:
@@ -222,10 +217,13 @@ def build_recommendations(risks: list[dict], evidence: dict) -> list[dict]:
     generated = _generate_recommendations(contexts)
 
     enriched = []
-    for r in risks:
+    for i, r in enumerate(risks):
         rt = r.get("risk_type", "")
         legal_basis = RULE_LAWS.get(rt, "")
-        rec = generated.get(rt) or _template_fallback(rt)
+        # 按索引取（顺序一致），并校验 risk_type 匹配；缺失/不匹配则回退模板（BUG-022，避免同类型多条建议错位）
+        rec = _template_fallback(rt)
+        if i < len(generated) and isinstance(generated[i], dict) and generated[i].get("risk_type") == rt:
+            rec = generated[i]
         # 空建议/空说明回退到护栏 direction（避免 LLM 部分失败时输出空）
         if not (rec.get("suggestion") or "").strip():
             rec = dict(rec)
