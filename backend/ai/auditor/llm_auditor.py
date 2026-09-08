@@ -1,3 +1,16 @@
+"""llm_auditor.py —— 已归档（非生产路径）。
+
+旧「precise = 规则 + LLM 直审」引擎（v5-v124 口径）。生产链路已切换为
+evidence_extractor + evidence_adjudicator（v6.4 冻结），本模块不再被生产调用，
+也不再从 ai.auditor 包命名空间再导出。
+
+当前唯一引用方（均为开发验证 / 旧基线，非生产）：
+- evaluate/evaluate_risks.py（旧 precise 引擎基线）
+- evaluate/export_fp.py（旧 FP 导出）
+- test_llm.py（冒烟 test_07）
+
+请勿重新接回生产链路。
+"""
 from ai.chunker import split_chunks
 from ai.llm_client import llm_client
 from ai.utils import extract_json_list
