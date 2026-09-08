@@ -42,7 +42,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 def _iso(ts) -> str | None:
-    """Return UTC-aware ISO string. SQLite CURRENT_TIMESTAMP is UTC."""
+    """把应用层写入的 naive UTC 时间序列化为带 Z 的 ISO 字符串（前端按 UTC 解析再转本地）。"""
     if ts is None:
         return None
     return ts.isoformat() + "Z"

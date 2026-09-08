@@ -1,9 +1,9 @@
 from datetime import datetime
 
-from sqlalchemy import String, Integer, Text, DateTime, JSON, ForeignKey, func
+from sqlalchemy import String, Integer, Text, DateTime, JSON, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
-from database import Base
+from database import Base, utcnow_naive
 
 
 class AuditReport(Base):
@@ -19,4 +19,4 @@ class AuditReport(Base):
     low_risk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     risk_heatmap_data: Mapped[dict] = mapped_column(JSON, nullable=True, default=None)
     missing_clauses: Mapped[dict] = mapped_column(JSON, nullable=True, default=None)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)

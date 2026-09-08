@@ -1,11 +1,11 @@
 """首页仪表盘统计（一次性返回所有卡片/图表数据，替代前端 mock）"""
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 
-from database import get_db
+from database import get_db, utcnow_naive
 from models.user import User
 from models.contract import Contract
 from models.audit_record import AuditRecord
@@ -16,8 +16,8 @@ router = APIRouter(prefix="/stats", tags=["stats"])
 
 
 def _utcnow() -> datetime:
-    """SQLite 的 CURRENT_TIMESTAMP 是 naive UTC，这里保持一致。"""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    """应用层统一 naive UTC（与 DB 方言解耦，见 database.utcnow_naive，BUG-036）。"""
+    return utcnow_naive()
 
 
 @router.get("/dashboard")

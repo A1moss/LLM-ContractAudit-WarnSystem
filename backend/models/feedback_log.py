@@ -1,9 +1,9 @@
 from datetime import datetime
 
-from sqlalchemy import String, Integer, Text, DateTime, JSON, ForeignKey, func
+from sqlalchemy import String, Integer, Text, DateTime, JSON, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
-from database import Base
+from database import Base, utcnow_naive
 
 
 class FeedbackLog(Base):
@@ -16,4 +16,4 @@ class FeedbackLog(Base):
     original_risk: Mapped[dict] = mapped_column(JSON, nullable=True, default=None)
     corrected_risk: Mapped[dict] = mapped_column(JSON, nullable=True, default=None)
     comment: Mapped[str] = mapped_column(Text, nullable=True, default=None)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)

@@ -25,6 +25,7 @@ class TemplateUpdate(BaseModel):
 
 
 def _iso(ts: datetime | None) -> str | None:
+    """把应用层写入的 naive UTC 时间序列化为带 Z 的 ISO 字符串（前端按 UTC 解析再转本地）。"""
     return ts.isoformat() + "Z" if ts else None
 
 

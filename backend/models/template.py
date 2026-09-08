@@ -1,9 +1,9 @@
 from datetime import datetime
 
-from sqlalchemy import String, Integer, Boolean, DateTime, JSON, ForeignKey, func
+from sqlalchemy import String, Integer, Boolean, DateTime, JSON, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
-from database import Base
+from database import Base, utcnow_naive
 
 
 class Template(Base):
@@ -16,5 +16,5 @@ class Template(Base):
     is_builtin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     previous_version_id: Mapped[int] = mapped_column(Integer, ForeignKey("templates.id"), nullable=True, default=None)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
