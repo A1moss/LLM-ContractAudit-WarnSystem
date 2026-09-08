@@ -150,7 +150,7 @@ def _locate_clause(full_text: str, clause_text: str) -> dict | None:
 
 
 @router.post("/upload")
-async def upload_contract(
+def upload_contract(
     file: UploadFile = File(...),
     name: str = Form(None),
     contract_type: str = Form(None),
@@ -165,7 +165,8 @@ async def upload_contract(
     ext = os.path.splitext(file.filename)[1]
     saved_name = str(uuid.uuid4()) + ext
     file_path = os.path.join(UPLOAD_DIR, saved_name)
-    content = await file.read()
+    # 同步端点（def → 线程池）：用 file.file.read() 同步读，不再 await（BUG-002，原 async 全程阻塞事件循环）
+    content = file.file.read()
     with open(file_path, "wb") as f:
         f.write(content)
 
