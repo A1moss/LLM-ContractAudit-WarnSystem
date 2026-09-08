@@ -1,8 +1,9 @@
 import os
-import secrets
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# 从 __file__ 定位项目根 .env（config.py → backend/ → 项目根/），避免依赖 cwd
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "mysql+pymysql://root:root@localhost:3306/contract_audit")
 # 未配置 SECRET_KEY 或仍是弱默认时启动失败，避免随机 key 导致 --reload/多 worker 下 JWT 失效（BUG-054）
