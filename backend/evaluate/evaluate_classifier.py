@@ -1,8 +1,11 @@
 """
-evaluate_classifier.py — 计算合同分类准确率（需 DEEPSEEK_API_KEY）
+evaluate_classifier.py — 纯 LLM 分块投票分类评测（BASELINE，非生产链）
 
-读取 build_testset.py 生成的 03_数据集/测试集/testset.json，对每条样本调
-ai.classifier.classify_contract，与 true_type 比对，输出：
+⚠️ 本脚本走「纯 LLM 分块投票」（classifier.classify_contract），
+与生产默认 RAG 分类链（rag_classifier.classify_by_rag）不同。
+仅作为 RAG 分类的基线对照（baseline），其数字不用于正式指标。
+
+读取 realtest.json，对每条样本调 ai.classifier.classify_contract，与 true_type 比对：
   - accuracy（总准确率，赛题门槛 ≥85%）
   - 每类 precision / recall / F1
   - 混淆矩阵（true × pred，markdown）
