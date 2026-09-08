@@ -30,7 +30,9 @@ request.interceptors.response.use(
   async (error) => {
     const config = error.config
     // 网络错误（后端刚启动/连接未建立）时静默重试一次，避免页面首刷就弹"网络异常"
-    if (!error.response && config && !config.__retried) {
+    // 只对幂等方法（GET/HEAD/OPTIONS）重试；POST 重试会导致重复审核/重复写库（BUG-030）
+    const method = (config?.method || 'get').toLowerCase()
+    if (!error.response && config && !config.__retried && ['get', 'head', 'options'].includes(method)) {
       config.__retried = true
       await new Promise(resolve => setTimeout(resolve, 1000))
       return request(config)
