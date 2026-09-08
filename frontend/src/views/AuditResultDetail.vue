@@ -89,7 +89,15 @@
           <el-table-column prop="type" label="风险类型" width="130" />
           <el-table-column prop="clause" label="原文片段" min-width="220" show-overflow-tooltip />
           <el-table-column prop="reason" label="判定理由" min-width="220" show-overflow-tooltip />
-          <el-table-column prop="suggestion" label="建议" min-width="180" />
+          <el-table-column label="建议" min-width="280">
+            <template #default="{ row }">
+              <div v-if="row.risk_description" class="rec-desc">{{ row.risk_description }}</div>
+              <div class="rec-suggestion">{{ row.suggestion }}</div>
+              <div v-if="row.example" class="rec-example">{{ row.example }}</div>
+              <div v-if="row.legal_basis" class="rec-legal">法律依据：{{ row.legal_basis }}</div>
+              <div v-if="row.grounding_warning" class="rec-warning">⚠ 该建议含未经证据核实的数值，请结合合同原文确认。</div>
+            </template>
+          </el-table-column>
           <el-table-column prop="confidence" label="置信度" width="120">
             <template #default="{ row }">
               <el-progress
@@ -169,6 +177,12 @@ async function fetchResult() {
       suggestion: r.suggestion,
       confidence: r.confidence,
       detection_method: r.detection_method,
+      // v6.5 建议层结构化字段（BUG-021）
+      recommendation: r.recommendation || {},
+      risk_description: r.recommendation?.risk_description || '',
+      example: r.recommendation?.example || '',
+      legal_basis: r.recommendation?.legal_basis || '',
+      grounding_warning: r.recommendation?.grounding?.passed === false,
     }))
   } catch (e) {
     error.value = '加载审核结果失败'
@@ -228,4 +242,10 @@ onMounted(() => {
 .suffix-red { color: #F56C6C; font-size: 14px; }
 .suffix-orange { color: #E6A23C; font-size: 14px; }
 .suffix-green { color: #67C23A; font-size: 14px; }
+
+.rec-desc { font-size: 13px; color: #606266; margin-bottom: 2px; }
+.rec-suggestion { font-size: 13px; color: #303133; }
+.rec-example { font-size: 12px; color: #909399; margin-top: 4px; }
+.rec-legal { font-size: 12px; color: #909399; margin-top: 2px; }
+.rec-warning { font-size: 12px; color: #E6A23C; margin-top: 4px; }
 </style>

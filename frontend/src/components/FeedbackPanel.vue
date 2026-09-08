@@ -35,6 +35,22 @@
         <span class="label">修改建议：</span>
         <span class="text">{{ item.suggestion }}</span>
       </div>
+      <!-- v6.5 建议层结构化字段（BUG-021） -->
+      <div class="risk-recommendation" v-if="item.risk_description">
+        <span class="label">风险说明：</span>
+        <span class="text">{{ item.risk_description }}</span>
+      </div>
+      <div class="risk-recommendation" v-if="item.example">
+        <span class="label">修改示例：</span>
+        <span class="text">{{ item.example }}</span>
+      </div>
+      <div class="risk-recommendation" v-if="item.legal_basis">
+        <span class="label">法律依据：</span>
+        <span class="text">{{ item.legal_basis }}</span>
+      </div>
+      <div class="risk-grounding-warning" v-if="item.grounding_warning">
+        ⚠ 该建议含未经证据核实的数值，请结合合同原文确认。
+      </div>
 
       <!-- 未处理：显示四个操作按钮 -->
       <div v-if="!isProcessed(item)" class="risk-actions">
@@ -326,12 +342,17 @@ defineExpose({
 .risk-method { font-size: 12px; }
 .risk-confidence { font-size: 12px; color: #909399; }
 
-.risk-clause, .risk-reason, .risk-suggestion {
+.risk-clause, .risk-reason, .risk-suggestion, .risk-recommendation {
   margin-bottom: 6px;
   font-size: 13px;
   line-height: 1.6;
 }
 .label { color: #909399; margin-right: 4px; }
+.risk-grounding-warning {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #E6A23C;
+}
 .text { color: #303133; }
 
 .risk-actions {

@@ -533,6 +533,11 @@ async function fetchAuditResult() {
       clause_no: r.clause_position?.clause_no || null,
       clause_title: r.clause_position?.clause_title || null,
       suggestion: r.suggestion, reason: r.reason, confidence: r.confidence, detection_method: r.detection_method,
+      // v6.5 建议层结构化字段（BUG-021）
+      risk_description: r.recommendation?.risk_description || '',
+      example: r.recommendation?.example || '',
+      legal_basis: r.recommendation?.legal_basis || '',
+      grounding_warning: r.recommendation?.grounding?.passed === false,
     }))
   } catch { riskItems.value = [] }
 }

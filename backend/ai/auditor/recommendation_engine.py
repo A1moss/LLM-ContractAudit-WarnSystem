@@ -159,8 +159,8 @@ def recommendation_grounding_check(rec: dict, evidence: dict, rag_text: str = ""
         if num in legal or num in ev_text:
             continue
         issues.append(f"数字/比例「{m.group(0).strip()}」无证据来源")
-    # 中文数字/比例（如 百分之十、千分之五、三十日）
-    for m in re.finditer(r"([零一二三四五六七八九十百千万亿]+)", text):
+    # 中文数字/比例（如 百分之十、千分之五、三十日）——字符类纳入「分之」，避免「百分之十」被拆成单字漏拦（BUG-021-a）
+    for m in re.finditer(r"([零一二三四五六七八九十百千万亿分之]+)", text):
         cn = m.group(1)
         if len(cn) < 2:  # 单字（如"一"）干扰大，跳过
             continue
