@@ -302,7 +302,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Warning, ArrowLeft, ArrowRight, Loading } from '@element-plus/icons-vue'
 import FeedbackPanel from '../components/FeedbackPanel.vue'
@@ -352,14 +352,14 @@ const renderedText = computed(() => {
 })
 
 // ── 获取合同详情 ──
-async function fetchDetail() {
+async function fetchDetail(options = {}) {
   loading.value = true
   error.value = ''
   try {
     const res = await getContractDetail(route.params.id)
     contract.value = res.data
     fetchFeedback()
-    loadPdf()
+    if (options.loadPdf !== false) loadPdf()  // 轮询查状态时传 {loadPdf:false}，避免重复下载 PDF（BUG-032）
   } catch (e) {
     error.value = '无法加载合同详情，请确认合同 ID 有效且后端已启动'
     console.warn('合同详情加载失败:', e)
@@ -391,6 +391,11 @@ let pdfLoadingTask = null
 
 // ── loadPdf：自动转换 + 自动适配 ──
 async function loadPdf() {
+  // 先销毁上一个 PDF 任务，避免轮询期间反复下载/解析导致资源泄漏（BUG-032）
+  if (pdfLoadingTask) {
+    try { pdfLoadingTask.destroy() } catch {}
+    pdfLoadingTask = null
+  }
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
   const cid = route.params.id
 
@@ -708,7 +713,7 @@ async function handleTriggerAudit() {
     const deadline = Date.now() + 180000  // 最多 3 分钟
     while (Date.now() < deadline) {
       await new Promise(r => setTimeout(r, 2000))
-      await fetchDetail()
+      await fetchDetail({ loadPdf: false })  // 轮询只查状态，不重复下载/解析 PDF（BUG-032）
       const st = contract.value.status
       if (st === 'completed') {
         await fetchAuditResult()
@@ -767,6 +772,18 @@ onMounted(() => {
   fetchDetail()
   fetchAuditResult()
   fetchClauseComparison()
+})
+
+// 组件卸载时释放 PDF document / 图片 objectURL，避免资源泄漏（BUG-032）
+onUnmounted(() => {
+  if (pdfLoadingTask) {
+    try { pdfLoadingTask.destroy() } catch {}
+    pdfLoadingTask = null
+  }
+  if (imgSrc.value) {
+    URL.revokeObjectURL(imgSrc.value)
+    imgSrc.value = ''
+  }
 })
 </script>
 
