@@ -368,6 +368,39 @@ def get_contract_file(
     )
 
 
+_COMPARE_SECTION_MARKER = 'id="clause-comparison"'
+
+
+def _build_risk_rows(all_risks: list[dict]) -> str:
+    """生成风险表 HTML（所有动态字段 html.escape，防存储型 XSS，BUG-045）。"""
+    return "".join(
+        f"<tr><td>{html.escape(r.get('risk_type', ''))}</td><td>{html.escape(r.get('level', ''))}</td>"
+        f"<td>{html.escape(r.get('reason', '') or '')[:80]}</td><td>{html.escape(r.get('suggestion', '') or '')[:80]}</td></tr>"
+        for r in all_risks
+    )
+
+
+def _build_compare_rows(clauses: list[dict]) -> str:
+    """生成条款比对表 HTML（所有动态字段 html.escape，BUG-045）。"""
+    status_cn = {"covered": "已覆盖", "partial": "部分偏离", "missing": "缺失"}
+    return "".join(
+        f"<tr><td>{html.escape(cl.get('title', '') or '')}</td><td>{html.escape(status_cn.get(cl.get('status', ''), ''))}</td>"
+        f"<td>{html.escape(cl.get('deviation', '') or '')}</td><td>{html.escape(cl.get('completion', '') or '')}</td></tr>"
+        for cl in clauses
+    )
+
+
+def _wrap_compare_section(section: str) -> str:
+    return f'<div {_COMPARE_SECTION_MARKER}>{section}</div>'
+
+
+def _replace_compare_section(report_html: str, new_section: str) -> str:
+    """幂等替换条款比对片段（去掉旧片段再插入新片段，避免重复调用无限增长，BUG-045）。"""
+    pattern = re.compile(rf'<div {_COMPARE_SECTION_MARKER}>.*?</div>', re.DOTALL)
+    base = pattern.sub('', report_html or '')
+    return base + _wrap_compare_section(new_section)
+
+
 def _recover_contract_status(contract_id: int):
     """主审核流程失败后，用独立会话 best-effort 恢复合同状态为 parsed（BUG-010）。
 
@@ -501,22 +534,14 @@ def _run_audit(contract_id: int):
         risk_score = min(100, high * 30 + mid * 15 + low * 5)
 
         # Generate report HTML（风险表 + 条款比对章节）
-        risk_rows = "".join(
-            f"<tr><td>{r.get('risk_type','')}</td><td>{r.get('level','')}</td>"
-            f"<td>{html.escape(r.get('reason','') or '')[:80]}</td><td>{html.escape(r.get('suggestion','') or '')[:80]}</td></tr>"
-            for r in all_risks
-        )
+        risk_rows = _build_risk_rows(all_risks)
 
         compare_section = ""
         if compare_result and compare_result.get("clauses"):
             s = compare_result.get("summary") or {}
             cov_rate = s.get("coverage_rate") or 0
             miss_cnt = s.get("missing") or 0
-            compare_rows = "".join(
-                f"<tr><td>{html.escape(cl.get('title','') or '')}</td><td>{cl.get('status','')}</td>"
-                f"<td>{html.escape(cl.get('deviation','') or '')}</td><td>{html.escape(cl.get('completion','') or '')}</td></tr>"
-                for cl in compare_result["clauses"]
-            )
+            compare_rows = _build_compare_rows(compare_result["clauses"])
             compare_section = (
                 f"<h3>条款比对（覆盖率 {cov_rate:.0%}，缺失 {miss_cnt} 条）</h3>"
                 f"<table border='1'><tr><th>条款</th><th>状态</th><th>偏离说明</th><th>补全建议</th></tr>{compare_rows}</table>"
@@ -528,7 +553,7 @@ def _run_audit(contract_id: int):
             f"<html><body><h2>Audit Report</h2>"
             f"<p>Batch: {audit_batch} | Mode: {c.audit_mode} | Score: {risk_score}</p>"
             f"<table border='1'><tr><th>Type</th><th>Level</th><th>Reason</th><th>Suggestion</th></tr>{risk_rows}</table>"
-            f"{compare_section}"
+            f"{_wrap_compare_section(compare_section)}"
             f"</body></html>"
         )
 
@@ -826,19 +851,15 @@ def trigger_clause_comparison(
     )
     if report:
         report.missing_clauses = result
-        # 更新报告 HTML 加入条款比对片段
-        compare_rows = ""
-        for cl in result.get("clauses", []):
-            status_cn = {"covered": "已覆盖", "partial": "部分偏离", "missing": "缺失"}
-            compare_rows += (
-                f"<tr><td>{cl.get('title','')}</td><td>{status_cn.get(cl.get('status',''),'')}</td>"
-                f"<td>{cl.get('deviation','') or ''}</td><td>{cl.get('completion','') or ''}</td></tr>"
-            )
-        if compare_rows:
-            report.report_html = (report.report_html or "") + (
+        # 幂等更新报告 HTML 的条款比对片段（转义 + 替换而非追加，避免无限增长，BUG-045）
+        clauses = result.get("clauses", [])
+        if clauses:
+            section = (
                 f"<h3>条款比对</h3>"
-                f"<table border='1'><tr><th>条款</th><th>状态</th><th>偏离说明</th><th>补全建议</th></tr>{compare_rows}</table>"
+                f"<table border='1'><tr><th>条款</th><th>状态</th><th>偏离说明</th><th>补全建议</th></tr>"
+                f"{_build_compare_rows(clauses)}</table>"
             )
+            report.report_html = _replace_compare_section(report.report_html, section)
         db.commit()
 
     return {"code": 0, "message": "ok", "data": result}
