@@ -21,7 +21,7 @@ from api.deps import get_current_user, require_role, ROLE_ADMIN
 from ai.parser import detect_and_parse
 from ai.classifier import classify_contract
 from ai.extractor import extract_elements
-from ai.auditor import run_rules, audit_with_llm
+from ai.auditor import run_rules
 from ai.auditor.evidence_extractor import extract_evidence_detailed
 from ai.auditor.evidence_adjudicator import adjudicate_risks
 from ai.auditor.recommendation_engine import build_recommendations
