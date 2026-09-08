@@ -193,8 +193,7 @@ def upload_contract(
     if ext not in (".pdf", ".docx", ".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp"):
         raise HTTPException(status_code=400, detail="仅支持 pdf/docx 或图片格式(jpg/png/tiff/bmp)")
 
-    ext = os.path.splitext(file.filename)[1]
-    saved_name = str(uuid.uuid4()) + ext
+    saved_name = str(uuid.uuid4()) + ext  # 统一小写扩展名（BUG-043，原第二行重复计算且丢 lower）
     file_path = os.path.join(UPLOAD_DIR, saved_name)
     # 同步端点（def → 线程池）：用 file.file.read() 同步读，不再 await（BUG-002，原 async 全程阻塞事件循环）
     content = file.file.read()
