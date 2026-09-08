@@ -214,10 +214,17 @@ def upload_contract(
 
     # OCR（图片）识别失败/无文字时给出明确提示，避免静默产生空合同
     if not full_text.strip():
+        # 删除已落盘的空文件，避免 orphan（BUG-050）
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
         if parsed.get("error"):
             raise HTTPException(status_code=422, detail=f"文本提取失败：{parsed['error']}")
         if ext.lower() in (".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp"):
             raise HTTPException(status_code=422, detail="图片未识别到文字，请确认图片清晰或上传 PDF/DOCX 格式")
+        # PDF/DOCX 空文本：扫描版 PDF 无文字层（BUG-050）
+        raise HTTPException(status_code=422, detail="未能从文件中提取到文字（可能是扫描版 PDF 无文字层），请上传含文字层的 PDF/DOCX 或清晰的图片")
 
     # 分类与要素抽取并行（要素抽取对 contract_type 不敏感，用中性词占位，不必等分类结果）
     from concurrent.futures import ThreadPoolExecutor
