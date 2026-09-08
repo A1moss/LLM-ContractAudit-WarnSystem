@@ -26,7 +26,6 @@ from ai.auditor.evidence_extractor import extract_evidence_detailed
 from ai.auditor.evidence_adjudicator import adjudicate_risks
 from ai.auditor.recommendation_engine import build_recommendations
 from ai.confidence import enrich_confidences
-from ai.corex import run_review
 from ai.matcher import compare_clauses
 from ai.reviser import revise_clause
 from ai.taxonomy import business_tag_names

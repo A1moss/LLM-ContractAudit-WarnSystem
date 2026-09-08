@@ -126,16 +126,6 @@ def test_10_knowledge():
 
 
 @test
-def test_11_corex():
-    from ai.corex import run_review
-    from ai.auditor.rule_engine import run_rules
-    initial = run_rules(TEST_CONTRACT)
-    result = run_review(TEST_CONTRACT[:2000], initial)
-    assert "risks" in result and "agent_logs" in result
-    print(f"  ✅ Corex: {result['completed_agents']}/{result['total_agents']} Agent, {len(result['risks'])} 条终审")
-
-
-@test
 def test_12_chunking():
     from ai.chunker import split_chunks
     from ai.auditor.rule_engine import run_rules
@@ -170,7 +160,6 @@ if __name__ == "__main__":
     test_08_parser()
     test_09_ocr_import()
     test_10_knowledge()
-    test_11_corex()
     test_12_chunking()
 
     print("=" * 60)
