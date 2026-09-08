@@ -195,23 +195,6 @@ const error = ref('')
 // 请求序列号：路由快速切换时丢弃过期请求的结果，防止旧报告/PDF 覆盖新内容
 let requestSeq = 0
 
-// ── 文件格式检测 ──
-const isPdf = ref(null)
-const DOCX_W = 602
-let cachedFileData = null
-
-async function fetchAndDetect(id) {
-  const token = localStorage.getItem('token')
-  const res = await fetch(`/api/contracts/${id}/file`,{headers:token?{Authorization:`Bearer ${token}`}:{}})
-  if (!res.ok) throw new Error(`服务器返回 ${res.status}`)
-  const buf = await res.arrayBuffer()
-  const head = new Uint8Array(buf.slice(0, 4))
-  if (head[0]===0x25 && head[1]===0x50 && head[2]===0x44 && head[3]===0x46) { isPdf.value=true }
-  else if (head[0]===0x50 && head[1]===0x4B) { isPdf.value=false }
-  else { isPdf.value = true }
-  cachedFileData = buf
-}
-
 // ── 风险等级映射 ──
 const LEVEL_MAP = { high: '高风险', medium: '中风险', low: '低风险' }
 function levelLabel(level) { return LEVEL_MAP[level] || level || '未知' }
@@ -271,8 +254,6 @@ watch(contractId, async (newId, oldId) => {
     totalPages.value = 0
     currentSpread.value = 1
     jumpPage.value = ''
-    isPdf.value = null
-    cachedFileData = null
     await fetchReport(seq)
     if (seq !== requestSeq) return
     await nextTick()
@@ -449,7 +430,6 @@ function handleJump() {
   goToSpread(spread)
   jumpPage.value = ''
 }
-function goToPage(pageNum) { if (pageNum < 1 || pageNum > totalPages.value) return; renderPage(pageNum) }
 
 onMounted(async () => {
   const seq = ++requestSeq

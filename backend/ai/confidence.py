@@ -70,18 +70,6 @@ def rule_confidence(risk_type: str) -> float:
     return RULE_CONFIDENCE.get(risk_type, DEFAULT_RULE_CONFIDENCE)
 
 
-def agent_confidence(agreements: int, total: int = 4) -> float:
-    """多 Agent 一致性置信度：按一致 Agent 占比线性映射到 [0.5, 0.95]。
-
-    一个 Agent 单独检出 → 0.5 左右（存在单视角偏差）；
-    4 个来源全部一致 → 0.95（高度可信）。
-    """
-    if total <= 0:
-        return 0.5
-    ratio = max(0.0, min(1.0, agreements / total))
-    return round(0.5 + 0.45 * ratio, 3)
-
-
 def _risk_key(risk: dict) -> tuple:
     """风险聚类键：风险类型 + 原文前 30 字（归一化换行/空白）。"""
     clause = (risk.get("clause_text") or "").replace("\n", " ").strip()

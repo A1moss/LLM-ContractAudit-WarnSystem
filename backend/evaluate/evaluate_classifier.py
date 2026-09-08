@@ -62,7 +62,7 @@ def main():
 
     TESTSET = _resolve_testset()
     if not TESTSET.exists():
-        print(f"找不到测试集 {TESTSET}，先运行 build_realtest.py / build_testset.py")
+        print(f"找不到测试集 {TESTSET}，先运行 build_realtest.py")
         sys.exit(1)
 
     entries = json.loads(TESTSET.read_text(encoding="utf-8"))

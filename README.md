@@ -57,7 +57,6 @@ backend/
     auditor/      规则引擎 + 证据抽取 + 确定性裁决 + 建议层（核心）
     knowledge/    法条库 laws.json / 风险案例 / 标准条款
     matcher/      标准条款比对
-    reporter/     报告生成 + 热力图数据
     rag/          ChromaDB / BM25 检索
   api/            FastAPI 路由（含后台审核流水线 _run_audit）
   models/         SQLAlchemy 模型
