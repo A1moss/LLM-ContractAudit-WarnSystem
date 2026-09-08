@@ -534,9 +534,8 @@ def _run_audit(contract_id: int):
             db.add(record)
             records.append(record)
 
-        db.commit()
-        for record in records:
-            db.refresh(record)
+        # 注意：此处不 commit。delete + insert records + report + status 合并为一个事务，
+        # 在下方统一 commit；中途异常时 except 分支 rollback 会保留旧记录（BUG-010）。
 
         # Calculate report stats
         high = sum(1 for r in all_risks if r.get("level") == "high")
@@ -618,10 +617,17 @@ def trigger_audit(
         raise HTTPException(status_code=404, detail="contract not found")
     if not c.parsed_text:
         raise HTTPException(status_code=400, detail="contract has no parsed text, upload first")
+    if c.status == "auditing":
+        raise HTTPException(status_code=409, detail="审核进行中，请勿重复提交")
 
-    # 异步审核：立即返回，后台执行完整流水线
-    c.status = "auditing"
+    # 原子占位（乐观锁）：并发下只有一个请求能把 status 从非 auditing 改成 auditing，防重复审核（BUG-009）
+    updated = db.query(Contract).filter(
+        Contract.id == contract_id,
+        Contract.status != "auditing",
+    ).update({"status": "auditing"}, synchronize_session=False)
     db.commit()
+    if not updated:
+        raise HTTPException(status_code=409, detail="审核进行中，请勿重复提交")
 
     background_tasks.add_task(_run_audit, contract_id)
     return {
@@ -715,12 +721,21 @@ def get_audit_result(
     if not c or not _can_view_contract(current_user, c):
         raise HTTPException(status_code=404, detail="contract not found")
 
-    records = (
-        db.query(AuditRecord)
+    # 只返回最新批次（按 created_at 取最新记录的 audit_batch），避免并发审核多批次混杂（BUG-009）
+    latest = (
+        db.query(AuditRecord.audit_batch)
         .filter(AuditRecord.contract_id == contract_id)
-        .order_by(AuditRecord.audit_batch.desc(), AuditRecord.risk_level.desc())
-        .all()
+        .order_by(AuditRecord.created_at.desc(), AuditRecord.id.desc())
+        .first()
     )
+    records = []
+    if latest:
+        records = (
+            db.query(AuditRecord)
+            .filter(AuditRecord.contract_id == contract_id, AuditRecord.audit_batch == latest[0])
+            .order_by(AuditRecord.risk_level.desc())
+            .all()
+        )
 
     has_current_result = any(r.result_status == "valid" for r in records)
 
