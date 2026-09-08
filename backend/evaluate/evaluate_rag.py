@@ -1,8 +1,10 @@
 """
 evaluate_rag.py — RAG 少样本分类评测（含 LLM 调用）
 
-检索 top-K 相似范本作示例喂 LLM，与 testset.json 的 true_type 比对。
-留一法防自身泄漏。输出 accuracy / 每类 F1 / 混淆矩阵。
+检索 top-K 相似范本作示例喂 LLM，与 classification_test.json（147 份分类正式测试集）
+的 true_type 比对。输出 accuracy / 每类 P/R/F1，并保存预测快照 rag_predictions.json。
+口径：147 份 = 第一批 84（realtest.json）+ 第二批 55（现实合同）+ 人工构造 8（边界样本），
+content 已去除「法理类型」等答案元信息，Gold 冻结。
 """
 import sys
 import json
@@ -17,16 +19,16 @@ sys.path.insert(0, str(_BACKEND_DIR))
 from ai.classifier.rag_classifier import classify_by_rag
 from ai.taxonomy import ENABLED_TYPES
 
-TESTSET_REAL = Path(__file__).resolve().parent / "realtest.json"   # 真实合同测试集（人工标注，待收集）
+TESTSET_REAL = Path(__file__).resolve().parent / "classification_test.json"  # 分类正式测试集（147 份，Gold 冻结）
 TESTSET_FALLBACK = _SERVICE_DIR / "03_数据集" / "测试集" / "testset.json"  # 范本样本集（与检索库同源，仅冒烟参考）
 PRED_FILE = Path(__file__).resolve().parent / "rag_predictions.json"  # 预测快照（可离线复核）
 
 
 def _resolve_testset():
-    """评测测试集优先取真实合同；未收集到时回退范本样本集并告警。"""
+    """评测测试集优先取分类正式测试集（147 份）；未收集到时回退范本样本集并告警。"""
     if TESTSET_REAL.exists():
         return TESTSET_REAL
-    print("[提示] 未找到真实合同测试集 realtest.json（待收集+人工标注），回退用范本样本集 testset.json。")
+    print("[提示] 未找到分类正式测试集 classification_test.json，回退用范本样本集 testset.json。")
     print("[提示] 注意：范本样本集与检索库 contract_templates 同源，结果仅作冒烟/回归参考，不作为正式泛化指标。")
     return TESTSET_FALLBACK
 
@@ -38,7 +40,7 @@ def main():
 
     conf = defaultdict(list)
     wrong = []
-    predictions = []  # 预测快照（可离线复核 82/84 等结果）
+    predictions = []  # 预测快照（可离线复核 145/147 等结果）
     for e in entries:
         body = e.get("content") or e.get("text", "")
         r = classify_by_rag(body, top_k=top_k, exclude_self=body)
