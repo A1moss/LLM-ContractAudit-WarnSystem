@@ -114,6 +114,11 @@ def _build_evidence(r: dict, rag_ctx: list | None) -> dict | None:
         return {"method": "rag", "references": refs} if refs else None
     if method == "corex_review":
         return {"method": "corex", "agreement": r.get("agreement_count", 0)}
+    if method == "evidence":
+        # precise 主链路（证据+确定性裁决）：附上命中法条与条款原文，作为可溯源证据（BUG-020，原恒为 None）
+        law = r.get("related_law", "")
+        clause = (r.get("clause_text") or "").strip()
+        return {"method": "evidence", "law": law, "clause_text": clause[:200]} if (law or clause) else None
     return None
 
 
