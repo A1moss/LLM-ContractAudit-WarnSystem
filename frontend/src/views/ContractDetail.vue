@@ -143,6 +143,7 @@
                         <div class="revise-chat-foot">
                           <el-input v-model="revisePanel.input" type="textarea" :rows="2" :placeholder="isOverviewActive ? '对整个合同的修改要求…' : '输入修改指令，例如：把违约金上限从30%改为20%'" @keydown.enter.prevent="handleRevise" />
                           <el-button type="primary" :loading="revisePanel.loading" @click="handleRevise">发送</el-button>
+                          <el-button @click="downloadRevised">下载修订版 DOCX</el-button>
                         </div>
                       </div>
                     </div>
@@ -307,7 +308,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Warning, ArrowLeft, ArrowRight, Loading } from '@element-plus/icons-vue'
 import FeedbackPanel from '../components/FeedbackPanel.vue'
 import { ElMessage } from 'element-plus'
-import { getContractDetail, getAuditResult, triggerAudit, getClauseComparison, submitFeedback, getFeedback, deleteFeedback, reviewContract, approveContract, reviseClause, getContractFile } from '../api/contract.js'
+import { getContractDetail, getAuditResult, triggerAudit, getClauseComparison, submitFeedback, getFeedback, deleteFeedback, reviewContract, approveContract, reviseClause, getRevisions, downloadRevisedDocx, getContractFile } from '../api/contract.js'
 import { formatTime } from '../utils/format.js'
 import { typeLabel } from '../constants/contractTypes.js'
 import * as pdfjsLib from 'pdfjs-dist'
@@ -644,15 +645,65 @@ function openReviseOverview() {
 }
 
 function openRevisePanel(focusId) {
-  // 从当前 riskItems 重建条款列表（保留已有对话历史）
-  const existing = {}
-  revisePanel.clauses.forEach(c => { existing[c.id] = c.messages })
+  // 从当前 riskItems 重建条款列表（空历史，随后从后端持久化会话填充）
   revisePanel.clauses = riskItems.value
     .filter(r => r.clause)
-    .map(r => ({ id: r.id, level: r.level, category: r.category, clause: r.clause, clause_no: r.clause_no || null, messages: existing[r.id] || [] }))
+    .map(r => ({ id: r.id, level: r.level, category: r.category, clause: r.clause, clause_no: r.clause_no || null, messages: [] }))
+  revisePanel.overviewMessages = []
   revisePanel.activeId = focusId || (revisePanel.clauses[0]?.id || '__overview__')
   revisePanel.input = ''
   revisePanel.visible = true
+
+  // 拉取持久化会话并重建（刷新/重进合同后历史仍在，可继续对话）
+  getRevisions(contractId.value).then(res => {
+    const revs = res.data || []
+    const byKey = {}
+    for (const r of revs) { (byKey[r.clause_key] = byKey[r.clause_key] || []).push(r) }
+    if (byKey['__overview__']) revisePanel.overviewMessages = revsToMessages(byKey['__overview__'])
+    for (const c of revisePanel.clauses) {
+      const key = String(c.id)
+      if (byKey[key]) c.messages = revsToMessages(byKey[key])
+    }
+  }).catch(() => { /* 拉取失败仅无历史，不影响打开抽屉 */ })
+}
+
+// 把持久化修订记录还原为聊天消息（user/assistant 交替）
+function revsToMessages(revs) {
+  const msgs = []
+  for (const r of revs) {
+    msgs.push({ role: 'user', text: r.instruction })
+    const meta = []
+    if (r.constraints?.length) meta.push('约束：' + r.constraints.join('；'))
+    if (r.legal_basis?.length) meta.push('法律依据：' + r.legal_basis.join('；'))
+    if (r.remaining_risks?.length) meta.push('⚠ 剩余风险：' + r.remaining_risks.join('；'))
+    msgs.push({ role: 'assistant', text: r.explanation || '（修订完成）', clause: r.revised_clause || '', meta: meta.join('\n') })
+  }
+  return msgs
+}
+
+// 下载修订版 DOCX
+async function downloadRevised() {
+  try {
+    const blob = await downloadRevisedDocx(contractId.value)
+    const base = (contract.value?.file_name || '合同').replace(/\.[^.]+$/, '')
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${base}_修订版.docx`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    // 400（如「还没有任何条款修改」）时，responseType=blob 下 error.response.data 是 Blob，手动解析具体提示
+    const data = e?.response?.data
+    if (data && typeof data.text === 'function') {
+      try {
+        const j = JSON.parse(await data.text())
+        ElMessage.warning(j.detail || '下载修订版失败')
+      } catch { /* 非 JSON，忽略（拦截器已弹通用 message） */ }
+    }
+  }
 }
 
 async function handleRevise() {
@@ -681,6 +732,9 @@ async function handleRevise() {
       clause_text: clauseText,
       instruction,
       history,
+      scope: isOverview ? 'overview' : 'clause',
+      clause_key: isOverview ? '__overview__' : String(activeClause.value?.id ?? ''),
+      clause_no: isOverview ? '' : (activeClause.value?.clause_no || ''),
     })
     const data = res.data || {}
     const meta = []

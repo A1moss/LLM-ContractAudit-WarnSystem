@@ -101,6 +101,20 @@ export function reviseClause(id, data) {
   return request.post(`/contracts/${id}/revise`, data, { timeout: REVISE_TIMEOUT })
 }
 
+/**
+ * 获取合同全部修订会话（用于刷新后重建对话）
+ */
+export function getRevisions(id) {
+  return request.get(`/contracts/${id}/revisions`)
+}
+
+/**
+ * 下载修订版 DOCX（返回 Blob）
+ */
+export function downloadRevisedDocx(id) {
+  return request.get(`/contracts/${id}/revised-docx`, { responseType: 'blob', timeout: FILE_TIMEOUT })
+}
+
 // ====== 反馈标注 ======
 
 /**

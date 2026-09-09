@@ -42,7 +42,7 @@ SYSTEM_PROMPT_EVIDENCE = """你是一位合同条款事实抽取助手。唯一�
   "R05_保密": {"duration": "永久/无限/不因终止而终止/直至公开/未写明", "statutory_basis": true/false, "duration_evidence": "原文"},
   "R06_IP": {"ownership": "归甲方/归乙方/双方共有/未明确", "has_consideration": true/false, "consideration_text": "原文", "imbalance_text": "原文"},
   "R07_付款": {"prepay_ratio": 0.0, "tail_ratio": 0.0, "has_milestone": true/false, "payment_evidence": "原文"},
-  "R08_验收": {"objective_basis": true/false, "basis_evidence": "原文(客观验收依据的具体条款；objective_basis=true时必须有原文，否则填false)"},
+  "R08_验收": {"objective_basis": true/false, "basis_evidence": "原文(合同中「履约验收标准」子项的完整原文，必须含子项编号与标题如「（6）履约验收标准：……」，无论是否客观都逐字摘录，找不到才留空)"},
   "R09_不可抗力": {"has_force_majeure": true/false, "force_majeure_evidence": "原文(合同不可抗力条款原文，若只是'可能存在不可抗力风险'这类提示句则填false且evidence留空)"},
   "R10_竞业": {"has_noncompete": true/false, "duration_years": null或数字, "scope": "全国/主营业务/全行业/其他/未写明", "clause_text": "原文"},
   "R11_续约": {"mode": "silence_auto_renewal/主动续签/固定期限/无", "has_exit_channel": true/false, "clause_text": "原文"},

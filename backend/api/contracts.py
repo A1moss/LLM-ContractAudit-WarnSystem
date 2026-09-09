@@ -32,6 +32,8 @@ from ai.taxonomy import business_tag_names
 from models.audit_record import AuditRecord
 from services.docx_converter import docx_to_pdf
 from models.audit_report import AuditReport
+from models.clause_revision import ClauseRevision
+from services.docx_reviser import build_revised_docx
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,16 @@ router = APIRouter(prefix="/contracts", tags=["contracts"])
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+def _unlink_quiet(path: str | None):
+    """静默删除临时文件（用于修订版 DOCX 下载后清理）。"""
+    if not path:
+        return
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 def _archive_deleted_file(stored_path: str | None):
@@ -144,11 +156,40 @@ def _cn_to_int(s: str) -> int | None:
     return _CN_NUM.get(s)
 
 
-def _locate_clause(full_text: str, clause_text: str) -> dict | None:
-    """定位条款位置，返回 {clause_no, clause_title}。
+_ITEM_RE = re.compile(r'（\s*[一二三四五六七八九十百千\d]+\s*）')
 
-    用 clause_text 前缀在 full_text 中定位，找到该位置之前最近的"第X条"
-    标题，返回第几条和该条标题（如"第五条 合同变更与解除"）。无法定位返回 None。
+
+def _pick_best_hit(full_text: str, probe: str) -> int:
+    """定位 probe 在 full_text 的所有命中；多命中时做通用消歧。
+
+    规则：唯一命中→该位置；多命中→优先落在「（N）子项」内的那个（风险条款通常是
+    编号子项，其前面 40 字内有（N）编号）；无（N）命中→返回 -1（显式定位失败，
+    不随意取第一个）。无命中→-1。
+    """
+    matches = []
+    s = 0
+    while True:
+        p = full_text.find(probe, s)
+        if p < 0:
+            break
+        matches.append(p)
+        s = p + 1
+    if not matches:
+        return -1
+    if len(matches) == 1:
+        return matches[0]
+    for p in matches:
+        if _ITEM_RE.search(full_text[max(0, p - 40):p]):
+            return p
+    return -1
+
+
+def _locate_clause(full_text: str, clause_text: str) -> dict | None:
+    """定位条款位置，返回 {clause_no, clause_title, original_text, start, end}。
+
+    用 clause_text 前缀在 full_text 中定位（前缀逐级缩短到 4 字，容忍 LLM 证据对
+    原文的改写/重组；多命中时优先（N）子项消歧），并截取命中处的子条款作为 DOCX
+    替换锚点。无法定位返回 None。
     """
     if not full_text or not clause_text:
         return None
@@ -156,28 +197,47 @@ def _locate_clause(full_text: str, clause_text: str) -> dict | None:
     if not needle:
         return None
     idx = -1
-    for n in (30, 20, 10):
+    for n in (30, 20, 10, 6, 4):
         probe = needle[:n] if len(needle) >= n else needle
-        idx = full_text.find(probe)
+        if not probe:
+            continue
+        idx = _pick_best_hit(full_text, probe)
         if idx >= 0:
             break
     if idx < 0:
         return None
+
+    # 截取命中处的「子条款」作为替换锚点：边界为（N）子项/句号/分号/换行，
+    # 避免整份合同落在单个段落时锚点变成整份合同
+    boundary_re = re.compile(r'（\s*[一二三四五六七八九十百千\d]+\s*）|[。；;]|\n')
+    positions = [m.start() for m in boundary_re.finditer(full_text)]
+    start = max([p for p in positions if p <= idx], default=max(0, idx - 60))
+    end_candidates = [p for p in positions if p > idx]
+    end = end_candidates[0] if end_candidates else min(len(full_text), idx + 60)
+    if end < len(full_text) and full_text[end] in "。；;":
+        end += 1  # 含句末标点
+    if end - start > 150:  # 边界过远（整份一段且无标点），回退 ±60 窗口
+        start = max(0, idx - 60)
+        end = min(len(full_text), idx + 60)
+    original_text = full_text[start:end].strip()
+
     before = full_text[:idx]
     # 只匹配"第X条"（不含"款"），并捕获编号本身——从最后一个标题解析出真实条号，
     # 而非用"标题出现次数"当条号（避免目录/条款混排导致计数错位，BUG-023）。
     headings = list(re.finditer(r'第\s*([一二三四五六七八九十百千\d]+)\s*条', before))
-    if not headings:
-        return None
-    last = headings[-1]
-    clause_no = _cn_to_int(last.group(1))
-    if clause_no is None:
-        clause_no = len(headings)  # 编号无法解析时退回计数（罕见）
-    # 提取标题：从"第X条"之后到下一个换行/全角空格/标点为止
-    seg = full_text[last.end():last.end() + 30]
-    parts = [p for p in re.split(r'[\n　\s。；;：，,]', seg) if p.strip()]
-    title = parts[0] if parts else ''
-    return {"clause_no": clause_no, "clause_title": title or None}
+    clause_no = None
+    title = None
+    if headings:
+        last = headings[-1]
+        clause_no = _cn_to_int(last.group(1))
+        if clause_no is None:
+            clause_no = len(headings)  # 编号无法解析时退回计数（罕见）
+        # 提取标题：从"第X条"之后到下一个换行/全角空格/标点为止
+        seg = full_text[last.end():last.end() + 30]
+        parts = [p for p in re.split(r'[\n　\s。；;：，,]', seg) if p.strip()]
+        title = parts[0] if parts else ''
+    return {"clause_no": clause_no, "clause_title": title or None,
+            "original_text": original_text, "start": start, "end": end}
 
 
 @router.post("/upload")
@@ -195,7 +255,6 @@ def upload_contract(
 
     saved_name = str(uuid.uuid4()) + ext  # 统一小写扩展名（BUG-043，原第二行重复计算且丢 lower）
     file_path = os.path.join(UPLOAD_DIR, saved_name)
-    # 同步端点（def → 线程池）：用 file.file.read() 同步读，不再 await（BUG-002，原 async 全程阻塞事件循环）
     content = file.file.read()
     with open(file_path, "wb") as f:
         f.write(content)
@@ -522,8 +581,8 @@ def _run_audit(contract_id: int):
         else:
             all_risks = list(rule_results)
 
-        # 条款比对：先于 DB 写事务执行（LLM ~30s，避免在写事务内长时间持有 SQLite 写锁，BUG-009）。
-        # 失败不阻断审核（风险审核结果已入库），报告会标注"待重试"。
+        # 条款比对：先于 DB 写事务执行（LLM ~30s；若放进写事务会长时间持有 SQLite 写锁，
+        # 导致并发审核 database is locked，BUG-009）。失败不阻断审核，报告标注待重试。
         compare_result = None
         try:
             compare_result = compare_clauses(full_text, c.contract_type or "买卖合同", c.is_outsourcing or False)
@@ -719,6 +778,9 @@ class ReviseRequest(BaseModel):
     clause_text: str
     instruction: str
     history: list = []
+    scope: str = "clause"     # "clause" | "overview"
+    clause_key: str = ""      # 条款会话标识（str(风险记录 id) 或 "__overview__"）
+    clause_no: str = ""       # 第 X 条（定位可得时）
 
 
 @router.post("/{contract_id}/revise")
@@ -746,7 +808,121 @@ def revise_contract_clause(
         logger.warning("改条款法条检索失败: %s", e)
 
     result = revise_clause(body.clause_text, body.instruction, c.contract_type or "", body.history, rag_context)
+
+    # 持久化修订记录（仅成功时；result 含 error 说明修订失败，不落库）
+    if not result.get("error"):
+        # 直接读取审核阶段已保存的「真实原文锚点」（clause_position.original_text）。
+        # 不再拿 LLM evidence 去 parsed_text 里重新猜位置——原文锚点权威来源是合同解析文本。
+        original_text = ""
+        if body.scope == "clause":
+            try:
+                rid = int(body.clause_key)
+            except (ValueError, TypeError):
+                rid = None
+            if rid:
+                rec = db.query(AuditRecord).filter(AuditRecord.id == rid).first()
+                if rec and rec.clause_position:
+                    original_text = (rec.clause_position.get("original_text") or "").strip()
+        rev = ClauseRevision(
+            contract_id=contract_id,
+            scope=body.scope if body.scope in ("clause", "overview") else "clause",
+            clause_key=body.clause_key or "",
+            clause_no=body.clause_no or None,
+            clause_text=body.clause_text,
+            original_clause_text=original_text or None,
+            instruction=body.instruction,
+            revised_clause=result.get("revised_clause", ""),
+            explanation=result.get("explanation", ""),
+            constraints=result.get("constraints", []),
+            legal_basis=result.get("legal_basis", []),
+            remaining_risks=result.get("remaining_risks", []),
+        )
+        db.add(rev)
+        db.commit()
+        result["revision_id"] = rev.id
+
     return {"code": 0, "message": "ok", "data": result}
+
+
+@router.get("/{contract_id}/revisions")
+def get_contract_revisions(
+    contract_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """返回该合同全部修订会话（按时间正序），供前端刷新后重建对话。"""
+    c = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not c or not _can_view_contract(current_user, c):
+        raise HTTPException(status_code=404, detail="contract not found")
+    revs = (
+        db.query(ClauseRevision)
+        .filter(ClauseRevision.contract_id == contract_id)
+        .order_by(ClauseRevision.id.asc())
+        .all()
+    )
+    data = [{
+        "id": r.id,
+        "scope": r.scope,
+        "clause_key": r.clause_key,
+        "clause_no": r.clause_no,
+        "clause_text": r.clause_text,
+        "instruction": r.instruction,
+        "revised_clause": r.revised_clause,
+        "explanation": r.explanation,
+        "constraints": r.constraints or [],
+        "legal_basis": r.legal_basis or [],
+        "remaining_risks": r.remaining_risks or [],
+        "created_at": _iso(r.created_at),
+    } for r in revs]
+    return {"code": 0, "message": "ok", "data": data}
+
+
+@router.get("/{contract_id}/revised-docx")
+def download_revised_docx(
+    contract_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """生成并下载修订版 DOCX（原文件名_修订版.docx）。仅 DOCX 原始合同支持。"""
+    c = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not c or not _can_view_contract(current_user, c):
+        raise HTTPException(status_code=404, detail="contract not found")
+    if not c.stored_path or not c.stored_path.lower().endswith(".docx"):
+        raise HTTPException(status_code=400, detail="仅 DOCX 原始合同支持导出修订版")
+    if not os.path.isfile(c.stored_path):
+        raise HTTPException(status_code=404, detail="原始合同文件不存在")
+
+    revs = (
+        db.query(ClauseRevision)
+        .filter(ClauseRevision.contract_id == contract_id, ClauseRevision.scope == "clause")
+        .order_by(ClauseRevision.id.asc())
+        .all()
+    )
+    if not revs:
+        raise HTTPException(status_code=400, detail="当前合同还没有任何条款修改，无法生成修订版")
+
+    base = os.path.splitext(c.file_name or "合同")[0]
+    out_name = f"{base}_修订版.docx"
+    out_path = os.path.join(UPLOAD_DIR, f"revised_{uuid.uuid4().hex}.docx")
+    try:
+        applied, skipped = build_revised_docx(c.stored_path, revs, out_path)
+    except Exception as e:
+        _unlink_quiet(out_path)
+        logger.warning("生成修订版 DOCX 失败: %s", e)
+        raise HTTPException(status_code=500, detail="生成修订版 DOCX 失败，原合同文件可能已损坏")
+    if applied == 0:
+        _unlink_quiet(out_path)
+        raise HTTPException(status_code=400, detail="修订条款未能定位到原文，无法生成修订版")
+
+    background_tasks.add_task(_unlink_quiet, out_path)
+    return FileResponse(
+        out_path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=out_name,
+    )
+
+
 @router.get("/{contract_id}/audit-result")
 def get_audit_result(
     contract_id: int,
@@ -788,7 +964,7 @@ def get_audit_result(
         "data": {
             "contract_id": contract_id,
             "total": len(records),
-            # 当前是否存在有效审核结果（是否有 valid 记录）——前端据此判断是否展示「已驳回」，不靠 status 推导（BUG-028）
+            # 当前是否存在有效审核结果（最新批次是否 valid）——前端据此判断是否展示「已驳回」等，不靠 status 推导（BUG-028）
             "has_current_result": has_current_result,
             "items": [
                 {
