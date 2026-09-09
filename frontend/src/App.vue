@@ -164,33 +164,53 @@ body {
 </style>
 
 <style scoped>
-/* ── 导航栏 ── */
+/* ── 导航栏（深色，恒天风格） ── */
 .app-nav {
   position: sticky;
   top: 0;
   z-index: 100;
-  height: 56px;
+  height: 60px;
   display: flex;
   align-items: center;
-  border-bottom: 1px solid #e4e7ed;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
-  padding: 0 20px;
+  background: linear-gradient(90deg, #081426 0%, #0D2447 55%, #0A1A3C 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 2px 8px rgba(3, 12, 30, 0.3);
+  padding: 0 24px;
+  --el-menu-bg-color: transparent;
+  --el-menu-text-color: #B9C6E4;
+  --el-menu-hover-text-color: #fff;
+  --el-menu-hover-bg-color: rgba(255, 255, 255, 0.06);
+  --el-menu-active-color: #fff;
+  --el-menu-border-color: transparent;
 }
 
 .nav-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   margin-right: 24px;
   font-size: 17px;
   font-weight: 600;
-  color: #303133;
+  color: #fff;
   cursor: pointer;
   user-select: none;
 }
 
+.nav-brand :deep(.el-icon) {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, #1935C3, #1B70F0);
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(27, 112, 240, 0.4);
+}
+
 .nav-brand:hover {
-  color: #409EFF;
+  color: #8FB4FF;
+}
+
+.app-nav :deep(.el-menu-item.is-active) {
+  border-bottom-color: #1B70F0 !important;
 }
 
 .nav-spacer {

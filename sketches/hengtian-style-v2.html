@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A24 前端风格 · 恒天风格版 V2</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "微软雅黑",
+      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #fff; color: #444; line-height: 1.7; -webkit-font-smoothing: antialiased;
+  }
+  a { text-decoration: none; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 0 40px; }
+
+  /* ── 透明导航（叠在 hero 上，白字，仿恒天首屏） ── */
+  .nav {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 10;
+    height: 72px; display: flex; align-items: center; padding: 0 40px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; margin-right: 40px; cursor: pointer; }
+  .brand .logo {
+    width: 32px; height: 32px; border-radius: 7px;
+    background: linear-gradient(135deg, #1935C3, #1B70F0);
+    color: #fff; font-weight: 700; font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 8px rgba(27,112,240,.5);
+  }
+  .brand .name { color: #fff; font-size: 17px; font-weight: 600; letter-spacing: .5px; }
+  .menu { display: flex; height: 100%; }
+  .menu .item {
+    padding: 0 20px; height: 100%; display: flex; align-items: center;
+    color: #B9C6E4; font-size: 15px; cursor: pointer; position: relative; white-space: nowrap;
+    transition: color .15s;
+  }
+  .menu .item:hover { color: #fff; }
+  .menu .item.active { color: #fff; }
+  .menu .item.active::after {
+    content: ""; position: absolute; left: 20px; right: 20px; bottom: 16px; height: 2.5px;
+    background: #1B70F0; border-radius: 2px;
+  }
+  .nav .spacer { flex: 1; }
+  .user { display: flex; align-items: center; gap: 9px; color: #E8EEF8; font-size: 14px; cursor: pointer; }
+  .user .avatar {
+    width: 30px; height: 30px; border-radius: 50%; color: #fff; font-size: 13px; font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #1935C3, #1B70F0);
+  }
+  .role-chip { font-size: 11px; padding: 2px 8px; border-radius: 4px; background: rgba(255,255,255,.14); color: #C7D3F5; border: 1px solid rgba(255,255,255,.18); }
+
+  /* ── hero banner（深蓝大图感，左文右图） ── */
+  .hero {
+    position: relative; overflow: hidden; min-height: 460px;
+    background:
+      radial-gradient(1100px 420px at 82% -10%, rgba(27,112,240,.38) 0%, transparent 60%),
+      radial-gradient(800px 480px at -8% 118%, rgba(25,53,195,.55) 0%, transparent 55%),
+      linear-gradient(118deg, #081426 0%, #0D2447 48%, #102B5E 100%);
+    padding: 140px 40px 90px; color: #fff;
+  }
+  .hero::before {
+    content: ""; position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px);
+    background-size: 52px 52px;
+    mask-image: radial-gradient(ellipse at 70% 40%, #000 20%, transparent 72%);
+    -webkit-mask-image: radial-gradient(ellipse at 70% 40%, #000 20%, transparent 72%);
+  }
+  .hero .inner { position: relative; z-index: 2; display: flex; align-items: center; gap: 48px; max-width: 1200px; margin: 0 auto; }
+  .hero .left { flex: 1.1; }
+  .hero .kicker {
+    display: inline-block; font-size: 13px; letter-spacing: 1px; color: #8FB4FF;
+    border: 1px solid rgba(143,180,255,.4); padding: 4px 14px; border-radius: 999px; margin-bottom: 18px;
+  }
+  .hero h1 { font-size: 40px; font-weight: 700; line-height: 1.25; letter-spacing: .5px; color: #fff; }
+  .hero .sub { margin-top: 16px; font-size: 16px; color: #B9C6E4; max-width: 520px; }
+  .hero .actions { margin-top: 30px; display: flex; gap: 16px; }
+  .btn { display: inline-flex; align-items: center; gap: 7px; padding: 12px 28px; border-radius: 6px; font-size: 15px; cursor: pointer; transition: all .15s; border: 1px solid transparent; }
+  .btn-primary { background: #1B70F0; color: #fff; }
+  .btn-primary:hover { background: #3D87F5; }
+  .btn-ghost { background: transparent; color: #DCE6F7; border-color: rgba(255,255,255,.35); }
+  .btn-ghost:hover { background: rgba(255,255,255,.1); color: #fff; }
+  .hero .right { flex: .9; }
+  .hero .right img {
+    width: 100%; border-radius: 12px; display: block;
+    border: 1px solid rgba(255,255,255,.15);
+    box-shadow: 0 20px 50px rgba(3,12,30,.5);
+  }
+
+  /* ── 核心数据条 ── */
+  .metrics { background: #fff; border-bottom: 1px solid #EDF0F5; }
+  .metrics .inner { display: grid; grid-template-columns: repeat(4, 1fr); padding: 40px 0; }
+  .metric { text-align: center; position: relative; }
+  .metric + .metric::before { content: ""; position: absolute; left: 0; top: 12%; bottom: 12%; width: 1px; background: #EDF0F5; }
+  .metric .num { font-size: 36px; font-weight: 700; color: #1935C3; line-height: 1.1; }
+  .metric .num small { font-size: 18px; color: #1935C3; }
+  .metric .lbl { margin-top: 8px; font-size: 14px; color: #8A93A6; }
+
+  /* ── 功能模块区（编号 + 图文混排，左右交替） ── */
+  .section-head { text-align: center; padding: 70px 0 8px; }
+  .section-head h2 { font-size: 32px; font-weight: 700; color: #131313; }
+  .section-head .en { font-size: 14px; color: #8A93A6; letter-spacing: 2px; margin-top: 6px; text-transform: uppercase; }
+  .section-head .line { width: 44px; height: 3px; background: #1935C3; margin: 18px auto 0; border-radius: 2px; }
+
+  .feat { padding: 46px 0; }
+  .feat-row { display: flex; align-items: center; gap: 60px; padding: 34px 0; }
+  .feat-row.reverse { flex-direction: row-reverse; }
+  .feat-img { flex: 1; }
+  .feat-img img { width: 100%; border-radius: 10px; display: block; box-shadow: 0 10px 30px rgba(13,36,71,.12); }
+  .feat-txt { flex: 1; position: relative; padding-left: 20px; }
+  .feat-row.reverse .feat-txt { padding-left: 0; padding-right: 20px; }
+  .feat-txt .no {
+    position: absolute; left: -30px; top: -30px; font-size: 88px; font-weight: 700;
+    color: #EFF3FB; line-height: 1; z-index: -1; user-select: none;
+  }
+  .feat-row.reverse .feat-txt .no { left: auto; right: -10px; }
+  .feat-txt h3 { font-size: 24px; font-weight: 700; color: #131313; }
+  .feat-txt .desc { margin-top: 14px; font-size: 14.5px; color: #585E7D; line-height: 1.9; }
+  .more { display: inline-flex; align-items: center; gap: 6px; margin-top: 20px; color: #1935C3; font-size: 14px; cursor: pointer; }
+  .more:hover { color: #1B70F0; }
+
+  /* ── 页脚 ── */
+  .footer { background: #081426; color: #9FB0C8; padding: 48px 0 32px; margin-top: 40px; }
+  .footer .top { display: flex; justify-content: space-between; align-items: center; padding-bottom: 26px; border-bottom: 1px solid rgba(255,255,255,.08); }
+  .footer .f-brand { display: flex; align-items: center; gap: 10px; }
+  .footer .f-brand .logo {
+    width: 30px; height: 30px; border-radius: 7px; background: linear-gradient(135deg,#1935C3,#1B70F0);
+    color: #fff; font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 15px;
+  }
+  .footer .f-brand .name { color: #fff; font-size: 16px; font-weight: 600; }
+  .footer .links { display: flex; gap: 34px; font-size: 14px; }
+  .footer .links span { cursor: pointer; }
+  .footer .links span:hover { color: #fff; }
+  .footer .bottom { padding-top: 22px; font-size: 12.5px; color: #6E7A95; text-align: center; }
+
+  .note {
+    background: #0A1A3C; color: #C7D3F5; font-size: 13px; padding: 11px 40px; letter-spacing: .3px;
+  }
+  .note b { color: #fff; }
+</style>
+</head>
+<body>
+
+<div class="note">
+  <b>第二版预览</b> —— 按恒天官网（hengtiansoft.com）首页骨架重做：透明导航叠 hero 大图 → 轮播式 banner（大字标题+副标题+按钮）→ 核心数据 → 编号模块图文区（01/02/03… 图文左右交替）→ 深色页脚。配色/字体均为官网实测值。
+</div>
+
+<!-- 透明导航 -->
+<div class="nav">
+  <div class="brand"><div class="logo">A</div><div class="name">A24 合同审核系统</div></div>
+  <div class="menu">
+    <div class="item active">首页</div>
+    <div class="item">合同管理 ▾</div>
+    <div class="item">审核中心 ▾</div>
+    <div class="item">模板管理</div>
+  </div>
+  <div class="spacer"></div>
+  <div class="user"><div class="avatar">A</div>同学 A<span class="role-chip">上传者</span></div>
+</div>
+
+<!-- hero -->
+<div class="hero">
+  <div class="inner">
+    <div class="left">
+      <span class="kicker">基于大模型 · 人机协同审核</span>
+      <h1>A24 合同智能审核系统</h1>
+      <div class="sub">面向企业法务与风控的 AI 原生合同审核平台，实现「上传 → 分类 → 要素抽取 → 风险识别 → 修改建议 → 审核报告」全流程闭环。</div>
+      <div class="actions">
+        <div class="btn btn-primary">上传合同</div>
+        <div class="btn btn-ghost">了解详情</div>
+      </div>
+    </div>
+    <div class="right"><img src="images/hero.png" alt="A24 平台示意"></div>
+  </div>
+</div>
+
+<!-- 核心数据 -->
+<div class="metrics">
+  <div class="wrap"><div class="inner">
+    <div class="metric"><div class="num">98.6<small>%</small></div><div class="lbl">法理分类准确率</div></div>
+    <div class="metric"><div class="num">93.7<small>%</small></div><div class="lbl">要素抽取 F1</div></div>
+    <div class="metric"><div class="num">76.6<small>%</small></div><div class="lbl">风险识别精准率</div></div>
+    <div class="metric"><div class="num">80.1<small>%</small></div><div class="lbl">风险识别召回率</div></div>
+  </div></div>
+</div>
+
+<!-- 功能模块 -->
+<div class="wrap">
+  <div class="section-head">
+    <h2>核心能力</h2>
+    <div class="en">Core Capabilities</div>
+    <div class="line"></div>
+  </div>
+
+  <div class="feat">
+    <div class="feat-row">
+      <div class="feat-img"><img src="images/feat-1.png" alt="智能合同分类"></div>
+      <div class="feat-txt">
+        <span class="no">01</span>
+        <h3>智能合同分类</h3>
+        <div class="desc">基于 RAG 检索范本 + 大模型推理，将合同自动归类到民法典 11 类法理分类，并叠加「服务外包」等业务标签，分类准确率实测 98.6%。</div>
+        <span class="more">了解更多 →</span>
+      </div>
+    </div>
+    <div class="feat-row reverse">
+      <div class="feat-img"><img src="images/feat-2.png" alt="风险识别与预警"></div>
+      <div class="feat-txt">
+        <span class="no">02</span>
+        <h3>风险识别与预警</h3>
+        <div class="desc">「LLM 只抽事实证据 + 确定性规则裁决」架构，覆盖 R01–R13 风险规则，风险判定不做 LLM 自由发挥，确保判定可解释、可溯源。</div>
+        <span class="more">了解更多 →</span>
+      </div>
+    </div>
+    <div class="feat-row">
+      <div class="feat-img"><img src="images/feat-3.png" alt="合同要素抽取"></div>
+      <div class="feat-txt">
+        <span class="no">03</span>
+        <h3>合同要素抽取</h3>
+        <div class="desc">自动抽取合同关键要素（主体、金额、期限、违约责任等），要素抽取 F1 实测 93.7%，为审核与比对提供结构化底座。</div>
+        <span class="more">了解更多 →</span>
+      </div>
+    </div>
+    <div class="feat-row reverse">
+      <div class="feat-img"><img src="images/feat-4.png" alt="审核报告生成"></div>
+      <div class="feat-txt">
+        <span class="no">04</span>
+        <h3>审核报告生成</h3>
+        <div class="desc">一键生成结构化审核报告：风险清单、修改建议、条款比对与风险热力图，支持反馈标注闭环，人机协同完成最终审核。</div>
+        <span class="more">了解更多 →</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 页脚 -->
+<div class="footer">
+  <div class="wrap">
+    <div class="top">
+      <div class="f-brand"><div class="logo">A</div><div class="name">A24 合同审核系统</div></div>
+      <div class="links"><span>合同管理</span><span>审核中心</span><span>模板管理</span><span>关于我们</span></div>
+    </div>
+    <div class="bottom">© 2026 A24 · 海底汪汪队 —— 命题企业：网新恒天</div>
+  </div>
+</div>
+
+</body>
+</html>

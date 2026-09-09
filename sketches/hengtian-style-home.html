@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A24 前端风格 · 恒天风格版（方案一预览）</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "微软雅黑",
+      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #F8FAFD;
+    color: #444;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── 说明条 ── */
+  .note {
+    background: #0A1A3C; color: #C7D3F5; font-size: 13px;
+    padding: 10px 28px; letter-spacing: .3px;
+  }
+  .note b { color: #fff; }
+
+  /* ── 深色导航（呼应恒天滚动后变黑的顶栏 + 藏蓝主色） ── */
+  .nav {
+    position: sticky; top: 0; z-index: 10;
+    height: 64px; display: flex; align-items: center;
+    padding: 0 28px;
+    background: linear-gradient(90deg, #081426 0%, #0D2447 55%, #0A1A3C 100%);
+    border-bottom: 1px solid rgba(255,255,255,.06);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; margin-right: 34px; cursor: pointer; }
+  .brand .logo {
+    width: 30px; height: 30px; border-radius: 7px;
+    background: linear-gradient(135deg, #1935C3, #1B70F0);
+    color: #fff; font-weight: 700; font-size: 15px;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 8px rgba(27,112,240,.4);
+  }
+  .brand .name { color: #fff; font-size: 16px; font-weight: 600; letter-spacing: .5px; }
+  .menu { display: flex; height: 100%; }
+  .menu .item {
+    padding: 0 18px; height: 100%; display: flex; align-items: center;
+    color: #9FB0C8; font-size: 14px; cursor: pointer; position: relative; white-space: nowrap;
+    transition: color .15s;
+  }
+  .menu .item:hover { color: #fff; }
+  .menu .item.active { color: #fff; }
+  .menu .item.active::after {
+    content: ""; position: absolute; left: 18px; right: 18px; bottom: 0; height: 2.5px;
+    background: #1B70F0; border-radius: 2px 2px 0 0;
+  }
+  .nav .spacer { flex: 1; }
+  .user { display: flex; align-items: center; gap: 9px; color: #E8EEF8; font-size: 14px; cursor: pointer; }
+  .user .avatar {
+    width: 30px; height: 30px; border-radius: 50%; color: #fff; font-size: 13px; font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #1935C3, #1B70F0);
+  }
+  .role-chip {
+    font-size: 11px; padding: 2px 8px; border-radius: 4px;
+    background: rgba(255,255,255,.12); color: #C7D3F5; border: 1px solid rgba(255,255,255,.15);
+  }
+
+  /* ── hero 区（深蓝科技感，模拟恒天深蓝配图） ── */
+  .hero {
+    position: relative; overflow: hidden;
+    background:
+      radial-gradient(1200px 400px at 85% -10%, rgba(27,112,240,.35) 0%, transparent 60%),
+      radial-gradient(900px 500px at -10% 120%, rgba(25,53,195,.5) 0%, transparent 55%),
+      linear-gradient(120deg, #0A1A3C 0%, #0D2447 45%, #102B5E 100%);
+    padding: 56px 48px 64px; color: #fff;
+  }
+  .hero::after {
+    content: ""; position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.05) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse at 70% 30%, #000 30%, transparent 75%);
+    -webkit-mask-image: radial-gradient(ellipse at 70% 30%, #000 30%, transparent 75%);
+    pointer-events: none;
+  }
+  .hero .inner { position: relative; z-index: 2; max-width: 1104px; margin: 0 auto; }
+  .hero h2 { font-size: 30px; font-weight: 700; letter-spacing: .3px; color: #fff; }
+  .hero .sub { margin-top: 10px; color: #B9C6E4; font-size: 15px; max-width: 560px; }
+  .hero .actions { margin-top: 24px; display: flex; gap: 14px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 10px 22px; border-radius: 6px; font-size: 14px; cursor: pointer;
+    transition: all .15s; border: 1px solid transparent;
+  }
+  .btn-primary { background: #1B70F0; color: #fff; }
+  .btn-primary:hover { background: #3D87F5; }
+  .btn-ghost { background: transparent; color: #DCE6F7; border-color: rgba(255,255,255,.3); }
+  .btn-ghost:hover { background: rgba(255,255,255,.08); color: #fff; }
+
+  /* ── 内容区 ── */
+  .main { max-width: 1104px; margin: 0 auto; padding: 28px 24px 48px; }
+
+  /* 统计卡片 */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: -40px; position: relative; z-index: 3; }
+  .stat {
+    background: #fff; border: 1px solid #E5EAF2; border-radius: 10px;
+    padding: 18px 20px; box-shadow: 0 2px 8px rgba(13,36,71,.06); cursor: pointer;
+    transition: transform .18s ease, box-shadow .18s ease;
+  }
+  .stat:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(13,36,71,.12); }
+  .stat .lbl { font-size: 13px; color: #8A93A6; display: flex; align-items: center; gap: 7px; }
+  .stat .lbl .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .stat .row { display: flex; align-items: baseline; gap: 7px; margin-top: 8px; }
+  .stat .num { font-size: 30px; font-weight: 700; color: #1935C3; line-height: 1; }
+  .stat .unit { font-size: 13px; color: #8A93A6; }
+  .stat .delta { font-size: 12px; margin-left: auto; }
+  .up { color: #00B42A; }
+  .down { color: #E60012; }
+
+  /* 面板 */
+  .panel {
+    background: #fff; border: 1px solid #E5EAF2; border-radius: 10px;
+    padding: 20px 22px; margin-top: 18px; box-shadow: 0 1px 3px rgba(13,36,71,.04);
+  }
+  .panel .pt { font-size: 15px; font-weight: 600; color: #131313; display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .panel .pt::before { content: ""; width: 4px; height: 16px; background: #1935C3; border-radius: 2px; margin-right: 9px; }
+  .panel .pt .title-wrap { display: flex; align-items: center; }
+  .panel .pt .hint { font-size: 12px; font-weight: 400; color: #8A93A6; }
+
+  /* 柱状图 */
+  .chart-row { display: flex; gap: 18px; }
+  .bars { flex: 1.4; display: flex; align-items: flex-end; gap: 16px; height: 160px; padding-top: 10px; }
+  .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 7px; height: 100%; }
+  .bar { width: 100%; max-width: 42px; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, #1B70F0, #1935C3); }
+  .bar.dim { background: #C7D3F5; }
+  .bar-col .x { font-size: 11px; color: #8A93A6; }
+  .donut {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+    border-left: 1px solid #EEF1F6; padding-left: 18px;
+  }
+  .donut .ring {
+    width: 120px; height: 120px; border-radius: 50%;
+    background: conic-gradient(#1935C3 0 62%, #E60012 62% 81%, #F5A623 81% 100%);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .donut .ring .hole { width: 78px; height: 78px; border-radius: 50%; background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .donut .ring .hole b { font-size: 20px; color: #131313; }
+  .donut .ring .hole span { font-size: 11px; color: #8A93A6; }
+  .donut .legend { display: flex; gap: 14px; font-size: 12px; color: #8A93A6; }
+  .donut .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; }
+
+  /* 表格 */
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th { text-align: left; padding: 11px 14px; font-weight: 600; font-size: 12.5px; color: #585E7D; background: #F5F8FC; border-bottom: 1px solid #E5EAF2; }
+  td { padding: 12px 14px; border-bottom: 1px solid #EEF1F6; color: #444; }
+  tr.row { cursor: pointer; transition: background .12s; }
+  tr.row:hover { background: #F0F4FB; }
+  .status { font-size: 11px; padding: 2px 9px; border-radius: 4px; white-space: nowrap; }
+  .risk { font-size: 11px; padding: 2px 9px; border-radius: 4px; white-space: nowrap; font-weight: 600; }
+  .s-ok   { background: #E6F7EC; color: #00B42A; }
+  .s-run  { background: #E8F1FE; color: #1B70F0; }
+  .s-wait { background: #FFF3E6; color: #F5A623; }
+  .r-high { background: #FDEBEC; color: #E60012; }
+  .r-mid  { background: #FFF3E6; color: #F5A623; }
+  .r-low  { background: #E6F7EC; color: #00B42A; }
+  .time { color: #8A93A6; }
+
+  .footnote { max-width: 1104px; margin: 26px auto 0; padding: 0 24px; font-size: 12.5px; color: #8A93A6; line-height: 1.8; }
+  .footnote b { color: #585E7D; }
+</style>
+</head>
+<body>
+
+<div class="note">
+  方案一预览 · <b>恒天风格版</b> —— 深色顶栏（呼应恒天滚动变黑导航）+ 藏蓝 #1935C3 主色 + 红色 #E60012 强调 + 浅蓝白 #F8FAFD 背景 + 深蓝科技感 hero。所有配色值取自 hengtiansoft.com 官网 CSS。
+</div>
+
+<!-- 深色导航 -->
+<div class="nav">
+  <div class="brand"><div class="logo">A</div><div class="name">A24 合同审核系统</div></div>
+  <div class="menu">
+    <div class="item active">首页</div>
+    <div class="item">合同管理 ▾</div>
+    <div class="item">审核中心 ▾</div>
+    <div class="item">模板管理</div>
+  </div>
+  <div class="spacer"></div>
+  <div class="user"><div class="avatar">A</div>同学 A<span class="role-chip">上传者</span></div>
+</div>
+
+<!-- hero -->
+<div class="hero">
+  <div class="inner">
+    <h2>欢迎回来，同学 A</h2>
+    <div class="sub">A24 合同智能审核系统 · 基于大模型的企业合同审核与风险预警平台，人机协同，高效可控。</div>
+    <div class="actions">
+      <div class="btn btn-primary">上传合同</div>
+      <div class="btn btn-ghost">查看审核报告</div>
+    </div>
+  </div>
+</div>
+
+<div class="main">
+  <!-- 统计卡片（上浮叠在 hero 下缘） -->
+  <div class="stats">
+    <div class="stat"><div class="lbl"><span class="dot" style="background:#1935C3"></span>今日审核</div><div class="row"><span class="num">12</span><span class="unit">份</span><span class="delta up">↑ 3</span></div></div>
+    <div class="stat"><div class="lbl"><span class="dot" style="background:#E60012"></span>风险预警</div><div class="row"><span class="num">3</span><span class="unit">条</span><span class="delta down">↑ 1</span></div></div>
+    <div class="stat"><div class="lbl"><span class="dot" style="background:#F5A623"></span>待复核</div><div class="row"><span class="num">5</span><span class="unit">份</span><span class="delta up">↓ 2</span></div></div>
+    <div class="stat"><div class="lbl"><span class="dot" style="background:#1B70F0"></span>累计合同</div><div class="row"><span class="num">148</span><span class="unit">份</span></div></div>
+  </div>
+
+  <!-- 图表 -->
+  <div class="panel">
+    <div class="pt"><span class="title-wrap">审核统计</span><span class="hint">近 7 日 · 单位：份</span></div>
+    <div class="chart-row">
+      <div class="bars">
+        <div class="bar-col"><div class="bar" style="height:40%"></div><div class="x">周一</div></div>
+        <div class="bar-col"><div class="bar dim" style="height:55%"></div><div class="x">周二</div></div>
+        <div class="bar-col"><div class="bar dim" style="height:35%"></div><div class="x">周三</div></div>
+        <div class="bar-col"><div class="bar dim" style="height:70%"></div><div class="x">周四</div></div>
+        <div class="bar-col"><div class="bar dim" style="height:60%"></div><div class="x">周五</div></div>
+        <div class="bar-col"><div class="bar dim" style="height:82%"></div><div class="x">周六</div></div>
+        <div class="bar-col"><div class="bar" style="height:48%"></div><div class="x">今天</div></div>
+      </div>
+      <div class="donut">
+        <div class="ring"><div class="hole"><b>148</b><span>风险分布</span></div></div>
+        <div class="legend">
+          <span><i style="background:#1935C3"></i>低风险</span>
+          <span><i style="background:#E60012"></i>高风险</span>
+          <span><i style="background:#F5A623"></i>中风险</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 最近合同 -->
+  <div class="panel">
+    <div class="pt"><span class="title-wrap">最近合同</span><span class="hint" style="color:#1935C3;cursor:pointer">查看全部 →</span></div>
+    <table>
+      <tr><th>合同名称</th><th>类型</th><th>状态</th><th>风险等级</th><th>上传时间</th></tr>
+      <tr class="row"><td>华锐科技采购合同</td><td>买卖合同</td><td><span class="status s-ok">已完成</span></td><td><span class="risk r-mid">中风险</span></td><td class="time">今天 10:24</td></tr>
+      <tr class="row"><td>恒创大厦租赁合同</td><td>租赁合同</td><td><span class="status s-run">审核中</span></td><td><span class="risk r-high">高风险</span></td><td class="time">今天 09:41</td></tr>
+      <tr class="row"><td>云启软件外包合同</td><td>技术合同</td><td><span class="status s-ok">已完成</span></td><td><span class="risk r-low">低风险</span></td><td class="time">昨天 16:02</td></tr>
+      <tr class="row"><td>明德物业委托合同</td><td>物业服务合同</td><td><span class="status s-wait">待复核</span></td><td><span class="risk r-low">低风险</span></td><td class="time">昨天 14:35</td></tr>
+    </table>
+  </div>
+
+  <div class="footnote">
+    <b>风格映射说明：</b><br>
+    · 顶栏 = 恒天官网滚动后的深色导航（近黑藏蓝底 + 白字，激活项用亮蓝 #1B70F0 下划线）<br>
+    · 主色 #1935C3 / 导航激活 #02448F / 强调红 #E60012 / 背景 #F8FAFD / 字体 PingFangSC，均取自官网 CSS 实测值<br>
+    · hero 深蓝科技感 + 网格点阵，呼应恒天业务配图的深蓝高饱和风格（#234284 系）<br>
+    · 落地到 Element Plus 时：用 CSS 变量把 --el-color-primary 换成 #1935C3 色阶，导航栏 App.vue 改深色即可
+  </div>
+</div>
+
+</body>
+</html>
