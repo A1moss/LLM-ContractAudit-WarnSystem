@@ -96,14 +96,20 @@ def _ensure_columns():
                 db.commit()
         except Exception as e:
             logger.debug("audit_records 表尚不存在，跳过 evidence 迁移: %s", e)
-        # clause_revisions 新增 original_clause_text 列（DOCX 导出替换锚点，真实原文）
+        # clause_revisions 新增列（DOCX 导出替换锚点 + 新增条款操作/位置）
         try:
             existing_cr = {row[1] for row in db.execute("PRAGMA table_info(clause_revisions)")}
             if existing_cr and "original_clause_text" not in existing_cr:
                 db.execute("ALTER TABLE clause_revisions ADD COLUMN original_clause_text TEXT")
                 db.commit()
+            if existing_cr and "operation" not in existing_cr:
+                db.execute("ALTER TABLE clause_revisions ADD COLUMN operation VARCHAR(20) DEFAULT 'replace'")
+                db.commit()
+            if existing_cr and "position" not in existing_cr:
+                db.execute("ALTER TABLE clause_revisions ADD COLUMN position JSON")
+                db.commit()
         except Exception as e:
-            logger.debug("clause_revisions 表尚不存在，跳过 original_clause_text 迁移: %s", e)
+            logger.debug("clause_revisions 表尚不存在，跳过迁移: %s", e)
         # FK 类型对齐：历史遗留 VARCHAR(36) → INTEGER（切 MySQL 前保证一致）
         for table in ("contracts", "feedback_logs"):
             try:

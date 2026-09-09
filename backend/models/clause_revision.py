@@ -20,6 +20,10 @@ class ClauseRevision(Base):
     contract_id: Mapped[int] = mapped_column(Integer, ForeignKey("contracts.id"), nullable=False, index=True)
     # 会话作用域："clause"（单条款）| "overview"（整个合同总览）
     scope: Mapped[str] = mapped_column(String(20), nullable=False, default="clause")
+    # 操作类型："replace"（替换已有条款）| "add_clause"（新增缺失条款，R09）
+    operation: Mapped[str] = mapped_column(String(20), nullable=False, default="replace")
+    # 新增条款的插入位置（operation=add_clause 时用）：{"anchor":"五","hint":"第五条之后"} 或 {"append":true}
+    position: Mapped[dict] = mapped_column(JSON, nullable=True, default=None)
     # 条款会话标识：str(风险记录 id) 或 "__overview__"（用于刷新后重建各会话）
     clause_key: Mapped[str] = mapped_column(String(100), nullable=False, default="")
     # 条款编号（第 X 条，定位可得时记录，供展示/未来定位兜底）

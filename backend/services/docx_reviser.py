@@ -1,6 +1,6 @@
-"""docx_reviser — 修订版 DOCX 生成（打开原 DOCX，按条款文本定位段落并替换，另存新文件）。
+"""docx_reviser — 修订版 DOCX 生成（打开原 DOCX，按条款文本定位段落并替换/插入，另存新文件）。
 
-不修改原文件；只替换已修改条款对应的段落，其余段落保持原样。
+不修改原文件；只替换已修改条款对应的段落、插入新增缺失条款（add_clause），其余段落保持原样。
 不做 Word 修订痕迹（Track Changes）、不做完整版本管理。
 """
 import re
@@ -90,20 +90,247 @@ def _final_clause_map(revisions) -> dict:
     return final
 
 
+# ── 新增条款（add_clause）插入 + 最小可靠编号 ──────────────────────────────
+
+_CN_DIGITS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+
+
+def _cn_to_int(s: str) -> int | None:
+    """中文数字 → 整数（一~九十九），无法解析返回 None。"""
+    s = (s or "").strip()
+    if not s:
+        return None
+    if s.isdigit():
+        return int(s)
+    if s == "十":
+        return 10
+    if "十" in s:
+        parts = s.split("十")
+        tens = _CN_DIGITS.get(parts[0], 1) if parts[0] else 1
+        ones = _CN_DIGITS.get(parts[1], 0) if len(parts) > 1 and parts[1] else 0
+        return tens * 10 + ones
+    return _CN_DIGITS.get(s)
+
+
+def _int_to_cn(n: int) -> str:
+    """整数 → 中文数字（1~99）。"""
+    digits = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"]
+    if n <= 0:
+        return str(n)
+    if n < 10:
+        return digits[n]
+    if n == 10:
+        return "十"
+    if n < 20:
+        return "十" + digits[n - 10]
+    if n < 100:
+        tens, ones = divmod(n, 10)
+        return digits[tens] + "十" + ("" if ones == 0 else digits[ones])
+    return str(n)
+
+
+# 标题样式："五、"（一、二、三…）或 "第五条"（第X条）。group(1)="第"/""，group(2)=数字，group(3)="条"/"、"
+_HEADING_RE = re.compile(r'(第\s*)?([一二三四五六七八九十百千\d]+)\s*(条|、)')
+
+
+def _heading_num(text: str) -> int | None:
+    """若文本以「第X条」/「X、」标题开头，返回其编号，否则 None。"""
+    m = _HEADING_RE.match((text or "").lstrip())
+    if not m:
+        return None
+    return _cn_to_int(m.group(2))
+
+
+def _set_heading(text: str, new_num: int) -> str:
+    """把文本开头的标题编号改为 new_num，保留前缀/分隔符与标题后正文。"""
+    m = _HEADING_RE.match((text or "").lstrip())
+    if not m:
+        return text
+    lead = len(text) - len(text.lstrip())
+    cn = _int_to_cn(new_num)
+    return text[:lead] + (m.group(1) or "") + cn + m.group(3) + text[lead + m.end():]
+
+
+def _renumber_text(text: str, greater_than: int) -> str:
+    """把文本中所有编号 > greater_than 的标题（第X条 / X、）编号 +1。"""
+
+    def repl(m):
+        n = _cn_to_int(m.group(2))
+        if n is not None and n > greater_than:
+            return (m.group(1) or "") + _int_to_cn(n + 1) + m.group(3)
+        return m.group(0)
+
+    return _HEADING_RE.sub(repl, text)
+
+
+def _pos_key(position) -> str:
+    """位置归一化键（用于 add_clause 多轮修改「同位置只留最终版」）。"""
+    position = position or {}
+    if position.get("append"):
+        return "append"
+    return "anchor:" + str(position.get("anchor", ""))
+
+
+def _final_add_clause_map(revisions) -> list:
+    """收集新增条款（operation="add_clause"）：同一插入位置只保留最后一条。
+
+    用户对同一条新增条款多轮修改（继续修改）会生成多条 add_clause 修订，
+    位置相同 → 只保留最终版，避免重复插入。
+    返回 [{"position": {...}, "clause_text": "..."}, ...]（按首次出现顺序）。
+    """
+    final = {}
+    order = []
+    for rev in revisions:
+        if getattr(rev, "operation", "replace") != "add_clause":
+            continue
+        if not rev.revised_clause:
+            continue
+        pos = getattr(rev, "position", None) or {}
+        key = _pos_key(pos)
+        if key not in final:
+            order.append(key)
+        final[key] = {"position": pos, "clause_text": rev.revised_clause}
+    return [final[k] for k in order]
+
+
+def _has_paragraph_heading(doc, anchor_num: int) -> bool:
+    """是否存在以 anchor_num 编号开头的段落（段落级标题结构）。"""
+    for p in doc.paragraphs:
+        if _heading_num(p.text) == anchor_num:
+            return True
+    return False
+
+
+def _append_clause(doc, clause_text: str) -> tuple[bool, str]:
+    """追加新增条款到文档末尾；编号取文档中最大标题编号 + 1（无可识别标题则不编）。"""
+    max_num = 0
+    has_heading = False
+    for p in doc.paragraphs:
+        n = _heading_num(p.text)
+        if n is not None:
+            has_heading = True
+            max_num = max(max_num, n)
+        else:
+            for m in _HEADING_RE.finditer(p.text):
+                n2 = _cn_to_int(m.group(2))
+                if n2 is not None:
+                    has_heading = True
+                    max_num = max(max_num, n2)
+    if has_heading:
+        doc.add_paragraph(f"{_int_to_cn(max_num + 1)}、{clause_text}")
+    else:
+        # 无法识别编号：不猜编号，直接追加正文（编号问题已在生成前由用户确认位置时解决）
+        doc.add_paragraph(clause_text)
+    return True, "已追加到合同末尾"
+
+
+def _insert_paragraph_level(doc, clause_text: str, anchor_num: int) -> tuple[bool, str]:
+    """段落级结构：标题独立成段/段首。在 anchor 标题段之后、下一标题段之前插入，并顺延后续编号。"""
+    paras = doc.paragraphs
+    anchor_idx = -1
+    for i, p in enumerate(paras):
+        if _heading_num(p.text) == anchor_num:
+            anchor_idx = i
+            break
+    if anchor_idx < 0:
+        return False, "未找到插入位置"
+
+    # 1) 顺延编号：所有编号 > anchor_num 的标题 +1
+    for p in paras:
+        n = _heading_num(p.text)
+        if n is not None and n > anchor_num:
+            p.text = _set_heading(p.text, n + 1)
+
+    # 2) 找下一标题段（重编号后其编号仍 > anchor_num）
+    next_idx = -1
+    for i in range(anchor_idx + 1, len(paras)):
+        if _heading_num(paras[i].text) is not None and _heading_num(paras[i].text) > anchor_num:
+            next_idx = i
+            break
+
+    new_text = f"{_int_to_cn(anchor_num + 1)}、{clause_text}"
+    if next_idx >= 0:
+        paras[next_idx].insert_paragraph_before(new_text)
+    else:
+        doc.add_paragraph(new_text)
+    return True, ""
+
+
+def _insert_inline(doc, clause_text: str, position, anchor_num: int) -> tuple[bool, str]:
+    """单段合同（整份落在一个段落）：在段落内联标题处插入并顺延后续编号。"""
+    anchor_cn = (position or {}).get("anchor", "")
+    for p in doc.paragraphs:
+        text = p.text
+        anchor_match = None
+        next_match = None
+        for m in _HEADING_RE.finditer(text):
+            n = _cn_to_int(m.group(2))
+            if n == anchor_num and anchor_match is None:
+                anchor_match = m
+            if n is not None and n > anchor_num and next_match is None:
+                next_match = m
+                break
+        if anchor_match is None:
+            continue  # 不在这一段
+
+        new_cn = _int_to_cn(anchor_num + 1)
+        if next_match is None:
+            # 无后续标题：顺延编号后追加到段落末尾
+            new_text = _renumber_text(text, anchor_num)
+            p.text = new_text + f" {new_cn}、{clause_text}"
+            return True, ""
+
+        # 先顺延编号，再在重编号后的下一标题前插入新条款
+        new_text = _renumber_text(text, anchor_num)
+        insert_idx = -1
+        for m in _HEADING_RE.finditer(new_text):
+            n = _cn_to_int(m.group(2))
+            if n is not None and n > anchor_num:
+                insert_idx = m.start()
+                break
+        if insert_idx < 0:
+            return False, f"插入位置「{anchor_cn}」无法可靠识别，请明确插入位置"
+        p.text = new_text[:insert_idx] + f"{new_cn}、{clause_text}" + new_text[insert_idx:]
+        return True, ""
+    return False, f"未找到插入位置「{anchor_cn}」"
+
+
+def _insert_one(doc, clause_text: str, position) -> tuple[bool, str]:
+    """按 position 插入一条新增条款，返回 (ok, msg)。"""
+    clause_text = (clause_text or "").strip()
+    if not clause_text:
+        return False, "新增条款内容为空"
+
+    if position and position.get("append"):
+        return _append_clause(doc, clause_text)
+
+    anchor = (position or {}).get("anchor", "")
+    if not anchor:
+        return False, "未指定插入位置"
+    anchor_num = _cn_to_int(anchor)
+    if anchor_num is None:
+        return False, f"插入位置「{anchor}」无法识别，请明确条款编号"
+
+    if _has_paragraph_heading(doc, anchor_num):
+        return _insert_paragraph_level(doc, clause_text, anchor_num)
+    return _insert_inline(doc, clause_text, position, anchor_num)
+
+
 def build_revised_docx(src_docx_path: str, revisions, dst_docx_path: str):
-    """打开原 DOCX，应用条款替换，另存到 dst_docx_path。
+    """打开原 DOCX，应用条款替换 + 新增条款插入，另存到 dst_docx_path。
 
     返回 (applied_count, skipped_count)。不修改原文件。
+    新增条款插入失败（位置无法定位）时抛 ValueError，调用方据此返回明确错误。
     """
     doc = Document(src_docx_path)
     final_map = _final_clause_map(revisions)
 
     applied = skipped = 0
+    # 1) 替换已有条款（段内子串替换 + 多段兜底）
     for anchor, revised in final_map.items():
         if not anchor:
             skipped += 1
             continue
-        # 1) 段内子串替换：整份合同落在单一段落时也只替换命中片段，保留其余正文
         replaced = False
         for p in doc.paragraphs:
             idx = p.text.find(anchor)
@@ -114,7 +341,6 @@ def build_revised_docx(src_docx_path: str, revisions, dst_docx_path: str):
         if replaced:
             applied += 1
             continue
-        # 2) 兜底：锚点跨多个段落时，首段替换、余段清空
         idxs = _find_paragraph_indices(doc.paragraphs, anchor)
         if idxs:
             doc.paragraphs[idxs[0]].text = revised
@@ -123,6 +349,14 @@ def build_revised_docx(src_docx_path: str, revisions, dst_docx_path: str):
             applied += 1
         else:
             skipped += 1
+
+    # 2) 插入新增条款（R09 缺失条款等）
+    for ac in _final_add_clause_map(revisions):
+        ok, msg = _insert_one(doc, ac["clause_text"], ac["position"])
+        if ok:
+            applied += 1
+        else:
+            raise ValueError(msg)
 
     doc.save(dst_docx_path)
     return applied, skipped

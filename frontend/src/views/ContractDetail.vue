@@ -76,6 +76,11 @@
                     <el-table-column prop="clause" label="涉及条款" min-width="160" show-overflow-tooltip />
                     <el-table-column prop="suggestion" label="建议" min-width="160" show-overflow-tooltip />
                     <el-table-column prop="confidence" label="置信度" width="90" align="center"><template #default="{row}"><el-progress :percentage="Math.round((row.confidence||0)*100)" :color="row.confidence>=0.7?'#67C23A':row.confidence>=0.5?'#E6A23C':'#F56C6C'" :stroke-width="6" /></template></el-table-column>
+                    <el-table-column label="操作" width="100" align="center">
+                      <template #default="{row}">
+                        <el-button v-if="isAddClauseRisk(row)" type="success" size="small" @click="openAddClause(row)">新增条款</el-button>
+                      </template>
+                    </el-table-column>
                   </el-table>
                   <div class="audit-actions">
                     <el-button type="primary" size="small" @click="goToAuditResult">全屏查看结果</el-button>
@@ -140,14 +145,58 @@
                           </div>
                         </div>
                         <!-- 输入区 -->
+                        <div v-if="isOverviewActive && refiningAddClause" class="refine-tip">
+                          <el-alert title="正在继续修改新增条款：下方输入即针对刚生成的新增条款，确认后点「完成新增」" type="info" :closable="false" show-icon />
+                          <el-button size="small" type="success" @click="finishAddClause">完成新增</el-button>
+                        </div>
                         <div class="revise-chat-foot">
-                          <el-input v-model="revisePanel.input" type="textarea" :rows="2" :placeholder="isOverviewActive ? '对整个合同的修改要求…' : '输入修改指令，例如：把违约金上限从30%改为20%'" @keydown.enter.prevent="handleRevise" />
+                          <el-input v-model="revisePanel.input" type="textarea" :rows="2" :placeholder="revisePlaceholder" @keydown.enter.prevent="handleRevise" />
                           <el-button type="primary" :loading="revisePanel.loading" @click="handleRevise">发送</el-button>
+                          <el-button v-if="isOverviewActive" size="small" @click="openAddClause(null)">新增缺失条款</el-button>
                           <el-button @click="downloadRevised">下载修订版 DOCX</el-button>
                         </div>
                       </div>
                     </div>
                   </el-drawer>
+
+                  <!-- 新增缺失条款对话框（R09 等） -->
+                  <el-dialog v-model="addPanel.visible" title="新增缺失条款" width="760px" :close-on-click-modal="false" append-to-body>
+                    <div class="add-clause-body">
+                      <el-alert :title="`缺失风险：${addPanel.riskType === 'R09' ? '不可抗力条款缺失' : addPanel.riskType}`" type="warning" show-icon :closable="false" />
+                      <!-- 同类范本（RAG 建议） -->
+                      <div v-if="addPanel.templates.length" class="add-clause-sec">
+                        <div class="add-clause-sec-title">同类范本参考</div>
+                        <div v-for="(t, i) in addPanel.templates" :key="i" class="add-clause-tpl">{{ t.text }}</div>
+                      </div>
+                      <!-- 法律依据（RAG 建议） -->
+                      <div v-if="addPanel.legalBasis.length" class="add-clause-sec">
+                        <div class="add-clause-sec-title">法律依据</div>
+                        <el-tag v-for="(l, i) in addPanel.legalBasis" :key="i" size="small" type="info" style="margin:2px">{{ l.law }}{{ l.article }} {{ l.title }}</el-tag>
+                      </div>
+                      <!-- 插入位置（仅建议，用户自主决定） -->
+                      <div class="add-clause-sec">
+                        <div class="add-clause-sec-title">插入位置（请确认）</div>
+                        <el-radio-group v-model="addPanel.positionMode" @change="onPositionModeChange">
+                          <el-radio value="suggest" :disabled="!addPanel.suggestedPosition">采纳建议</el-radio>
+                          <el-radio value="custom">指定位置</el-radio>
+                          <el-radio value="append">追加到末尾</el-radio>
+                        </el-radio-group>
+                        <div v-if="addPanel.suggestedPosition" class="add-clause-pos-hint">建议：{{ addPanel.suggestedPosition.hint || '（建议位置）' }}</div>
+                        <el-select v-if="addPanel.positionMode === 'custom'" v-model="addPanel.customAnchor" placeholder="选择插入到哪一条之后" style="width:100%;margin-top:8px">
+                          <el-option v-for="h in addPanel.headings" :key="h.num" :value="h.cn" :label="`第${h.cn}条${h.title ? '（' + h.title + '）' : ''}`" />
+                        </el-select>
+                      </div>
+                      <!-- 指令 -->
+                      <div class="add-clause-sec">
+                        <div class="add-clause-sec-title">新增条款要求</div>
+                        <el-input v-model="addPanel.instruction" type="textarea" :rows="3" placeholder="例如：新增不可抗力条款，明确不可抗力的定义、通知义务与免责安排" />
+                      </div>
+                    </div>
+                    <template #footer>
+                      <el-button @click="addPanel.visible = false">暂不添加</el-button>
+                      <el-button type="primary" :loading="addPanel.loading" @click="confirmAddClause">生成新增条款</el-button>
+                    </template>
+                  </el-dialog>
                 </template>
 
                 <el-empty v-else description="审核完成，未检测到风险" />
@@ -308,7 +357,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Warning, ArrowLeft, ArrowRight, Loading } from '@element-plus/icons-vue'
 import FeedbackPanel from '../components/FeedbackPanel.vue'
 import { ElMessage } from 'element-plus'
-import { getContractDetail, getAuditResult, triggerAudit, getClauseComparison, submitFeedback, getFeedback, deleteFeedback, reviewContract, approveContract, reviseClause, getRevisions, downloadRevisedDocx, getContractFile } from '../api/contract.js'
+import { getContractDetail, getAuditResult, triggerAudit, getClauseComparison, submitFeedback, getFeedback, deleteFeedback, reviewContract, approveContract, reviseClause, getRevisions, downloadRevisedDocx, getContractFile, getAddClauseSuggestion } from '../api/contract.js'
 import { formatTime } from '../utils/format.js'
 import { typeLabel } from '../constants/contractTypes.js'
 import * as pdfjsLib from 'pdfjs-dist'
@@ -614,10 +663,28 @@ const revisePanel = reactive({
   overviewMessages: [],  // 总览会话（整个合同）的消息
   input: '',
   loading: false,
+  initialized: false,  // 是否已初始化（从风险列表重建条款列表 + 拉取历史）
 })
 const isOverviewActive = computed(() => revisePanel.activeId === '__overview__')
 const activeClause = computed(() => revisePanel.clauses.find(c => c.id === revisePanel.activeId))
 const currentMessages = computed(() => isOverviewActive.value ? revisePanel.overviewMessages : (activeClause.value ? activeClause.value.messages : []))
+
+// ── 新增缺失条款（R09 等 add_clause）──
+const addPanel = reactive({
+  visible: false,
+  loading: false,
+  riskType: 'R09',
+  instruction: '',
+  templates: [],
+  legalBasis: [],
+  suggestedPosition: null,  // {anchor, hint} | {append:true, hint} | null
+  headings: [],             // [{num, cn, title}]
+  positionMode: 'suggest',  // 'suggest' | 'custom' | 'append'
+  customAnchor: '',
+})
+// 「继续修改新增条款」模式：true 时 overview 输入框的指令针对刚生成的新增条款（同位置重生成）
+const refiningAddClause = ref(false)
+const addClausePosition = ref(null)
 
 // 阿拉伯数字 → 中文数字（如 5 → 五）
 function cnNo(n) {
@@ -636,6 +703,124 @@ const reviseEmptyHint = computed(() => {
   return '输入修改指令，开始修订缺失条款'
 })
 
+const revisePlaceholder = computed(() => {
+  if (isOverviewActive.value && refiningAddClause.value) return '继续修改新增条款，例如：把通知义务改为「15日内书面通知」…'
+  if (isOverviewActive.value) return '对整个合同的修改要求…（也可输入「新增/增加/补充…」自然表达新增条款）'
+  return '输入修改指令，例如：把违约金上限从30%改为20%'
+})
+
+// R09 等「缺失条款」风险 → 走新增条款流程
+function isAddClauseRisk(row) {
+  return row && (row.risk_type === 'R09' || row.category === 'R09')
+}
+
+// 从风险行/自然语言触发新增条款对话框（展示 RAG 建议 + 位置选择）
+async function openAddClause(row, prefillInstruction = '') {
+  addPanel.riskType = row?.risk_type || 'R09'
+  addPanel.instruction = prefillInstruction || (row?.risk_type === 'R09'
+    ? '新增不可抗力条款，明确不可抗力的定义、通知义务与免责安排'
+    : '新增缺失条款')
+  addPanel.templates = []
+  addPanel.legalBasis = []
+  addPanel.suggestedPosition = null
+  addPanel.headings = []
+  addPanel.positionMode = 'suggest'
+  addPanel.customAnchor = ''
+  addPanel.loading = false
+  addPanel.visible = true
+  try {
+    const res = await getAddClauseSuggestion(contractId.value, {
+      risk_type: addPanel.riskType,
+      instruction: addPanel.instruction,
+    })
+    const d = res.data || {}
+    addPanel.templates = d.templates || []
+    addPanel.legalBasis = d.legal_basis || []
+    addPanel.suggestedPosition = d.suggested_position || null
+    addPanel.headings = d.headings || []
+    if (!addPanel.suggestedPosition) addPanel.positionMode = 'custom'
+  } catch { /* 检索失败仍可手动指定位置 */ }
+}
+
+function onPositionModeChange() {
+  if (addPanel.positionMode === 'custom' && !addPanel.customAnchor && addPanel.headings.length) {
+    addPanel.customAnchor = addPanel.headings[0]?.cn || ''
+  }
+}
+
+function resolveAddPosition() {
+  if (addPanel.positionMode === 'append') return { append: true, hint: '追加到合同末尾' }
+  if (addPanel.positionMode === 'custom') {
+    const cn = addPanel.customAnchor
+    if (!cn) return null
+    const h = addPanel.headings.find(x => x.cn === cn)
+    return { anchor: cn, hint: h ? `第${h.cn}条（${h.title || '该条款'}）之后` : `第${cn}条之后` }
+  }
+  return addPanel.suggestedPosition
+}
+
+async function confirmAddClause() {
+  const position = resolveAddPosition()
+  if (!position) { ElMessage.warning('请选择插入位置（无法可靠识别位置，请明确）'); return }
+  if (!addPanel.instruction.trim()) { ElMessage.warning('请输入新增条款要求'); return }
+  addPanel.loading = true
+  try {
+    // 进入现有 overview 总会话（未初始化则先重建条款列表 + 拉取历史）
+    if (!revisePanel.initialized) {
+      await openRevisePanel('__overview__')
+    } else {
+      revisePanel.activeId = '__overview__'
+    }
+    revisePanel.visible = true
+    await doAddClause(addPanel.instruction.trim(), position)
+    addPanel.visible = false
+  } finally {
+    addPanel.loading = false
+  }
+}
+
+function finishAddClause() {
+  refiningAddClause.value = false
+  addClausePosition.value = null
+  ElMessage.success('新增条款已确认（下载修订版 DOCX 时写入）')
+}
+
+// 在 overview 会话中生成/继续修改新增条款（operation=add_clause，同位置覆盖）
+async function doAddClause(instruction, position) {
+  const messages = revisePanel.overviewMessages
+  messages.push({ role: 'user', text: instruction })
+  revisePanel.loading = true
+  try {
+    const res = await reviseClause(contractId.value, {
+      clause_text: '',
+      instruction,
+      history: [],
+      scope: 'overview',
+      clause_key: '__overview__',
+      clause_no: '',
+      operation: 'add_clause',
+      position,
+    })
+    const data = res.data || {}
+    const meta = []
+    if (data.legal_basis?.length) meta.push('法律依据：' + data.legal_basis.join('；'))
+    const posHint = position.hint || (position.append ? '追加到合同末尾' : (position.anchor ? `第${position.anchor}条之后` : ''))
+    meta.push('插入位置：' + (posHint || '待定'))
+    messages.push({
+      role: 'assistant',
+      text: data.explanation || '（已生成新增条款）',
+      clause: data.revised_clause || data.clause_text || '',
+      meta: meta.join('\n'),
+    })
+    refiningAddClause.value = true
+    addClausePosition.value = position
+  } catch {
+    messages.pop()
+  } finally {
+    revisePanel.loading = false
+  }
+}
+
 function openRevise(row) {
   openRevisePanel(row.id)
 }
@@ -653,9 +838,10 @@ function openRevisePanel(focusId) {
   revisePanel.activeId = focusId || (revisePanel.clauses[0]?.id || '__overview__')
   revisePanel.input = ''
   revisePanel.visible = true
+  revisePanel.initialized = true
 
   // 拉取持久化会话并重建（刷新/重进合同后历史仍在，可继续对话）
-  getRevisions(contractId.value).then(res => {
+  return getRevisions(contractId.value).then(res => {
     const revs = res.data || []
     const byKey = {}
     for (const r of revs) { (byKey[r.clause_key] = byKey[r.clause_key] || []).push(r) }
@@ -673,6 +859,10 @@ function revsToMessages(revs) {
   for (const r of revs) {
     msgs.push({ role: 'user', text: r.instruction })
     const meta = []
+    if (r.operation === 'add_clause' && r.position) {
+      const p = r.position
+      meta.push('插入位置：' + (p.hint || (p.append ? '追加到合同末尾' : (p.anchor ? `第${p.anchor}条之后` : '待定'))))
+    }
     if (r.constraints?.length) meta.push('约束：' + r.constraints.join('；'))
     if (r.legal_basis?.length) meta.push('法律依据：' + r.legal_basis.join('；'))
     if (r.remaining_risks?.length) meta.push('⚠ 剩余风险：' + r.remaining_risks.join('；'))
@@ -713,6 +903,20 @@ async function handleRevise() {
   const isOverview = isOverviewActive.value
   const messages = isOverview ? revisePanel.overviewMessages : (activeClause.value ? activeClause.value.messages : null)
   if (!messages) { ElMessage.warning('请先选择会话'); return }
+
+  // 总览会话：自然表达「新增/增加/补充/添加…条款」且未在 refine 模式 → 进入新增条款对话框（位置需用户明确）
+  if (isOverview && !refiningAddClause.value && /(新增|增加|补充|添加).{0,12}?条款/.test(instruction)) {
+    revisePanel.input = ''
+    openAddClause(null, instruction)
+    return
+  }
+  // refine 模式：继续修改刚生成的新增条款（operation=add_clause，同位置覆盖）
+  if (isOverview && refiningAddClause.value && addClausePosition.value) {
+    revisePanel.input = ''
+    await doAddClause(instruction, addClausePosition.value)
+    return
+  }
+
   // 总览会话改整个合同；条款会话改单条
   const clauseText = isOverview ? (contract.value?.parsed_text || '') : activeClause.value.clause
 
@@ -928,6 +1132,13 @@ onUnmounted(() => {
 .revise-msg-meta { margin-top: 6px; font-size: 12px; color: #909399; white-space: pre-line; }
 .revise-chat-foot { display: flex; gap: 8px; align-items: flex-end; margin-top: 8px; }
 .revise-chat-foot .el-input { flex: 1; }
+.refine-tip { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.refine-tip .el-alert { flex: 1; }
+.add-clause-body { max-height: 60vh; overflow-y: auto; }
+.add-clause-sec { margin-top: 14px; }
+.add-clause-sec-title { font-weight: 600; color: #303133; margin-bottom: 6px; }
+.add-clause-tpl { padding: 8px 10px; background: #f5f7fa; border-radius: 6px; font-size: 13px; line-height: 1.6; color: #606266; margin-bottom: 6px; white-space: pre-wrap; }
+.add-clause-pos-hint { margin-top: 6px; font-size: 13px; color: #e6a23c; }
 .audit-placeholder { padding: 60px 0; }
 .audit-full-link { margin-top: 12px; }
 .report-desc { margin-bottom: 16px; }

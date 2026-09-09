@@ -10,7 +10,7 @@ import html
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, status, BackgroundTasks
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import func, case
+from sqlalchemy import func, case, or_, and_
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -27,7 +27,7 @@ from ai.auditor.evidence_adjudicator import adjudicate_risks
 from ai.auditor.recommendation_engine import build_recommendations
 from ai.confidence import enrich_confidences
 from ai.matcher import compare_clauses
-from ai.reviser import revise_clause
+from ai.reviser import revise_clause, generate_clause
 from ai.taxonomy import business_tag_names
 from models.audit_record import AuditRecord
 from services.docx_converter import docx_to_pdf
@@ -154,6 +154,79 @@ def _cn_to_int(s: str) -> int | None:
         ones = _CN_NUM.get(parts[1], 0) if len(parts) > 1 and parts[1] else 0
         return tens * 10 + ones
     return _CN_NUM.get(s)
+
+
+def _int_to_cn(n: int) -> str:
+    """整数 → 中文数字（1~99），用于新增条款位置提示与编号。"""
+    digits = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"]
+    if n <= 0:
+        return str(n)
+    if n < 10:
+        return digits[n]
+    if n == 10:
+        return "十"
+    if n < 20:
+        return "十" + digits[n - 10]
+    if n < 100:
+        tens, ones = divmod(n, 10)
+        return digits[tens] + "十" + ("" if ones == 0 else digits[ones])
+    return str(n)
+
+
+_HEADING_RE = re.compile(r'(第\s*)?([一二三四五六七八九十百千\d]+)\s*(条|、)')
+
+
+def _parse_headings(text: str) -> list[dict]:
+    """从合同正文解析顶层标题（第X条 / X、），返回 [{num, cn, title}]。
+
+    只收「一~九十九」编号的标题；标题取标题之后到下一个换行/标点为止的短句。
+    """
+    text = text or ""
+    out = []
+    seen = set()
+    for m in _HEADING_RE.finditer(text):
+        n = _cn_to_int(m.group(2))
+        if n is None:
+            continue
+        seg = text[m.end():m.end() + 20]
+        parts = [p for p in re.split(r'[\n　\s。；;：，,]', seg) if p.strip()]
+        title = parts[0] if parts else ""
+        if n in seen:
+            continue
+        seen.add(n)
+        out.append({"num": n, "cn": _int_to_cn(n), "title": title})
+    return out
+
+
+def _suggest_position(parsed_text: str) -> dict | None:
+    """新增缺失条款的建议插入位置（启发式，仅给建议，不替用户决定）。
+
+    规则：优先插在「争议解决」之前（anchor = 争议解决前一条的编号）；
+    否则插在「违约责任」之后；再否则追加到末尾；无标题结构返回 None（要求用户明确）。
+    """
+    headings = _parse_headings(parsed_text)
+    if not headings:
+        return None
+
+    def find(title_kw):
+        for h in headings:
+            if title_kw in (h["title"] or ""):
+                return h
+        return None
+
+    dispute = find("争议")
+    breach = find("违约")
+    if dispute:
+        # 插在争议解决前一条之后
+        idx = next((i for i, h in enumerate(headings) if h["num"] == dispute["num"]), -1)
+        prev = headings[idx - 1] if idx > 0 else None
+        if prev:
+            return {"anchor": prev["cn"], "hint": f"第{prev['cn']}条（{prev['title'] or '上一款'}）之后、争议解决条款之前"}
+        return {"append": True, "hint": "追加到合同末尾（争议解决之前无法定位）"}
+    if breach:
+        return {"anchor": breach["cn"], "hint": f"第{breach['cn']}条（违约责任）之后"}
+    last = headings[-1]
+    return {"anchor": last["cn"], "hint": f"第{last['cn']}条之后"}
 
 
 _ITEM_RE = re.compile(r'（\s*[一二三四五六七八九十百千\d]+\s*）')
@@ -782,6 +855,58 @@ class ReviseRequest(BaseModel):
     scope: str = "clause"     # "clause" | "overview"
     clause_key: str = ""      # 条款会话标识（str(风险记录 id) 或 "__overview__"）
     clause_no: str = ""       # 第 X 条（定位可得时）
+    operation: str = "replace"   # "replace"（替换已有条款）| "add_clause"（新增缺失条款）
+    position: dict = None     # add_clause 插入位置：{"anchor":"五","hint":"..."} 或 {"append":true}
+
+
+class AddClauseSuggestionRequest(BaseModel):
+    risk_type: str = "R09"     # 缺失条款风险类型（R09 不可抗力等）
+    instruction: str = ""      # 用户自然语言补充（可选）
+
+
+@router.post("/{contract_id}/add-clause-suggestion")
+def get_add_clause_suggestion(
+    contract_id: int,
+    body: AddClauseSuggestionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """R09 缺失条款的新增建议：RAG 同类范本 + 法律依据 + 建议插入位置。
+
+    仅给建议，不替用户决定位置；无标题结构时 suggested_position=None，前端要求用户明确。
+    """
+    c = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not c or not _can_view_contract(current_user, c):
+        raise HTTPException(status_code=404, detail="contract not found")
+
+    # 风险类型 → 自然语言检索词（指令为空时用，避免拿 R09 这种代码去检索）
+    _RT_QUERY = {"R09": "不可抗力条款 通知 免责", "R08": "验收标准 验收方式",
+                 "R10": "竞业限制 竞业禁止", "R11": "续约条款 自动续约"}
+    query = body.instruction.strip() or _RT_QUERY.get(body.risk_type, body.risk_type or "缺失条款")
+    templates, laws = [], []
+    try:
+        from ai.rag import search_similar_templates, search_knowledge
+        templates = [{"text": t.get("text", "")[:300], "type": t.get("type", ""), "score": t.get("score")}
+                     for t in (search_similar_templates(query, 3) or [])]
+    except Exception as e:
+        logger.warning("范本检索失败: %s", e)
+    try:
+        from ai.rag import search_knowledge
+        laws = [{"law": it.get("law", ""), "article": it.get("article", ""),
+                 "title": it.get("title", ""), "content": it.get("content", "")[:200]}
+                for it in (search_knowledge(query, "laws", 3) or [])]
+    except Exception as e:
+        logger.warning("法条检索失败: %s", e)
+
+    headings = _parse_headings(c.parsed_text or "")
+    suggested = _suggest_position(c.parsed_text or "")
+    return {"code": 0, "message": "ok", "data": {
+        "risk_type": body.risk_type,
+        "templates": templates,
+        "legal_basis": laws,
+        "suggested_position": suggested,
+        "headings": headings,
+    }}
 
 
 @router.post("/{contract_id}/revise")
@@ -791,14 +916,20 @@ def revise_contract_clause(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """多轮对话式改条款（Leader-Follower 多智能体，参考 RCBSF）"""
+    """多轮对话式改条款（Leader-Follower 多智能体，参考 RCBSF）。
+
+    operation="add_clause" 时走「新增条款起草」路径（单次 LLM，不做 Leader-Follower）：
+    不要求 clause_text（新条款无原文），用 instruction + RAG 范本/法条起草，并记录插入位置。
+    """
     c = db.query(Contract).filter(Contract.id == contract_id).first()
     if not c or not _can_view_contract(current_user, c):
         raise HTTPException(status_code=404, detail="contract not found")
-    if not body.clause_text.strip():
-        raise HTTPException(status_code=400, detail="clause_text is required")
     if not body.instruction.strip():
         raise HTTPException(status_code=400, detail="instruction is required")
+
+    is_add = body.operation == "add_clause"
+    if not is_add and not body.clause_text.strip():
+        raise HTTPException(status_code=400, detail="clause_text is required")
 
     # 检索相关法条作为修订依据（懒加载 RAG，避免启动时拖入 chromadb/torch）
     rag_context = None
@@ -808,7 +939,22 @@ def revise_contract_clause(
     except Exception as e:
         logger.warning("改条款法条检索失败: %s", e)
 
-    result = revise_clause(body.clause_text, body.instruction, c.contract_type or "", body.history, rag_context)
+    if is_add:
+        # 新增条款：RAG 同类范本（供起草参考）+ 法条（依据）
+        rag_templates = None
+        try:
+            from ai.rag import search_similar_templates
+            rag_templates = search_similar_templates(body.instruction, 3)
+        except Exception as e:
+            logger.warning("新增条款范本检索失败: %s", e)
+        position_hint = (body.position or {}).get("hint") or None
+        result = generate_clause(body.instruction, c.contract_type or "", rag_context, position_hint)
+        if not result.get("error") and rag_templates:
+            result["templates"] = [t.get("text", "")[:200] for t in rag_templates[:2]]
+        # 统一对外字段：新增条款正文用 revised_clause 返回（与替换修订一致，前端/持久化共用）
+        result["revised_clause"] = result.get("clause_text", "")
+    else:
+        result = revise_clause(body.clause_text, body.instruction, c.contract_type or "", body.history, rag_context)
 
     # 持久化修订记录（仅成功时；result 含 error 说明修订失败，不落库）
     if not result.get("error"):
@@ -827,6 +973,8 @@ def revise_contract_clause(
         rev = ClauseRevision(
             contract_id=contract_id,
             scope=body.scope if body.scope in ("clause", "overview") else "clause",
+            operation="add_clause" if is_add else "replace",
+            position=body.position if is_add else None,
             clause_key=body.clause_key or "",
             clause_no=body.clause_no or None,
             clause_text=body.clause_text,
@@ -864,6 +1012,8 @@ def get_contract_revisions(
     data = [{
         "id": r.id,
         "scope": r.scope,
+        "operation": getattr(r, "operation", "replace") or "replace",
+        "position": getattr(r, "position", None),
         "clause_key": r.clause_key,
         "clause_no": r.clause_no,
         "clause_text": r.clause_text,
@@ -896,7 +1046,13 @@ def download_revised_docx(
 
     revs = (
         db.query(ClauseRevision)
-        .filter(ClauseRevision.contract_id == contract_id, ClauseRevision.scope == "clause")
+        .filter(
+            ClauseRevision.contract_id == contract_id,
+            or_(
+                ClauseRevision.scope == "clause",
+                and_(ClauseRevision.scope == "overview", ClauseRevision.operation == "add_clause"),
+            ),
+        )
         .order_by(ClauseRevision.id.asc())
         .all()
     )
@@ -908,6 +1064,10 @@ def download_revised_docx(
     out_path = os.path.join(UPLOAD_DIR, f"revised_{uuid.uuid4().hex}.docx")
     try:
         applied, skipped = build_revised_docx(c.stored_path, revs, out_path)
+    except ValueError as e:
+        _unlink_quiet(out_path)
+        logger.warning("新增条款插入失败: %s", e)
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         _unlink_quiet(out_path)
         logger.warning("生成修订版 DOCX 失败: %s", e)

@@ -142,3 +142,45 @@ def revise_clause(
         "remaining_risks": qa.get("remaining_risks", []),
         "final_advice": qa.get("final_advice", ""),
     }
+
+
+GENERATE_PROMPT = """你是合同起草助手。请根据用户的指令、合同类型、相关法条与参考范本，起草一条**新增条款**。
+
+要求：
+1. 条款内容完整、表述规范、可直接插入合同正文；
+2. 严格依据提供的法条与参考范本，不编造数字、法条或术语；
+3. 只输出 JSON：
+{
+  "clause_text": "新增条款的完整正文（不含条款编号，编号由系统按插入位置补）",
+  "explanation": "一句话说明新增理由",
+  "legal_basis": ["依据的法条，如民法典第590条"]
+}"""
+
+
+def generate_clause(instruction: str, contract_type: str = "", rag_context: list | None = None,
+                    position_hint: str | None = None) -> dict:
+    """起草一条新增条款（用于 R09 缺失条款等 add_clause 场景）。
+
+    单次 LLM 调用（新增是"起草"而非"修订"，不走 Leader-Follower 多智能体）。
+    返回 {clause_text, explanation, legal_basis} 或 {error}。
+    """
+    law_text = ""
+    if rag_context:
+        law_text = "\n".join(
+            f"- {it.get('law', '')}{it.get('article', '')} {it.get('title', '')}: {it.get('content', '')[:200]}"
+            for it in rag_context[:3]
+        )
+    ctx = f"合同类型：{contract_type or '未指定'}\n用户指令：{instruction}"
+    if position_hint:
+        ctx += f"\n建议插入位置：{position_hint}"
+    if law_text:
+        ctx += f"\n\n相关法条/范本：\n{law_text}"
+
+    resp = _call_agent(GENERATE_PROMPT, ctx, "Generate")
+    if resp.get("error"):
+        return {"error": resp["error"]}
+    return {
+        "clause_text": resp.get("clause_text", ""),
+        "explanation": resp.get("explanation", ""),
+        "legal_basis": resp.get("legal_basis", []),
+    }

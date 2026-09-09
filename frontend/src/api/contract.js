@@ -109,6 +109,15 @@ export function getRevisions(id) {
 }
 
 /**
+ * 获取缺失条款（R09 等）的新增建议：同类范本 + 法律依据 + 建议插入位置
+ * @param {number|string} id — 合同 ID
+ * @param {Object} data — { risk_type, instruction }
+ */
+export function getAddClauseSuggestion(id, data) {
+  return request.post(`/contracts/${id}/add-clause-suggestion`, data, { timeout: COMPARE_TIMEOUT })
+}
+
+/**
  * 下载修订版 DOCX（返回 Blob）
  */
 export function downloadRevisedDocx(id) {
