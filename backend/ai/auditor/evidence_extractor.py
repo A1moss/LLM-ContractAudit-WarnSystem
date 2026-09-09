@@ -31,8 +31,8 @@ SYSTEM_PROMPT_EVIDENCE = """你是一位合同条款事实抽取助手。唯一�
 {
   "contract_type": "买卖/租赁/承揽/建设工程/技术/委托/物业服务/中介/保密/劳动/无名",
   "is_delivery_type": true或false,
-  "R01_违约金": {"exists": true/false, "rate": 0.0, "unit": "daily/monthly/one_time", "basis": "合同总价/逾期金额/其他", "liable_party": "甲方/乙方/双方/未写明", "clause_text": "原文"},
-  "R02_责任": {"absolute_wording": true/false, "absolute_text": "原文", "has_cap": true/false, "scope": "实际损失/直接损失/全部损失/含预期利润或间接损失/未明确", "liable_party": "甲方/乙方/双方/未写明"},
+  "R01_违约金": {"exists": true/false, "rate": 0.0, "unit": "daily/monthly/one_time", "basis": "合同总价/逾期金额/其他", "liable_party": "甲方/乙方/双方/未写明", "clause_text": "原文(违约金条款的完整原文，必须含条款编号/子项编号与标题，逐字摘录不改写，找不到才留空)"},
+  "R02_责任": {"absolute_wording": true/false, "absolute_text": "原文(赔偿/责任条款的完整原文，必须含条款编号/子项编号与标题，逐字摘录不改写，找不到才留空)", "has_cap": true/false, "scope": "实际损失/直接损失/全部损失/含预期利润或间接损失/未明确", "liable_party": "甲方/乙方/双方/未写明"},
   "R03_单方权利": {
     "termination": {"party": "甲方/乙方/双方/无", "arbitrary": true/false, "no_compensation": true/false, "clause_text": "原文"},
     "suspension": {"party": "甲方/乙方/双方/无", "arbitrary": true/false, "no_compensation": true/false, "clause_text": "原文"},

@@ -138,13 +138,15 @@ def adjudicate_risks(evidence: dict) -> list[dict]:
     if r.get("exists") and r.get("unit") == "daily":
         rate = _num(r.get("rate"))
         if rate is not None and rate >= 0.005:
-            add("R01", r.get("clause_text") or r.get("basis") or "违约金条款")
+            # clause_text 只用逐字原文；不再用 basis（概念）或"违约金条款"（兜底描述）当定位文本
+            add("R01", r.get("clause_text") or "")
 
     # R02 无限责任：scope/absolute_text 含超可预见标记
     r = evidence.get("R02_责任") or {}
     scope_text = (r.get("scope") or "") + " " + (r.get("absolute_text") or "")
     if any(k in scope_text for k in ("预期", "间接", "无限", "一切", "全部损失")):
-        add("R02", r.get("absolute_text") or "赔偿责任条款")
+        # clause_text 只用逐字 absolute_text；不再用"赔偿责任条款"兜底描述定位
+        add("R02", r.get("absolute_text") or "")
 
     # R03 单方解约：termination/suspension/change 任一 任意+无补偿
     r = evidence.get("R03_单方权利") or {}

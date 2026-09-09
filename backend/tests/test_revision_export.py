@@ -167,6 +167,15 @@ class TestDocxReviser(unittest.TestCase):
         loc = contracts._locate_clause(full, clause)
         self.assertIsNone(loc)
 
+    def test_locate_clause_multi_subitem_returns_none(self):
+        # 多个命中且多个都落在（N）子项 → 显式失败（不随便选第一个）
+        full = ("（4）履约验收程序：设备正常运行生产30日并验收合格。"
+                "（5）履约验收的内容：设备正常运行生产30日并验收合格后。"
+                "（6）履约验收标准：设备正常运行生产30日并验收合格后。")
+        clause = "设备正常运行生产30日并验收合格"
+        loc = contracts._locate_clause(full, clause)
+        self.assertIsNone(loc)
+
     def test_locate_clause_unique_hit_unchanged(self):
         # 唯一命中：现有行为不变
         full = "四、合同验收（6）履约验收标准：设备正常运行生产30日并验收合格后。"
@@ -193,6 +202,64 @@ class TestDocxReviser(unittest.TestCase):
         r08 = [r for r in risks if r["risk_type"] == "R08"]
         self.assertEqual(len(r08), 1)
         self.assertEqual(r08[0]["clause_text"], "（6）履约验收标准：设备验收合格30日内组织验收")
+
+    def test_r01_adjudicator_uses_verbatim_clause_text(self):
+        # R01 裁决器：有逐字 clause_text 时用它，不能退到 basis 概念（"逾期金额"）
+        from ai.auditor.evidence_adjudicator import adjudicate_risks
+        verbatim = "第X条 违约责任：乙方逾期交付的，每逾期一日按逾期交付货物价值的千分之五支付违约金。"
+        evidence = {
+            "is_delivery_type": True,
+            "R01_违约金": {"exists": True, "unit": "daily", "rate": 0.006,
+                           "basis": "逾期金额", "clause_text": verbatim},
+        }
+        risks = adjudicate_risks(evidence)
+        r01 = [r for r in risks if r["risk_type"] == "R01"]
+        self.assertEqual(len(r01), 1)
+        self.assertEqual(r01[0]["clause_text"], verbatim)
+
+    def test_r01_adjudicator_no_concept_or_marker_fallback(self):
+        # R01 裁决器：clause_text 为空时 clause_text 也为空（不拿 basis 概念、"违约金条款"兜底当定位文本）
+        from ai.auditor.evidence_adjudicator import adjudicate_risks
+        evidence = {
+            "is_delivery_type": True,
+            "R01_违约金": {"exists": True, "unit": "daily", "rate": 0.006,
+                           "basis": "逾期金额", "clause_text": ""},
+        }
+        risks = adjudicate_risks(evidence)
+        r01 = [r for r in risks if r["risk_type"] == "R01"]
+        self.assertEqual(len(r01), 1)
+        self.assertEqual(r01[0]["clause_text"], "")
+
+    def test_r02_adjudicator_no_marker_fallback(self):
+        # R02 裁决器：absolute_text 为空时 clause_text 也为空（不拿"赔偿责任条款"兜底定位）
+        from ai.auditor.evidence_adjudicator import adjudicate_risks
+        evidence = {
+            "is_delivery_type": True,
+            "R02_责任": {"scope": "全部损失", "absolute_text": ""},
+        }
+        risks = adjudicate_risks(evidence)
+        r02 = [r for r in risks if r["risk_type"] == "R02"]
+        self.assertEqual(len(r02), 1)
+        self.assertEqual(r02[0]["clause_text"], "")
+
+    def test_r02_adjudicator_uses_verbatim_absolute_text(self):
+        # R02 裁决器：absolute_text 是逐字原文时用它做 clause_text
+        from ai.auditor.evidence_adjudicator import adjudicate_risks
+        verbatim = "第X条：乙方应承担因违约造成的全部损失。"
+        evidence = {
+            "is_delivery_type": True,
+            "R02_责任": {"scope": "全部损失", "absolute_text": verbatim},
+        }
+        risks = adjudicate_risks(evidence)
+        r02 = [r for r in risks if r["risk_type"] == "R02"]
+        self.assertEqual(len(r02), 1)
+        self.assertEqual(r02[0]["clause_text"], verbatim)
+
+    def test_r01_r02_prompt_requires_verbatim(self):
+        # R01/R02 证据 prompt 必须要求逐字摘录完整条款（含编号/子项编号+标题）
+        from ai.auditor.evidence_extractor import SYSTEM_PROMPT_EVIDENCE
+        self.assertIn("含条款编号/子项编号与标题", SYSTEM_PROMPT_EVIDENCE)
+        self.assertIn("逐字摘录不改写", SYSTEM_PROMPT_EVIDENCE)
 
 
 class TestRevisionApi(unittest.TestCase):

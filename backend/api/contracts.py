@@ -162,9 +162,10 @@ _ITEM_RE = re.compile(r'（\s*[一二三四五六七八九十百千\d]+\s*）')
 def _pick_best_hit(full_text: str, probe: str) -> int:
     """定位 probe 在 full_text 的所有命中；多命中时做通用消歧。
 
-    规则：唯一命中→该位置；多命中→优先落在「（N）子项」内的那个（风险条款通常是
-    编号子项，其前面 40 字内有（N）编号）；无（N）命中→返回 -1（显式定位失败，
-    不随意取第一个）。无命中→-1。
+    规则：
+    - 唯一命中 → 该位置；
+    - 多命中且**恰有一个**落在「（N）子项」内 → 该（N）命中；
+    - 多命中但多个/零个落在（N）子项 → 返回 -1（显式定位失败，不随便取第一个）。
     """
     matches = []
     s = 0
@@ -178,9 +179,9 @@ def _pick_best_hit(full_text: str, probe: str) -> int:
         return -1
     if len(matches) == 1:
         return matches[0]
-    for p in matches:
-        if _ITEM_RE.search(full_text[max(0, p - 40):p]):
-            return p
+    in_item = [p for p in matches if _ITEM_RE.search(full_text[max(0, p - 40):p])]
+    if len(in_item) == 1:
+        return in_item[0]
     return -1
 
 
