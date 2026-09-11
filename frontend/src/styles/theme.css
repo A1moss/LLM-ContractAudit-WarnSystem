@@ -1,0 +1,157 @@
+/* ============================================================
+   A24 合同审核系统 · 全局主题
+   对齐浙江网新恒天软件官网：主色深藏蓝 #1935C3
+   ============================================================ */
+
+:root {
+  /* —— Element Plus 主色换肤（替代默认蓝 #409EFF）—— */
+  --el-color-primary: #1935C3;
+  --el-color-primary-light-3: #5E72D5;
+  --el-color-primary-light-5: #8C9AE1;
+  --el-color-primary-light-7: #BAC2ED;
+  --el-color-primary-light-8: #D1D7F3;
+  --el-color-primary-light-9: #E8EBF9;
+  --el-color-primary-dark-2: #142A9C;
+
+  /* —— 全局圆角 / 表格表头 —— */
+  --el-border-radius-base: 6px;
+  --el-border-radius-small: 4px;
+  --el-card-border-radius: 12px;
+  --el-table-header-bg-color: #F5F8FC;
+  --el-table-header-text-color: #585E7D;
+
+  /* —— A24 品牌 token —— */
+  --a24-primary: #1935C3;
+  --a24-primary-2: #1B70F0;
+  --a24-accent: #E60012;
+  --a24-bg: #F8FAFD;
+  --a24-border: #E5EAF2;
+  --a24-heading: #131313;
+  --a24-text: #444444;
+  --a24-muted: #8A93A6;
+}
+
+html, body {
+  font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "微软雅黑",
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+  background-color: var(--a24-bg);
+  color: var(--a24-text);
+  line-height: 1.7;
+  min-height: 100vh;
+}
+
+#app { min-height: 100vh; }
+
+/* 链接主色 */
+.el-link.el-link--primary { --el-link-text-color: var(--a24-primary); }
+
+/* 卡片 hover 阴影 */
+.el-card.is-hover-shadow:hover {
+  box-shadow: 0 8px 24px rgba(13, 36, 71, 0.10);
+}
+
+/* ============================================================
+   通用布局组件类（各页面复用）
+   ============================================================ */
+
+/* —— 页头 —— */
+.a24-page-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 24px; margin-bottom: 20px;
+}
+.a24-page-header .crumb { font-size: 12.5px; color: #9AA4B8; margin-bottom: 8px; }
+.a24-page-header .crumb b { color: var(--a24-primary); font-weight: 500; }
+.a24-page-header .title-row { display: flex; align-items: center; gap: 12px; }
+.a24-page-header .icon {
+  width: 44px; height: 44px; border-radius: 12px; color: #fff; font-size: 22px;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  background: linear-gradient(135deg, #1935C3, #1B70F0);
+  box-shadow: 0 6px 18px rgba(25, 53, 195, 0.3);
+}
+.a24-page-header h3 { font-size: 22px; font-weight: 700; color: var(--a24-heading); margin: 0; }
+.a24-page-header .desc { margin-top: 6px; font-size: 13.5px; color: var(--a24-muted); margin-left: 56px; }
+.a24-page-header .actions { flex-shrink: 0; padding-top: 6px; display: flex; gap: 10px; }
+
+/* —— KPI 统计卡 —— */
+.a24-kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+.a24-kpi {
+  background: #fff; border: 1px solid var(--a24-border); border-radius: 12px;
+  padding: 16px 18px; display: flex; align-items: center; gap: 14px;
+  box-shadow: 0 2px 10px rgba(13, 36, 71, 0.04);
+  transition: box-shadow 0.18s;
+}
+.a24-kpi:hover { box-shadow: 0 8px 24px rgba(13, 36, 71, 0.10); }
+.a24-kpi .ic {
+  width: 46px; height: 46px; border-radius: 11px; font-size: 22px;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.a24-kpi .num { font-size: 26px; font-weight: 700; color: var(--a24-heading); line-height: 1.1; }
+.a24-kpi .lbl { font-size: 12.5px; color: var(--a24-muted); margin-top: 3px; }
+.a24-kpi .extra { margin-left: auto; font-size: 12px; color: #9AA4B8; text-align: right; }
+
+/* —— 统计卡（详情页 4 列）—— */
+.a24-stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px; }
+.a24-stat-card {
+  background: #fff; border: 1px solid var(--a24-border); border-radius: 12px;
+  padding: 14px 16px; display: flex; align-items: center; gap: 12px;
+}
+.a24-stat-card .ic {
+  width: 40px; height: 40px; border-radius: 10px; font-size: 18px;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.a24-stat-card .n { font-size: 22px; font-weight: 700; color: var(--a24-heading); line-height: 1.1; }
+.a24-stat-card .l { font-size: 12px; color: var(--a24-muted); margin-top: 2px; }
+
+/* —— 元信息条（详情页 5 格）—— */
+.a24-meta-strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 18px; }
+.a24-meta-cell {
+  background: #fff; border: 1px solid var(--a24-border); border-radius: 12px; padding: 14px 16px;
+}
+.a24-meta-cell .k { font-size: 12px; color: var(--a24-muted); }
+.a24-meta-cell .v { font-size: 14.5px; color: var(--a24-heading); font-weight: 600; margin-top: 4px; }
+
+/* —— 步骤条 —— */
+.a24-steps { display: flex; align-items: center; margin-bottom: 20px; }
+.a24-steps .step { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: #9AA4B8; }
+.a24-steps .dot {
+  width: 26px; height: 26px; border-radius: 50%; background: #E8EBF0; color: #9AA4B8;
+  font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;
+}
+.a24-steps .step.on { color: var(--a24-heading); font-weight: 600; }
+.a24-steps .step.on .dot {
+  background: linear-gradient(135deg, #1935C3, #1B70F0); color: #fff;
+  box-shadow: 0 4px 12px rgba(25, 53, 195, 0.3);
+}
+.a24-steps .line { flex: 1; height: 2px; background: #E8EBF0; margin: 0 16px; border-radius: 2px; max-width: 90px; }
+.a24-steps .line.done { background: var(--a24-primary); }
+
+/* —— 主从布局 —— */
+.a24-master-detail { display: flex; gap: 18px; align-items: flex-start; }
+.a24-master { flex: 0 0 360px; }
+.a24-detail { flex: 1; min-width: 0; }
+
+/* —— 卡片标题栏 —— */
+.a24-card-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 18px; border-bottom: 1px solid var(--a24-border);
+}
+.a24-card-head .t { font-size: 15px; font-weight: 600; color: var(--a24-heading); }
+.a24-card-head .t small { font-size: 12px; color: var(--a24-muted); font-weight: 400; margin-left: 8px; }
+
+/* ============================================================
+   响应式降级（小屏）
+   ============================================================ */
+@media (max-width: 900px) {
+  .a24-kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .a24-stat-grid { grid-template-columns: repeat(2, 1fr); }
+  .a24-meta-strip { grid-template-columns: repeat(2, 1fr); }
+  .a24-master-detail { flex-direction: column; }
+  .a24-master { flex: none; width: 100%; }
+  .a24-page-header { flex-direction: column; gap: 12px; }
+  .a24-page-header .desc { margin-left: 0; }
+}

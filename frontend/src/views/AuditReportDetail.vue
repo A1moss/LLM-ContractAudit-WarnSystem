@@ -15,32 +15,53 @@
     </div>
 
     <template v-else>
-      <!-- 页面导航 -->
-      <div class="page-nav-bar">
-        <el-button @click="$router.push('/audit/report')">
-          <el-icon><ArrowLeft /></el-icon>返回审核报告列表
-        </el-button>
-        <el-button
-          type="primary"
-          size="small"
-          @click="$router.push(`/audit/result/${contractId}`)"
-        >
-          查看审核结果
-        </el-button>
+      <!-- 页头 -->
+      <div class="a24-page-header">
+        <div>
+          <div class="crumb">首页 / 审核中心 / 审核报告 / <b>报告详情</b></div>
+          <div class="title-row">
+            <span class="icon"><el-icon><DataAnalysis /></el-icon></span>
+            <h3>审核报告</h3>
+          </div>
+          <div class="desc">合同 #{{ contractId }} · 风险评分 {{ report?.risk_score ?? '—' }}</div>
+        </div>
+        <div class="actions">
+          <el-button text @click="$router.push('/audit/report')">
+            <el-icon><ArrowLeft /></el-icon> 返回列表
+          </el-button>
+          <el-button type="primary" @click="$router.push(`/audit/result/${contractId}`)">查看审核结果</el-button>
+        </div>
       </div>
 
-      <!-- 报告总览 -->
-      <el-descriptions v-if="report" :column="4" border class="report-summary">
-        <el-descriptions-item label="综合评分">
-          <el-tag
-            :type="report.risk_score >= 60 ? 'danger' : report.risk_score >= 30 ? 'warning' : 'success'"
-            size="large"
-          >{{ report.risk_score }} 分</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="高风险">{{ report.high_risk_count }} 条</el-descriptions-item>
-        <el-descriptions-item label="中风险">{{ report.mid_risk_count }} 条</el-descriptions-item>
-        <el-descriptions-item label="低风险">{{ report.low_risk_count }} 条</el-descriptions-item>
-      </el-descriptions>
+      <!-- 评分环 + 高中低风险统计 -->
+      <div v-if="report" class="report-score-row">
+        <el-progress
+          type="circle"
+          :percentage="report.risk_score"
+          :width="116"
+          :stroke-width="10"
+          :color="scoreColor(report.risk_score)"
+        >
+          <template #default>
+            <div class="score-num">{{ report.risk_score }}</div>
+            <div class="score-lbl">风险分</div>
+          </template>
+        </el-progress>
+        <div class="report-stat-grid">
+          <div class="a24-stat-card">
+            <span class="ic" style="background:#FDECEC">🔴</span>
+            <div><div class="n" style="color:#E60012">{{ report.high_risk_count }}</div><div class="l">高风险</div></div>
+          </div>
+          <div class="a24-stat-card">
+            <span class="ic" style="background:#FEF3E2">🟠</span>
+            <div><div class="n" style="color:#C77A12">{{ report.mid_risk_count }}</div><div class="l">中风险</div></div>
+          </div>
+          <div class="a24-stat-card">
+            <span class="ic" style="background:#E8F7EE">🟢</span>
+            <div><div class="n" style="color:#1E9E54">{{ report.low_risk_count }}</div><div class="l">低风险</div></div>
+          </div>
+        </div>
+      </div>
 
       <!-- ECharts -->
       <el-row :gutter="20">
@@ -176,7 +197,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { Warning, ArrowLeft, ArrowRight, SuccessFilled, Loading } from '@element-plus/icons-vue'
+import { Warning, ArrowLeft, ArrowRight, SuccessFilled, Loading, DataAnalysis } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import * as pdfjsLib from 'pdfjs-dist'
@@ -310,6 +331,12 @@ function initCharts() {
       }],
     })
   }
+}
+
+function scoreColor(score) {
+  if (score >= 60) return '#E60012'
+  if (score >= 30) return '#E6A23C'
+  return '#67C23A'
 }
 
 function disposeCharts() {
@@ -608,4 +635,29 @@ onUnmounted(() => {
 
 .jump-label { font-size: 13px; color: #909399; white-space: nowrap; }
 .jump-input { width: 56px; }
+.report-score-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 16px;
+}
+
+.report-stat-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.score-num {
+  font-size: 26px;
+  font-weight: 700;
+  color: #131313;
+  line-height: 1.1;
+}
+
+.score-lbl {
+  font-size: 12px;
+  color: #8A93A6;
+}
 </style>

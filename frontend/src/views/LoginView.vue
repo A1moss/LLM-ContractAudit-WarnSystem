@@ -185,7 +185,12 @@ async function handleRegister() {
   justify-content: center;
   align-items: center;
   min-height: 100vh;
-  background: #f0f2f5;
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(900px 460px at 80% -10%, rgba(27, 112, 240, 0.35) 0%, transparent 60%),
+    radial-gradient(700px 460px at 0% 110%, rgba(25, 53, 195, 0.5) 0%, transparent 55%),
+    linear-gradient(120deg, #081426 0%, #0D2447 50%, #0A1A3C 100%);
 }
 
 .login-title {
@@ -195,6 +200,9 @@ async function handleRegister() {
 
 .login-card {
   width: 420px;
+  border: none;
+  border-radius: 14px;
+  box-shadow: 0 24px 70px rgba(3, 12, 30, 0.5);
 }
 
 .login-btn {

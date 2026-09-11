@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A24 前端美化预览 · 全页面版 V1（科技感背景）</title>
+<style>
+  /* ============ 全局重置 ============ */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --primary: #1935C3;
+    --primary-2: #1B70F0;
+    --nav-active: #02448F;
+    --accent: #E60012;
+    --bg: #F8FAFD;
+    --text: #444;
+    --heading: #131313;
+    --muted: #8A93A6;
+    --border: #E5EAF2;
+    --navy-1: #081426;
+    --navy-2: #0D2447;
+    --navy-3: #0A1A3C;
+  }
+  body {
+    font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "微软雅黑",
+      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0B132B;
+    color: var(--text);
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ============ 预览文档外层 ============ */
+  .preview-doc { max-width: 1200px; margin: 0 auto; padding: 48px 32px 120px; }
+  .doc-head { text-align: center; margin-bottom: 12px; }
+  .doc-head .tag {
+    display: inline-block; font-size: 12px; letter-spacing: 2px; color: #8FB4FF;
+    border: 1px solid rgba(143,180,255,.35); padding: 4px 14px; border-radius: 999px; margin-bottom: 16px;
+  }
+  .doc-head h1 { font-size: 30px; color: #fff; font-weight: 700; letter-spacing: .5px; }
+  .doc-head .sub { margin-top: 10px; font-size: 14px; color: #9FB0C8; max-width: 720px; margin-left: auto; margin-right: auto; }
+
+  /* 说明卡片 */
+  .note {
+    margin: 28px 0 40px; padding: 18px 22px;
+    background: rgba(25,53,195,.12); border: 1px solid rgba(27,112,240,.3);
+    border-radius: 10px; color: #C7D3F5; font-size: 13.5px; line-height: 1.9;
+  }
+  .note b { color: #fff; }
+  .note .hl { color: #8FB4FF; }
+
+  /* 每个页面块的标题 */
+  .page-label { display: flex; align-items: center; gap: 12px; margin: 48px 0 14px; }
+  .page-label .idx {
+    width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+    background: linear-gradient(135deg, #1935C3, #1B70F0); color: #fff;
+    font-weight: 700; font-size: 15px; display: flex; align-items: center; justify-content: center;
+  }
+  .page-label h2 { font-size: 19px; color: #fff; font-weight: 600; }
+  .page-label .path { font-size: 12.5px; color: #6E7A95; font-family: Consolas, Menlo, monospace; }
+  .page-label .desc { margin-left: auto; font-size: 13px; color: #9FB0C8; }
+
+  /* 浏览器外框 */
+  .browser {
+    border-radius: 12px; overflow: hidden;
+    background: #fff; box-shadow: 0 20px 60px rgba(0,0,0,.45);
+    border: 1px solid rgba(255,255,255,.08);
+  }
+  .browser-bar {
+    display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px;
+    background: linear-gradient(90deg, #0D2447, #102B5E);
+  }
+  .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .dot.r { background: #FF5F57; } .dot.y { background: #FEBC2E; } .dot.g { background: #28C840; }
+  .urlbar {
+    margin-left: 12px; flex: 1; height: 24px; border-radius: 6px;
+    background: rgba(255,255,255,.08); color: #9FB0C8; font-size: 12px;
+    display: flex; align-items: center; padding: 0 12px;
+    font-family: Consolas, Menlo, monospace; letter-spacing: .3px;
+  }
+  .browser-body { background: var(--bg); }
+
+  /* ============ 科技感背景（核心新增） ============ */
+  .tech-bg {
+    position: relative; overflow: hidden;
+    background:
+      radial-gradient(900px 420px at 12% 6%, rgba(27,112,240,.10), transparent 60%),
+      radial-gradient(760px 460px at 88% 22%, rgba(25,53,195,.12), transparent 62%),
+      radial-gradient(900px 520px at 50% 108%, rgba(27,112,240,.08), transparent 58%),
+      var(--bg);
+  }
+  .tech-grid {
+    position: absolute; inset: 0; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(25,53,195,.055) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(25,53,195,.055) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: linear-gradient(#000 0%, transparent 88%);
+    -webkit-mask-image: linear-gradient(#000 0%, transparent 88%);
+  }
+  .tech-orb { position: absolute; border-radius: 50%; filter: blur(58px); opacity: .4; pointer-events: none; animation: orbFloat 9s ease-in-out infinite; }
+  .tech-orb.o1 { width: 360px; height: 360px; left: -90px; top: -70px; background: rgba(27,112,240,.35); }
+  .tech-orb.o2 { width: 300px; height: 300px; right: -70px; top: 120px; background: rgba(25,53,195,.40); animation-delay: -3s; }
+  .tech-orb.o3 { width: 420px; height: 420px; left: 40%; bottom: -180px; background: rgba(27,112,240,.22); animation-delay: -6s; }
+  @keyframes orbFloat { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-26px) scale(1.06); } }
+
+  /* 漂浮粒子 */
+  .particle { position: absolute; border-radius: 50%; background: rgba(27,112,240,.5); pointer-events: none; animation: rise linear infinite; }
+  @keyframes rise {
+    0% { transform: translateY(0); opacity: 0; }
+    12% { opacity: .7; }
+    85% { opacity: .15; }
+    100% { transform: translateY(-240px); opacity: 0; }
+  }
+
+  /* 扫描光束（hero 内） */
+  .beam {
+    position: absolute; top: -20%; bottom: -20%; width: 140px;
+    background: linear-gradient(90deg, transparent, rgba(143,180,255,.12), transparent);
+    transform: rotate(18deg); pointer-events: none; animation: scan 7s ease-in-out infinite;
+  }
+  @keyframes scan { 0% { left: -30%; } 50% { left: 110%; } 100% { left: -30%; } }
+
+  /* ============ 通用组件（新版主题） ============ */
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 40px; position: relative; z-index: 2; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; padding: 10px 22px; border-radius: 6px;
+    font-size: 14px; cursor: pointer; transition: all .15s; border: 1px solid transparent; user-select: none; font-family: inherit;
+  }
+  .btn-primary { background: var(--primary); color: #fff; box-shadow: 0 4px 14px rgba(25,53,195,.28); }
+  .btn-primary:hover { background: var(--primary-2); }
+  .btn-plain { background: #fff; color: var(--primary); border-color: var(--primary); }
+  .btn-plain:hover { background: #E8EBF9; }
+  .btn-ghost { background: transparent; color: #DCE6F7; border-color: rgba(255,255,255,.35); }
+  .btn-ghost:hover { background: rgba(255,255,255,.1); color: #fff; }
+
+  .card {
+    background: #fff; border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(13,36,71,.05); transition: box-shadow .18s, transform .18s;
+  }
+  .card:hover { box-shadow: 0 8px 24px rgba(13,36,71,.10); }
+
+  .tag { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 4px; font-size: 12px; line-height: 1.6; }
+  .tag-blue { background: #E8EBF9; color: var(--primary); }
+  .tag-green { background: #E8F7EE; color: #1E9E54; }
+  .tag-orange { background: #FEF3E2; color: #C77A12; }
+  .tag-red { background: #FDECEC; color: #D53A3A; }
+  .tag-gray { background: #F0F2F5; color: #7A8699; }
+  .tag-red-solid { background: var(--accent); color: #fff; }
+
+  .section-head { text-align: center; padding: 52px 0 6px; }
+  .section-head h2 { font-size: 28px; font-weight: 700; color: var(--heading); }
+  .section-head .en { font-size: 12px; color: var(--muted); letter-spacing: 3px; margin-top: 4px; text-transform: uppercase; }
+  .section-head .line { width: 44px; height: 3px; background: var(--primary); margin: 14px auto 0; border-radius: 2px; }
+
+  /* 深色导航（复用） */
+  .nav {
+    height: 60px; display: flex; align-items: center; padding: 0 24px;
+    background: linear-gradient(90deg, #081426 0%, #0D2447 55%, #0A1A3C 100%);
+    border-bottom: 1px solid rgba(255,255,255,.06);
+  }
+  .nav .brand { display: flex; align-items: center; gap: 9px; margin-right: 28px; cursor: pointer; }
+  .nav .logo {
+    width: 28px; height: 28px; border-radius: 7px; color: #fff; font-size: 14px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #1935C3, #1B70F0); box-shadow: 0 2px 6px rgba(27,112,240,.4);
+  }
+  .nav .name { color: #fff; font-size: 16px; font-weight: 600; letter-spacing: .4px; }
+  .nav .menu { display: flex; height: 100%; }
+  .nav .menu .item {
+    padding: 0 18px; height: 100%; display: flex; align-items: center; gap: 6px;
+    color: #B9C6E4; font-size: 14px; cursor: pointer; position: relative; white-space: nowrap; transition: color .15s;
+  }
+  .nav .menu .item:hover { color: #fff; }
+  .nav .menu .item.active { color: #fff; }
+  .nav .menu .item.active::after {
+    content: ""; position: absolute; left: 18px; right: 18px; bottom: 0; height: 2.5px;
+    background: #1B70F0; border-radius: 2px;
+  }
+  .nav .spacer { flex: 1; }
+  .nav .user { display: flex; align-items: center; gap: 9px; color: #E8EEF8; font-size: 13px; cursor: pointer; }
+  .nav .avatar {
+    width: 28px; height: 28px; border-radius: 50%; color: #fff; font-size: 12px; font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #1935C3, #1B70F0);
+  }
+
+  /* 页面内标题 */
+  .page-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  .page-title h3 { font-size: 20px; font-weight: 700; color: var(--heading); }
+  .divider { height: 1px; background: var(--border); margin: 0 0 20px; }
+
+  /* 表格 */
+  table.grid { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.grid th {
+    text-align: left; padding: 10px 12px; background: #F5F8FC; color: #585E7D;
+    font-weight: 600; border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  table.grid td { padding: 11px 12px; border-bottom: 1px solid #F0F3F8; color: #50586A; }
+  table.grid tr:hover td { background: #F8FAFE; }
+  .link { color: var(--primary); cursor: pointer; }
+  .link:hover { color: var(--primary-2); }
+
+  /* ============ 主页 hero ============ */
+  .hero {
+    position: relative; overflow: hidden; padding: 56px 40px 76px; color: #fff;
+    background:
+      radial-gradient(1100px 420px at 82% -10%, rgba(27,112,240,.38) 0%, transparent 60%),
+      radial-gradient(800px 480px at -8% 118%, rgba(25,53,195,.55) 0%, transparent 55%),
+      linear-gradient(118deg, #081426 0%, #0D2447 48%, #102B5E 100%);
+  }
+  .hero .grid {
+    position: absolute; inset: 0; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px);
+    background-size: 52px 52px;
+    mask-image: radial-gradient(ellipse at 70% 40%, #000 20%, transparent 72%);
+    -webkit-mask-image: radial-gradient(ellipse at 70% 40%, #000 20%, transparent 72%);
+  }
+  .hero-inner { position: relative; z-index: 2; display: flex; align-items: center; gap: 48px; max-width: 1180px; margin: 0 auto; }
+  .hero-left { flex: 1.1; }
+  .hero .kicker {
+    display: inline-block; font-size: 13px; letter-spacing: 1px; color: #8FB4FF;
+    border: 1px solid rgba(143,180,255,.4); padding: 4px 14px; border-radius: 999px; margin-bottom: 18px;
+  }
+  .hero h1 { font-size: 40px; font-weight: 700; line-height: 1.25; letter-spacing: .5px; }
+  .hero .sub { margin-top: 16px; font-size: 16px; color: #B9C6E4; max-width: 520px; }
+  .hero .actions { margin-top: 30px; display: flex; gap: 16px; }
+  .hero-right { flex: .9; }
+  .hero-right .shot {
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.15); border-radius: 12px;
+    padding: 22px; box-shadow: 0 20px 50px rgba(3,12,30,.5);
+  }
+  .hero-right .shot .row { display: flex; gap: 10px; margin-bottom: 10px; }
+  .hero-right .shot .bar { height: 10px; border-radius: 5px; background: rgba(143,180,255,.25); }
+  .hero-right .shot .bar.b1 { width: 40%; background: rgba(143,180,255,.5); }
+  .hero-right .shot .bar.b2 { width: 70%; }
+  .hero-right .shot .bar.b3 { width: 55%; }
+  .hero-right .shot .chip { display: inline-block; padding: 3px 9px; border-radius: 5px; font-size: 11px; color: #C7D3F5; background: rgba(255,255,255,.1); margin: 2px 4px 0 0; }
+
+  /* 数据条 */
+  .metrics { position: relative; z-index: 2; margin: -34px auto 0; max-width: 1180px; padding: 0 40px; }
+  .metrics-inner {
+    display: grid; grid-template-columns: repeat(4, 1fr); background: #fff;
+    border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+    box-shadow: 0 10px 34px rgba(13,36,71,.10);
+  }
+  .metric { text-align: center; padding: 26px 10px; position: relative; }
+  .metric + .metric::before { content: ""; position: absolute; left: 0; top: 22%; bottom: 22%; width: 1px; background: #EDF0F5; }
+  .metric .num { font-size: 34px; font-weight: 700; color: var(--primary); line-height: 1.1; }
+  .metric .num small { font-size: 17px; color: var(--primary); margin-left: 2px; }
+  .metric .lbl { margin-top: 8px; font-size: 13.5px; color: var(--muted); }
+
+  /* 功能模块 */
+  .capabilities { padding: 10px 0 20px; }
+  .feat-row { display: flex; align-items: center; gap: 56px; padding: 30px 0; }
+  .feat-row.reverse { flex-direction: row-reverse; }
+  .feat-img { flex: 1; }
+  .feat-img .box {
+    height: 200px; border-radius: 12px; position: relative; overflow: hidden;
+    background: linear-gradient(135deg, #E8EBF9, #D6DDF5);
+    border: 1px solid #D9E0F2; display: flex; align-items: center; justify-content: center;
+  }
+  .feat-img .box::before {
+    content: ""; position: absolute; inset: 0;
+    background-image: linear-gradient(rgba(25,53,195,.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(25,53,195,.06) 1px, transparent 1px); background-size: 26px 26px;
+  }
+  .feat-img .icon {
+    width: 74px; height: 74px; border-radius: 18px; color: #fff; font-size: 30px; z-index: 2;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #1935C3, #1B70F0); box-shadow: 0 10px 26px rgba(25,53,195,.32);
+  }
+  .feat-txt { flex: 1; position: relative; padding-left: 16px; }
+  .feat-row.reverse .feat-txt { padding-left: 0; padding-right: 16px; }
+  .feat-txt .no { position: absolute; left: -6px; top: -40px; font-size: 78px; font-weight: 700; color: #EFF3FB; line-height: 1; z-index: 0; user-select: none; }
+  .feat-txt h3 { font-size: 23px; font-weight: 700; color: var(--heading); position: relative; z-index: 1; }
+  .feat-txt .desc { margin-top: 12px; font-size: 14px; color: #585E7D; line-height: 1.85; position: relative; z-index: 1; }
+  .more { display: inline-flex; align-items: center; gap: 6px; margin-top: 18px; color: var(--primary); font-size: 14px; cursor: pointer; position: relative; z-index: 1; }
+  .more:hover { color: var(--primary-2); }
+
+  /* 最近合同表 */
+  .recent { padding-bottom: 46px; }
+  .table-card { background: #fff; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: 0 2px 10px rgba(13,36,71,.05); }
+
+  /* 页脚 */
+  .footer { background: #081426; color: #9FB0C8; padding: 40px 0 28px; }
+  .f-top { display: flex; justify-content: space-between; align-items: center; padding-bottom: 22px; border-bottom: 1px solid rgba(255,255,255,.08); }
+  .f-brand { display: flex; align-items: center; gap: 10px; }
+  .f-logo { width: 30px; height: 30px; border-radius: 7px; background: linear-gradient(135deg,#1935C3,#1B70F0); color: #fff; font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 15px; }
+  .f-name { color: #fff; font-size: 16px; font-weight: 600; }
+  .f-links { display: flex; gap: 28px; font-size: 14px; }
+  .f-links span { cursor: pointer; }
+  .f-links span:hover { color: #fff; }
+  .f-bottom { padding-top: 18px; font-size: 12.5px; color: #6E7A95; text-align: center; }
+
+  /* ============ 内页布局 ============ */
+  .content { position: relative; z-index: 2; max-width: 1180px; margin: 0 auto; padding: 28px 40px 48px; }
+  .backbar { padding: 10px 40px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,.7); position: relative; z-index: 2; }
+  .backbar span { font-size: 14px; color: #5A6478; cursor: pointer; }
+  .backbar span:hover { color: var(--primary); }
+
+  /* 搜索卡片 */
+  .search-card { padding: 18px 20px 2px; margin-bottom: 16px; }
+  .search-card .frow { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin-bottom: 16px; }
+  .fld { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: #585E7D; }
+  .fld .lbl { white-space: nowrap; }
+  .input, .select {
+    height: 32px; border: 1px solid #DCE1EC; border-radius: 6px; padding: 0 12px; font-size: 13px;
+    color: #303133; background: #fff; font-family: inherit; outline: none; transition: border-color .15s, box-shadow .15s;
+  }
+  .input:focus, .select:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(25,53,195,.12); }
+  .select { appearance: none; padding-right: 28px; cursor: pointer; }
+
+  /* 上传拖拽区 */
+  .dropzone {
+    border: 2px dashed #C4CDE3; border-radius: 12px; padding: 42px 20px; text-align: center;
+    background: #FBFCFE; transition: all .18s; cursor: pointer; margin-bottom: 24px;
+  }
+  .dropzone:hover { border-color: var(--primary); background: #F5F8FF; }
+  .dropzone .ic { width: 56px; height: 56px; margin: 0 auto 14px; border-radius: 14px; color: #fff; font-size: 26px; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #1935C3, #1B70F0); }
+  .dropzone p { font-size: 15px; color: #4A5468; }
+  .dropzone p em { color: var(--primary); font-style: normal; }
+  .dropzone .hint { font-size: 12.5px; color: #8A93A6; margin-top: 6px; }
+  .form-row { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
+  .form-row .lbl { width: 88px; flex-shrink: 0; text-align: right; font-size: 13.5px; color: #4A5468; padding-top: 6px; }
+  .form-row .ctl { flex: 1; max-width: 560px; }
+  .form-row .ctl .input, .form-row .ctl .select { width: 100%; }
+  .form-row .hint2 { font-size: 12px; color: #8A93A6; margin-top: 5px; line-height: 1.5; }
+  .radio-row { display: flex; gap: 22px; font-size: 13.5px; color: #4A5468; }
+  .radio-row label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .radio-row .dot { width: 16px; height: 16px; border-radius: 50%; border: 1px solid #C4CDE3; display: inline-flex; align-items: center; justify-content: center; background: #fff; }
+  .radio-row label.on .dot { border-color: var(--primary); }
+  .radio-row label.on .dot::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--primary); }
+
+  /* 详情页 */
+  .meta-card { padding: 18px 20px; margin-bottom: 18px; }
+  .meta-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; font-size: 13px; }
+  .meta-grid .k { color: #8A93A6; }
+  .meta-grid .v { color: #303133; font-weight: 500; margin-top: 2px; }
+  .detail-cols { display: flex; gap: 18px; }
+  .detail-left { flex: 1.4; }
+  .detail-right { flex: 1; }
+  .tabbar { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 10px 10px 0 0; background: #fff; overflow: hidden; }
+  .tabbar .tab { padding: 11px 18px; font-size: 13.5px; color: #585E7D; cursor: pointer; border-right: 1px solid var(--border); }
+  .tabbar .tab.on { background: var(--primary); color: #fff; }
+  .tab-panel { background: #fff; border: 1px solid var(--border); border-top: none; border-radius: 0 0 10px 10px; padding: 18px; min-height: 320px; }
+  .alert { padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+  .alert.warn { background: #FEF3E2; color: #A56A0B; border: 1px solid #F6DFB4; }
+  .alert.info { background: #E8EBF9; color: var(--primary); border: 1px solid #D1D7F3; }
+  .pdf-box {
+    background: #fff; border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+  }
+  .pdf-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 14px; color: var(--heading); font-weight: 600; }
+  .pdf-page {
+    height: 240px; margin: 16px; background: #fff; border: 1px solid #E6EAF2; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; color: #B4BCCB; font-size: 13px;
+    background-image: linear-gradient(#F4F6FA 1px, transparent 1px), linear-gradient(90deg, #F4F6FA 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+
+  /* 登录页 */
+  .login-bg {
+    min-height: 560px; display: flex; align-items: center; justify-content: center; position: relative;
+    background:
+      radial-gradient(900px 460px at 80% -10%, rgba(27,112,240,.35) 0%, transparent 60%),
+      radial-gradient(700px 460px at 0% 110%, rgba(25,53,195,.5) 0%, transparent 55%),
+      linear-gradient(120deg, #081426 0%, #0D2447 50%, #0A1A3C 100%);
+  }
+  .login-card {
+    width: 400px; background: #fff; border-radius: 14px; padding: 34px 34px 26px; position: relative; z-index: 2;
+    box-shadow: 0 24px 70px rgba(3,12,30,.5);
+  }
+  .login-card .title { text-align: center; font-size: 19px; font-weight: 700; color: var(--heading); margin-bottom: 4px; }
+  .login-card .title-en { text-align: center; font-size: 11px; letter-spacing: 2px; color: #A6AFC2; text-transform: uppercase; margin-bottom: 22px; }
+  .login-tabs { display: flex; margin-bottom: 18px; border-bottom: 1px solid var(--border); }
+  .login-tabs .t { flex: 1; text-align: center; padding: 9px 0; font-size: 14px; color: #7A8699; cursor: pointer; position: relative; }
+  .login-tabs .t.on { color: var(--primary); font-weight: 600; }
+  .login-tabs .t.on::after { content: ""; position: absolute; left: 30%; right: 30%; bottom: -1px; height: 2.5px; background: var(--primary); border-radius: 2px; }
+  .login-fld { margin-bottom: 14px; }
+  .login-fld .lbl { font-size: 13px; color: #4A5468; margin-bottom: 6px; }
+  .login-fld .input { width: 100%; height: 38px; }
+  .login-btn { width: 100%; height: 40px; background: var(--primary); color: #fff; border: none; border-radius: 7px; font-size: 15px; cursor: pointer; font-family: inherit; box-shadow: 0 4px 14px rgba(25,53,195,.28); }
+  .login-btn:hover { background: var(--primary-2); }
+  .guest-row { display: flex; align-items: center; gap: 10px; font-size: 13px; color: #585E7D; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .switch { width: 40px; height: 22px; border-radius: 999px; background: var(--primary); position: relative; cursor: pointer; flex-shrink: 0; }
+  .switch::after { content: ""; position: absolute; right: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; }
+  .guest-hint { margin-left: auto; font-size: 12px; color: #8A93A6; }
+</style>
+</head>
+<body>
+<div class="preview-doc">
+
+  <!-- ===== 文档头 ===== -->
+  <div class="doc-head">
+    <span class="tag">A24 · FRONTEND REDESIGN PREVIEW</span>
+    <h1>全页面美化预览 · V1</h1>
+    <p class="sub">对齐恒天深藏蓝品牌 + 科技感背景。下面是五个页面的新版视觉，均为静态示意，供组员投票。确认方向后再落地到代码。</p>
+  </div>
+
+  <div class="note">
+    <b>本次预览的两大变化：</b><br>
+    1. <span class="hl">主页背景去纯白、加科技感</span> —— 全局换成浅蓝白底 <b>#F8FAFD</b> + 淡蓝色网格纹理 + 呼吸光斑(orb) + 上浮粒子，hero 增加扫描光束；页面不再是大片死白。<br>
+    2. <span class="hl">全站主题统一为恒天深藏蓝</span> —— 主色从 Element Plus 默认蓝 <b>#409EFF</b> 换成 <b>#1935C3</b>（hover #1B70F0），强调红 <b>#E60012</b>，按钮/链接/标签/选中态全部换肤，与主页风格一致。<br>
+    <span class="hl">背景强度可调</span>：当前为「浅色科技」方案（专业、贴合恒天官网，适合法务场景）。如需更炫，可再出「深色沉浸」方案对比。
+  </div>
+
+  <!-- ============================================================
+       页面 1：主页 HomeView
+  ============================================================ -->
+  <div class="page-label">
+    <span class="idx">1</span>
+    <h2>主页 · 首页</h2>
+    <span class="path">HomeView.vue</span>
+    <span class="desc">科技感背景（去纯白）+ 深蓝 hero</span>
+  </div>
+  <div class="browser">
+    <div class="browser-bar">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <div class="urlbar">localhost:5173 /</div>
+    </div>
+    <div class="browser-body">
+
+      <!-- 导航 -->
+      <div class="nav">
+        <div class="brand"><span class="logo">A</span><span class="name">A24 合同审核系统</span></div>
+        <div class="menu">
+          <span class="item active">首页</span>
+          <span class="item">合同管理</span>
+          <span class="item">审核中心</span>
+          <span class="item">模板管理</span>
+        </div>
+        <div class="spacer"></div>
+        <div class="user"><span class="avatar">张</span> 张同学 · 上传者</div>
+      </div>
+
+      <!-- hero -->
+      <div class="hero">
+        <div class="grid"></div>
+        <div class="beam"></div>
+        <div class="hero-inner">
+          <div class="hero-left">
+            <span class="kicker">欢迎回来，张同学</span>
+            <h1>A24 合同智能审核系统</h1>
+            <p class="sub">面向企业法务与风控的 AI 原生合同审核平台，实现「上传 → 分类 → 要素抽取 → 风险识别 → 修改建议 → 审核报告」全流程闭环。</p>
+            <div class="actions">
+              <span class="btn btn-primary">上传合同</span>
+              <span class="btn btn-ghost">我的合同</span>
+            </div>
+          </div>
+          <div class="hero-right">
+            <div class="shot">
+              <div class="row"><span class="bar b1"></span><span class="bar"></span></div>
+              <div class="row"><span class="bar"></span><span class="bar b2"></span></div>
+              <div class="row"><span class="bar b3"></span><span class="bar"></span></div>
+              <div>
+                <span class="chip">风险识别</span><span class="chip">要素抽取</span><span class="chip">条款比对</span><span class="chip">报告生成</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 数据条（悬浮卡片） -->
+      <div class="metrics">
+        <div class="metrics-inner">
+          <div class="metric"><div class="num">128<small>份</small></div><div class="lbl">今日审核</div></div>
+          <div class="metric"><div class="num">6<small>份</small></div><div class="lbl">待处理</div></div>
+          <div class="metric"><div class="num">342<small>条</small></div><div class="lbl">本月风险</div></div>
+          <div class="metric"><div class="num">92.4<small>%</small></div><div class="lbl">通过率</div></div>
+        </div>
+      </div>
+
+      <!-- 科技感背景主体 -->
+      <div class="tech-bg">
+        <div class="tech-grid"></div>
+        <div class="tech-orb o1"></div><div class="tech-orb o2"></div><div class="tech-orb o3"></div>
+        <span class="particle" style="left:8%;top:70%;width:5px;height:5px;animation-duration:8s;"></span>
+        <span class="particle" style="left:22%;top:80%;width:4px;height:4px;animation-duration:10s;animation-delay:2s;"></span>
+        <span class="particle" style="left:70%;top:74%;width:6px;height:6px;animation-duration:9s;animation-delay:1s;"></span>
+        <span class="particle" style="left:88%;top:66%;width:4px;height:4px;animation-duration:11s;animation-delay:3s;"></span>
+
+        <!-- 核心能力 -->
+        <div class="capabilities">
+          <div class="wrap">
+            <div class="section-head"><h2>核心能力</h2><div class="en">Core Capabilities</div><div class="line"></div></div>
+            <div class="feat-row">
+              <div class="feat-img"><div class="box"><div class="icon">📁</div></div></div>
+              <div class="feat-txt"><span class="no">01</span><h3>智能合同分类</h3><p class="desc">基于 RAG 检索范本 + 大模型推理，将合同自动归类到民法典 11 类法理分类，并叠加「服务外包」等业务标签。</p><span class="more">进入合同列表 →</span></div>
+            </div>
+            <div class="feat-row reverse">
+              <div class="feat-img"><div class="box"><div class="icon">⚠️</div></div></div>
+              <div class="feat-txt"><span class="no">02</span><h3>风险识别与预警</h3><p class="desc">「LLM 只抽事实证据 + 确定性规则裁决」架构，覆盖 R01–R13 风险规则，风险判定可解释、可溯源。</p><span class="more">查看审核历史 →</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 最近合同 -->
+        <div class="recent">
+          <div class="wrap">
+            <div class="section-head"><h2>最近合同</h2><div class="line"></div></div>
+            <div class="table-card">
+              <table class="grid">
+                <thead><tr><th>文件名</th><th>类型</th><th>状态</th><th>风险等级</th><th>上传时间</th></tr></thead>
+                <tbody>
+                  <tr><td><span class="link">2026年软件外包服务合同.docx</span></td><td><span class="tag tag-blue">技术服务</span></td><td><span class="tag tag-green">审核完成</span></td><td><span class="tag tag-orange">中风险</span></td><td>09-11 18:42</td></tr>
+                  <tr><td><span class="link">房屋租赁合同（总部大楼）.pdf</span></td><td><span class="tag tag-blue">租赁合同</span></td><td><span class="tag tag-orange">审核中</span></td><td>—</td><td>09-11 17:20</td></tr>
+                  <tr><td><span class="link">保密协议-供应商NDA.docx</span></td><td><span class="tag tag-blue">保密协议</span></td><td><span class="tag tag-green">审核完成</span></td><td><span class="tag tag-green">低风险</span></td><td>09-11 15:08</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- 页脚 -->
+        <div class="footer">
+          <div class="wrap">
+            <div class="f-top">
+              <div class="f-brand"><span class="f-logo">A</span><span class="f-name">A24 合同审核系统</span></div>
+              <div class="f-links"><span>合同管理</span><span>审核中心</span><span>模板管理</span></div>
+            </div>
+            <div class="f-bottom">© 2026 A24 · 海底汪汪队 —— 命题企业：网新恒天</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       页面 2：登录页 LoginView
+  ============================================================ -->
+  <div class="page-label">
+    <span class="idx">2</span><h2>登录 / 注册页</h2>
+    <span class="path">LoginView.vue</span>
+    <span class="desc">深蓝科技渐变背景 + 白卡片</span>
+  </div>
+  <div class="browser">
+    <div class="browser-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><div class="urlbar">localhost:5173 /login</div></div>
+    <div class="browser-body">
+      <div class="login-bg">
+        <div class="tech-grid"></div>
+        <div class="tech-orb o1"></div><div class="tech-orb o2"></div>
+        <div class="beam"></div>
+        <div class="login-card">
+          <div class="title">A24 合同智能审核系统</div>
+          <div class="title-en">Contract Audit Platform</div>
+          <div class="login-tabs"><span class="t on">登录</span><span class="t">注册</span></div>
+          <div class="login-fld"><div class="lbl">用户名</div><input class="input" placeholder="请输入用户名"></div>
+          <div class="login-fld"><div class="lbl">密码</div><input class="input" type="password" placeholder="请输入密码"></div>
+          <button class="login-btn">登 录</button>
+          <div class="guest-row">
+            <span>游客模式</span><span class="switch"></span>
+            <span class="guest-hint">关闭后需登录才能访问</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       页面 3：合同列表 ContractList
+  ============================================================ -->
+  <div class="page-label">
+    <span class="idx">3</span><h2>合同列表</h2>
+    <span class="path">ContractList.vue</span>
+    <span class="desc">深蓝主题搜索栏 + 表格</span>
+  </div>
+  <div class="browser">
+    <div class="browser-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><div class="urlbar">localhost:5173 /contracts</div></div>
+    <div class="browser-body tech-bg">
+      <div class="tech-grid"></div>
+      <div class="nav">
+        <div class="brand"><span class="logo">A</span><span class="name">A24 合同审核系统</span></div>
+        <div class="menu"><span class="item">首页</span><span class="item active">合同管理</span><span class="item">审核中心</span></div>
+        <div class="spacer"></div><div class="user"><span class="avatar">张</span> 张同学</div>
+      </div>
+      <div class="backbar"><span>← 返回</span></div>
+      <div class="content">
+        <div class="page-title"><h3>合同列表</h3><span class="btn btn-primary">+ 上传合同</span></div>
+        <div class="divider"></div>
+        <div class="card search-card">
+          <div class="frow">
+            <div class="fld"><span class="lbl">合同名称</span><input class="input" placeholder="输入合同名称搜索" style="width:200px"></div>
+            <div class="fld"><span class="lbl">合同类型</span><select class="select"><option>全部类型</option><option>买卖合同</option><option>技术合同</option></select></div>
+            <div class="fld"><span class="lbl">审核状态</span><select class="select"><option>全部状态</option><option>审核完成</option></select></div>
+            <span class="btn btn-primary">搜索</span>
+            <span class="btn btn-plain">重置</span>
+          </div>
+        </div>
+        <div class="card table-card">
+          <table class="grid">
+            <thead><tr><th>文件名</th><th>合同类型</th><th>审核状态</th><th>上传时间</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr><td><span class="link">2026年软件外包服务合同.docx</span></td><td><span class="tag tag-blue">技术服务</span> <span class="tag tag-orange">服务外包</span></td><td><span class="tag tag-green">审核完成</span></td><td>09-11 18:42</td><td><span class="link">查看</span> <span class="link">审核结果</span></td></tr>
+              <tr><td><span class="link">房屋租赁合同.pdf</span></td><td><span class="tag tag-blue">租赁合同</span></td><td><span class="tag tag-orange">审核中</span></td><td>09-11 17:20</td><td><span class="link">查看</span></td></tr>
+              <tr><td><span class="link">保密协议-NDA.docx</span></td><td><span class="tag tag-blue">保密协议</span></td><td><span class="tag tag-green">审核完成</span></td><td>09-11 15:08</td><td><span class="link">查看</span> <span class="link">审核结果</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       页面 4：合同上传 ContractUpload
+  ============================================================ -->
+  <div class="page-label">
+    <span class="idx">4</span><h2>合同上传</h2>
+    <span class="path">ContractUpload.vue</span>
+    <span class="desc">拖拽上传区 + 深蓝主题表单</span>
+  </div>
+  <div class="browser">
+    <div class="browser-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><div class="urlbar">localhost:5173 /contracts/upload</div></div>
+    <div class="browser-body tech-bg">
+      <div class="tech-grid"></div>
+      <div class="nav">
+        <div class="brand"><span class="logo">A</span><span class="name">A24 合同审核系统</span></div>
+        <div class="menu"><span class="item">首页</span><span class="item active">合同管理</span><span class="item">审核中心</span></div>
+        <div class="spacer"></div><div class="user"><span class="avatar">张</span> 张同学</div>
+      </div>
+      <div class="backbar"><span>← 返回</span></div>
+      <div class="content">
+        <div class="page-title"><h3>合同上传</h3></div>
+        <div class="divider"></div>
+        <div class="card" style="padding:24px;">
+          <div class="dropzone">
+            <div class="ic">↑</div>
+            <p>将合同文件拖拽到此处，或 <em>点击选择文件</em></p>
+            <div class="hint">支持 .docx / .pdf / 图片(jpg/png/tiff) 格式，单文件最大 10MB</div>
+          </div>
+          <div class="form-row"><div class="lbl">合同名称</div><div class="ctl"><input class="input" placeholder="留空则使用原文件名"></div></div>
+          <div class="form-row"><div class="lbl">合同类型</div><div class="ctl"><select class="select"><option>自动识别（推荐）</option><option>买卖合同</option><option>技术合同</option></select><div class="hint2">选择"自动识别"将由 AI 自动判定合同类型</div></div></div>
+          <div class="form-row"><div class="lbl">审核模式</div><div class="ctl"><div class="radio-row"><label class="on"><span class="dot"></span>精细审核（推荐）</label><label><span class="dot"></span>快速初筛</label></div><div class="hint2">精细审核（证据抽取 + 规则裁决，准确）｜快速初筛（纯规则引擎，仅作粗筛）</div></div></div>
+          <div class="form-row"><div class="lbl"></div><div class="ctl"><span class="btn btn-primary">开始上传</span> <span class="btn btn-plain">重置</span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       页面 5：合同详情 ContractDetail
+  ============================================================ -->
+  <div class="page-label">
+    <span class="idx">5</span><h2>合同详情</h2>
+    <span class="path">ContractDetail.vue</span>
+    <span class="desc">左信息 + 右 PDF 预览，深蓝主题</span>
+  </div>
+  <div class="browser">
+    <div class="browser-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><div class="urlbar">localhost:5173 /contracts/42</div></div>
+    <div class="browser-body tech-bg">
+      <div class="tech-grid"></div>
+      <div class="nav">
+        <div class="brand"><span class="logo">A</span><span class="name">A24 合同审核系统</span></div>
+        <div class="menu"><span class="item">首页</span><span class="item active">合同管理</span><span class="item">审核中心</span></div>
+        <div class="spacer"></div><div class="user"><span class="avatar">张</span> 张同学</div>
+      </div>
+      <div class="backbar"><span>← 返回</span></div>
+      <div class="content">
+        <div class="card meta-card">
+          <div class="meta-grid">
+            <div><div class="k">文件名</div><div class="v"><span class="tag tag-blue">2026年软件外包服务合同.docx</span></div></div>
+            <div><div class="k">合同类型</div><div class="v">技术服务 <span class="tag tag-orange">服务外包</span></div></div>
+            <div><div class="k">上传时间</div><div class="v">09-11 18:42</div></div>
+            <div><div class="k">页数</div><div class="v">12 页</div></div>
+            <div><div class="k">审核状态</div><div class="v"><span class="tag tag-green">审核完成</span></div></div>
+          </div>
+        </div>
+        <div class="detail-cols">
+          <div class="detail-left">
+            <div class="tabbar"><span class="tab">原始文本</span><span class="tab on">风险详情</span><span class="tab">条款比对</span><span class="tab">审核报告</span></div>
+            <div class="tab-panel">
+              <div class="alert warn">⚠ 共检测到 8 条风险，高风险 2、中风险 4、低风险 2</div>
+              <table class="grid">
+                <thead><tr><th>等级</th><th>类别</th><th>定位</th><th>涉及条款</th><th>置信度</th></tr></thead>
+                <tbody>
+                  <tr><td><span class="tag tag-red">高风险</span></td><td>违约责任</td><td>第5条</td><td>违约金约定过高</td><td>92%</td></tr>
+                  <tr><td><span class="tag tag-red">高风险</span></td><td>付款条款</td><td>第3条</td><td>付款周期过长</td><td>88%</td></tr>
+                  <tr><td><span class="tag tag-orange">中风险</span></td><td>保密条款</td><td>第8条</td><td>保密期限不明确</td><td>74%</td></tr>
+                </tbody>
+              </table>
+              <div style="margin-top:14px;display:flex;gap:8px;"><span class="btn btn-primary">全屏查看结果</span><span class="btn btn-plain">改条款</span></div>
+            </div>
+          </div>
+          <div class="detail-right">
+            <div class="pdf-box">
+              <div class="pdf-head"><span>合同原文</span><span style="font-size:12px;color:#8A93A6">第 1 / 12 页</span></div>
+              <div class="pdf-page">PDF 预览区域</div>
+              <div style="padding:0 16px 14px;font-size:13px;color:#585E7D;">当前页条款摘要：甲方委托乙方提供软件开发服务，服务期限 12 个月…</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

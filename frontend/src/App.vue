@@ -1,5 +1,8 @@
 <template>
   <div id="app">
+    <!-- 科技感背景层（浅蓝白 + 网格 + 光斑，登录页/首页 hero 用自己的深色背景覆盖） -->
+    <div class="app-bg" aria-hidden="true"></div>
+
     <!-- 顶部导航栏 — 登录页不显示 -->
     <el-menu
       v-if="showNav"
@@ -157,13 +160,36 @@ function handleLogout() {
 /* ── 全局样式 ── */
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  background: #f0f2f5;
+  font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "微软雅黑", -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: #F8FAFD;
   min-height: 100vh;
 }
 </style>
 
 <style scoped>
+/* ── 科技感背景层 ── */
+.app-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(900px 420px at 12% 6%, rgba(27, 112, 240, 0.10), transparent 60%),
+    radial-gradient(760px 460px at 88% 22%, rgba(25, 53, 195, 0.12), transparent 62%),
+    radial-gradient(900px 520px at 50% 108%, rgba(27, 112, 240, 0.08), transparent 58%);
+}
+.app-bg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(25, 53, 195, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(25, 53, 195, 0.05) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: linear-gradient(#000 0%, transparent 85%);
+  -webkit-mask-image: linear-gradient(#000 0%, transparent 85%);
+}
+
 /* ── 导航栏（深色，恒天风格） ── */
 .app-nav {
   position: sticky;

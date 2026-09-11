@@ -1,7 +1,36 @@
 <template>
   <div class="page-container">
-    <h3>审核结果</h3>
-    <el-divider />
+    <!-- 页头 -->
+    <div class="a24-page-header">
+      <div>
+        <div class="crumb">首页 / 审核中心 / <b>审核历史</b></div>
+        <div class="title-row">
+          <span class="icon"><el-icon><Checked /></el-icon></span>
+          <h3>审核历史</h3>
+        </div>
+        <div class="desc">查看已完成审核的合同，展开行可查看风险明细</div>
+      </div>
+    </div>
+
+    <!-- KPI 统计 -->
+    <div class="a24-kpi-grid">
+      <div class="a24-kpi">
+        <span class="ic" style="background:#E8EBF9"><el-icon><Checked /></el-icon></span>
+        <div><div class="num">{{ pagination.total }}</div><div class="lbl">已审核合同</div></div>
+      </div>
+      <div class="a24-kpi">
+        <span class="ic" style="background:#FEF3E2"><el-icon><Clock /></el-icon></span>
+        <div><div class="num">{{ stats.pending }}</div><div class="lbl">待验收</div></div>
+      </div>
+      <div class="a24-kpi">
+        <span class="ic" style="background:#FDECEC"><el-icon><Warning /></el-icon></span>
+        <div><div class="num">{{ stats.month_risks }}</div><div class="lbl">本月风险</div></div>
+      </div>
+      <div class="a24-kpi">
+        <span class="ic" style="background:#E8F7EE"><el-icon><DataAnalysis /></el-icon></span>
+        <div><div class="num">{{ stats.approval_rate }}<small style="font-size:16px">%</small></div><div class="lbl">通过率</div></div>
+      </div>
+    </div>
 
     <!-- 加载状态 -->
     <div v-if="loading" class="loading-state">
@@ -130,7 +159,9 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import { Checked, Clock, Warning, DataAnalysis } from '@element-plus/icons-vue'
 import { getContractList, getAuditResult } from '../api/contract.js'
+import request from '../utils/request.js'
 import { formatTime } from '../utils/format.js'
 import { typeLabel } from '../constants/contractTypes.js'
 
@@ -143,6 +174,19 @@ const pagination = reactive({
   page_size: 10,
   total: 0,
 })
+
+// ── KPI 统计 ──
+const stats = reactive({ pending: 0, month_risks: 0, approval_rate: 0 })
+
+async function fetchStats() {
+  try {
+    const s = await request.get('/stats/dashboard')
+    const d = s.data || {}
+    stats.pending = d.pending ?? 0
+    stats.month_risks = d.month_risks ?? 0
+    stats.approval_rate = d.approval_rate ?? 0
+  } catch { /* 后端未启动时保持默认值 */ }
+}
 
 // ── 展开行状态（记录哪些行已加载过风险数据）──
 const expandingRows = reactive({})
@@ -207,7 +251,10 @@ async function handleExpand(row, expandedRows) {
   }
 }
 
-onMounted(() => fetchList())
+onMounted(() => {
+  fetchList()
+  fetchStats()
+})
 </script>
 
 <style scoped>

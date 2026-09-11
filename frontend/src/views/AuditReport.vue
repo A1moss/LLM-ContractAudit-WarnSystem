@@ -1,7 +1,16 @@
 <template>
   <div class="page-container">
-    <h3>审核报告</h3>
-    <el-divider />
+    <!-- 页头 -->
+    <div class="a24-page-header">
+      <div>
+        <div class="crumb">首页 / 审核中心 / <b>审核报告</b></div>
+        <div class="title-row">
+          <span class="icon"><el-icon><DataAnalysis /></el-icon></span>
+          <h3>审核报告</h3>
+        </div>
+        <div class="desc">查看每份合同的风险评分与报告，点击左侧列表切换</div>
+      </div>
+    </div>
 
     <!-- 加载状态 -->
     <div v-if="loading" class="loading-state">
@@ -28,7 +37,7 @@
     <template v-else>
       <el-row :gutter="20">
         <!-- 左侧：合同列表 -->
-        <el-col :span="selectedContract ? 8 : 24">
+        <el-col :xs="24" :md="selectedContract ? 8 : 24">
           <el-table
             :data="contracts"
             stripe
@@ -47,12 +56,12 @@
             <el-table-column label="审核时间" width="160">
               <template #default="{ row }">{{ formatTime(row.updated_at) }}</template>
             </el-table-column>
-            <el-table-column label="风险评分" width="100" align="center">
+            <el-table-column label="风险分" width="110" align="center">
               <template #default="{ row }">
                 <el-tag
                   :type="row._score >= 60 ? 'danger' : row._score >= 30 ? 'warning' : 'success'"
                   size="small"
-                >{{ row._score ?? '—' }}</el-tag>
+                >{{ row._score != null ? row._score + ' 分' : '—' }}</el-tag>
               </template>
             </el-table-column>
             <el-table-column label="操作" width="100">
@@ -78,7 +87,7 @@
         </el-col>
 
         <!-- 右侧：报告详情 -->
-        <el-col v-if="selectedContract" :span="16">
+        <el-col v-if="selectedContract" :xs="24" :md="16">
           <el-card shadow="hover">
             <template #header>
               <div class="report-detail-header">
@@ -99,18 +108,35 @@
             </div>
 
             <template v-else-if="reportData">
-              <!-- 综合评分 -->
-              <el-descriptions :column="4" border size="small" class="report-summary">
-                <el-descriptions-item label="综合评分">
-                  <el-tag
-                    :type="reportData.risk_score >= 60 ? 'danger' : reportData.risk_score >= 30 ? 'warning' : 'success'"
-                    size="large"
-                  >{{ reportData.risk_score }} 分</el-tag>
-                </el-descriptions-item>
-                <el-descriptions-item label="高风险">{{ reportData.high_risk_count }} 条</el-descriptions-item>
-                <el-descriptions-item label="中风险">{{ reportData.mid_risk_count }} 条</el-descriptions-item>
-                <el-descriptions-item label="低风险">{{ reportData.low_risk_count }} 条</el-descriptions-item>
-              </el-descriptions>
+              <!-- 评分环 + 高中低风险统计 -->
+              <div class="report-score-row">
+                <el-progress
+                  type="circle"
+                  :percentage="reportData.risk_score"
+                  :width="116"
+                  :stroke-width="10"
+                  :color="scoreColor(reportData.risk_score)"
+                >
+                  <template #default>
+                    <div class="score-num">{{ reportData.risk_score }}</div>
+                    <div class="score-lbl">风险分</div>
+                  </template>
+                </el-progress>
+                <div class="report-stat-grid">
+                  <div class="a24-stat-card">
+                    <span class="ic" style="background:#FDECEC">🔴</span>
+                    <div><div class="n" style="color:#E60012">{{ reportData.high_risk_count }}</div><div class="l">高风险</div></div>
+                  </div>
+                  <div class="a24-stat-card">
+                    <span class="ic" style="background:#FEF3E2">🟠</span>
+                    <div><div class="n" style="color:#C77A12">{{ reportData.mid_risk_count }}</div><div class="l">中风险</div></div>
+                  </div>
+                  <div class="a24-stat-card">
+                    <span class="ic" style="background:#E8F7EE">🟢</span>
+                    <div><div class="n" style="color:#1E9E54">{{ reportData.low_risk_count }}</div><div class="l">低风险</div></div>
+                  </div>
+                </div>
+              </div>
 
               <!-- 图表区 -->
               <el-row :gutter="20" class="chart-row">
@@ -147,6 +173,7 @@
 
 <script setup>
 import { ref, reactive, nextTick, onMounted, onUnmounted } from 'vue'
+import { DataAnalysis } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import { getContractList, getAuditResult, getAuditReport } from '../api/contract.js'
@@ -310,6 +337,12 @@ function initCharts() {
   }
 }
 
+function scoreColor(score) {
+  if (score >= 60) return '#E60012'
+  if (score >= 30) return '#E6A23C'
+  return '#67C23A'
+}
+
 function disposeCharts() {
   pieChartInstance?.dispose()
   pieChartInstance = null
@@ -356,6 +389,32 @@ onUnmounted(() => disposeCharts())
 
 .report-summary {
   margin-bottom: 16px;
+}
+
+.report-score-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 16px;
+}
+
+.report-stat-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.score-num {
+  font-size: 26px;
+  font-weight: 700;
+  color: #131313;
+  line-height: 1.1;
+}
+
+.score-lbl {
+  font-size: 12px;
+  color: #8A93A6;
 }
 
 .chart-row {

@@ -1,83 +1,109 @@
 <template>
   <div class="page-container">
-    <h3>合同上传</h3>
-    <el-divider />
-
-    <el-card shadow="hover" class="upload-card">
-      <!-- 拖拽上传区 -->
-      <el-upload
-        ref="uploadRef"
-        class="upload-dragger"
-        drag
-        action="#"
-        :auto-upload="false"
-        :limit="1"
-        :accept="'.docx,.pdf,.jpg,.jpeg,.png,.tiff,.tif,.bmp'"
-        :on-change="handleFileChange"
-        :on-remove="handleFileRemove"
-        :file-list="fileList"
-      >
-        <el-icon class="upload-icon"><UploadFilled /></el-icon>
-        <div class="upload-text">
-          <p>将合同文件拖拽到此处，或 <em>点击选择文件</em></p>
-          <p class="upload-hint">支持 .docx / .pdf / 图片(jpg/png/tiff) 格式，单文件最大 10MB</p>
+    <!-- 页头 -->
+    <div class="a24-page-header">
+      <div>
+        <div class="crumb">首页 / 合同管理 / <b>上传合同</b></div>
+        <div class="title-row">
+          <span class="icon"><el-icon><UploadFilled /></el-icon></span>
+          <h3>合同上传</h3>
         </div>
-      </el-upload>
-
-      <!-- 合同信息表单 -->
-      <el-form
-        ref="formRef"
-        :model="form"
-        :rules="rules"
-        label-width="100px"
-        class="upload-form"
-      >
-        <el-form-item label="合同名称" prop="name">
-          <el-input
-            v-model="form.name"
-            placeholder="留空则使用原文件名"
-            maxlength="200"
-            show-word-limit
-          />
-        </el-form-item>
-
-        <el-form-item label="合同类型" prop="contract_type">
-          <el-select v-model="form.contract_type" placeholder="请选择合同类型" style="width: 100%;">
-            <el-option label="自动识别（推荐）" value="" />
-            <el-option v-for="t in CONTRACT_TYPES" :key="t" :label="t" :value="t" />
-          </el-select>
-          <div class="form-hint">选择"自动识别"将由 AI 自动判定合同类型</div>
-        </el-form-item>
-
-        <el-form-item label="审核模式" prop="audit_mode">
-          <el-radio-group v-model="form.audit_mode">
-            <el-radio value="precise">精细审核（推荐）</el-radio>
-            <el-radio value="fast">快速初筛</el-radio>
-          </el-radio-group>
-          <div class="form-hint">精细审核（证据抽取 + 规则裁决，准确）｜快速初筛（纯规则引擎，仅作粗筛、误报较多）</div>
-        </el-form-item>
-
-        <el-form-item>
-          <el-button
-            type="primary"
-            :loading="uploading"
-            :disabled="!selectedFile"
-            @click="handleUpload"
-          >
-            {{ uploading ? '上传中...' : '开始上传' }}
-          </el-button>
-          <el-button @click="handleReset">重置</el-button>
-        </el-form-item>
-      </el-form>
-
-      <!-- 上传进度条 -->
-      <div v-if="uploading" class="upload-progress">
-        <el-progress :percentage="progress" :status="progressStatus" />
-        <p class="progress-text">{{ progressText }}</p>
+        <div class="desc">上传合同文件并填写基本信息，系统将自动解析并触发 AI 审核</div>
       </div>
-    </el-card>
+    </div>
+
+    <!-- 步骤条 -->
+    <div class="a24-steps">
+      <div class="step on"><span class="dot">1</span>上传文件</div>
+      <div class="line" :class="{ done: selectedFile }"></div>
+      <div class="step" :class="{ on: selectedFile }"><span class="dot">2</span>填写信息</div>
+      <div class="line" :class="{ done: uploading }"></div>
+      <div class="step" :class="{ on: uploading }"><span class="dot">3</span>开始审核</div>
+    </div>
+
+    <!-- 左右分栏 -->
+    <el-row :gutter="20">
+      <!-- 左：拖拽上传区 -->
+      <el-col :xs="24" :md="14">
+        <el-upload
+          ref="uploadRef"
+          class="upload-dragger"
+          drag
+          action="#"
+          :auto-upload="false"
+          :limit="1"
+          :accept="'.docx,.pdf,.jpg,.jpeg,.png,.tiff,.tif,.bmp'"
+          :on-change="handleFileChange"
+          :on-remove="handleFileRemove"
+          :file-list="fileList"
+        >
+          <el-icon class="upload-icon"><UploadFilled /></el-icon>
+          <div class="upload-text">
+            <p>将合同文件拖拽到此处，或 <em>点击选择文件</em></p>
+            <p class="upload-hint">支持 .docx / .pdf / 图片(jpg/png/tiff) 格式，单文件最大 10MB</p>
+          </div>
+        </el-upload>
+      </el-col>
+
+      <!-- 右：合同信息表单 -->
+      <el-col :xs="24" :md="10">
+        <el-card shadow="hover" class="upload-card">
+          <el-form
+            ref="formRef"
+            :model="form"
+            :rules="rules"
+            label-width="90px"
+            class="upload-form"
+          >
+            <el-form-item label="合同名称" prop="name">
+              <el-input
+                v-model="form.name"
+                placeholder="留空则使用原文件名"
+                maxlength="200"
+                show-word-limit
+              />
+            </el-form-item>
+
+            <el-form-item label="合同类型" prop="contract_type">
+              <el-select v-model="form.contract_type" placeholder="请选择合同类型" style="width: 100%;">
+                <el-option label="自动识别（推荐）" value="" />
+                <el-option v-for="t in CONTRACT_TYPES" :key="t" :label="t" :value="t" />
+              </el-select>
+              <div class="form-hint">选择"自动识别"将由 AI 自动判定合同类型</div>
+            </el-form-item>
+
+            <el-form-item label="审核模式" prop="audit_mode">
+              <el-radio-group v-model="form.audit_mode">
+                <el-radio value="precise">精细审核（推荐）</el-radio>
+                <el-radio value="fast">快速初筛</el-radio>
+              </el-radio-group>
+              <div class="form-hint">精细审核（证据抽取 + 规则裁决，准确）｜快速初筛（纯规则引擎，仅作粗筛、误报较多）</div>
+            </el-form-item>
+
+            <el-form-item>
+              <el-button
+                type="primary"
+                :loading="uploading"
+                :disabled="!selectedFile"
+                @click="handleUpload"
+              >
+                {{ uploading ? '上传中...' : '开始上传' }}
+              </el-button>
+              <el-button @click="handleReset">重置</el-button>
+            </el-form-item>
+          </el-form>
+
+          <!-- 上传进度条 -->
+          <div v-if="uploading" class="upload-progress">
+            <el-progress :percentage="progress" :status="progressStatus" />
+            <p class="progress-text">{{ progressText }}</p>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
   </div>
 </template>
+
 
 <script setup>
 import { ref, reactive } from 'vue'
@@ -214,17 +240,25 @@ function handleReset() {
   margin: 0 auto;
 }
 
-.upload-card {
-  margin-top: 16px;
+/* 拖拽区：占满左栏，内容居中 */
+.upload-dragger :deep(.el-upload-dragger) {
+  min-height: 340px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  border: 2px dashed #C4CDE3;
+  transition: all 0.18s;
 }
-
-.upload-dragger {
-  margin-bottom: 24px;
+.upload-dragger :deep(.el-upload-dragger:hover) {
+  border-color: #1935C3;
+  background: #F5F8FF;
 }
 
 .upload-icon {
   font-size: 48px;
-  color: #409EFF;
+  color: #1935C3;
   margin-bottom: 8px;
 }
 
@@ -235,7 +269,7 @@ function handleReset() {
 }
 
 .upload-text em {
-  color: #409EFF;
+  color: #1935C3;
   font-style: normal;
 }
 
@@ -245,7 +279,7 @@ function handleReset() {
 }
 
 .upload-form {
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
 .form-hint {
@@ -269,3 +303,4 @@ function handleReset() {
   margin-top: 8px;
 }
 </style>
+

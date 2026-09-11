@@ -11,18 +11,44 @@
     </div>
 
     <template v-else-if="contract">
-      <el-descriptions title="合同详情" :column="5" border class="meta-descriptions">
-        <el-descriptions-item label="文件名"><el-tag type="primary" size="small">{{ contract.file_name }}</el-tag></el-descriptions-item>
-        <el-descriptions-item label="合同类型">
-          {{ typeLabel(contract.contract_type) }}
-          <el-tag v-if="contract.is_outsourcing" type="warning" size="small" style="margin-left: 4px;">服务外包</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="上传时间">{{ formatTime(contract.created_at) }}</el-descriptions-item>
-        <el-descriptions-item label="页数">{{ totalPages }} 页</el-descriptions-item>
-        <el-descriptions-item label="审核状态">
-          <el-tag :type="statusTag(contract.status)">{{ statusLabel(contract.status) }}</el-tag>
-        </el-descriptions-item>
-      </el-descriptions>
+      <!-- 页头 -->
+      <div class="a24-page-header">
+        <div>
+          <div class="crumb">首页 / 合同管理 / <b>合同详情</b></div>
+          <div class="title-row">
+            <span class="icon"><el-icon><Document /></el-icon></span>
+            <h3>{{ contract.file_name }}</h3>
+          </div>
+          <div class="desc">上传于 {{ formatTime(contract.created_at) }} · {{ totalPages }} 页 · {{ typeLabel(contract.contract_type) }}</div>
+        </div>
+        <div class="actions">
+          <el-tag :type="statusTag(contract.status)" size="large">{{ statusLabel(contract.status) }}</el-tag>
+        </div>
+      </div>
+
+      <!-- 元信息卡片条 -->
+      <div class="a24-meta-strip">
+        <div class="a24-meta-cell">
+          <div class="k">合同类型</div>
+          <div class="v">{{ typeLabel(contract.contract_type) }}<el-tag v-if="contract.is_outsourcing" type="warning" size="small" style="margin-left:4px">服务外包</el-tag></div>
+        </div>
+        <div class="a24-meta-cell">
+          <div class="k">上传时间</div>
+          <div class="v" style="font-size:13px">{{ formatTime(contract.created_at) }}</div>
+        </div>
+        <div class="a24-meta-cell">
+          <div class="k">页数</div>
+          <div class="v">{{ totalPages }} 页</div>
+        </div>
+        <div class="a24-meta-cell">
+          <div class="k">审核模式</div>
+          <div class="v">{{ contract.audit_mode === 'precise' ? '精细审核' : contract.audit_mode === 'fast' ? '快速初筛' : '—' }}</div>
+        </div>
+        <div class="a24-meta-cell">
+          <div class="k">审核状态</div>
+          <div class="v"><el-tag :type="statusTag(contract.status)" size="small">{{ statusLabel(contract.status) }}</el-tag></div>
+        </div>
+      </div>
 
       <!-- 复核 / 验收 操作栏（按角色显示） -->
       <div v-if="(contract.status === 'completed' && canReview) || (contract.status === 'reviewed' && canApprove)" class="review-bar">
@@ -38,7 +64,7 @@
       </div>
 
       <el-row :gutter="20" class="detail-row">
-        <el-col :span="14">
+        <el-col :xs="24" :md="14">
           <el-tabs v-model="activeTab" type="border-card">
             <el-tab-pane label="原始文本" name="text">
               <div class="tab-content">
@@ -259,7 +285,7 @@
         </el-col>
 
         <!-- 右侧预览面板 -->
-        <el-col :span="10" class="detail-right">
+        <el-col :xs="24" :md="10" class="detail-right">
           <el-card shadow="hover">
             <template #header>
               <div class="pdf-header">
@@ -354,7 +380,7 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Warning, ArrowLeft, ArrowRight, Loading } from '@element-plus/icons-vue'
+import { Warning, ArrowLeft, ArrowRight, Loading, Document } from '@element-plus/icons-vue'
 import FeedbackPanel from '../components/FeedbackPanel.vue'
 import { ElMessage } from 'element-plus'
 import { getContractDetail, getAuditResult, triggerAudit, getClauseComparison, submitFeedback, getFeedback, deleteFeedback, reviewContract, approveContract, reviseClause, getRevisions, downloadRevisedDocx, getContractFile, getAddClauseSuggestion } from '../api/contract.js'
@@ -1054,7 +1080,6 @@ onUnmounted(() => {
 
 .loading-state { padding: 40px 0; }
 .error-state { padding: 60px 0; }
-.meta-descriptions { margin-bottom: 20px; }
 
 .review-bar {
   display: flex;
@@ -1073,6 +1098,14 @@ onUnmounted(() => {
   height: var(--row-height);
   min-height: 600px;
   overflow: hidden;
+}
+
+@media (max-width: 992px) {
+  .detail-row {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
 }
 
 .detail-right {

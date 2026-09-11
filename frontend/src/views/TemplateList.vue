@@ -1,12 +1,21 @@
 <template>
   <div class="page-container">
-    <div class="list-header">
-      <h3>标准条款模板管理</h3>
-      <el-button type="primary" @click="openCreate">
-        <el-icon><Plus /></el-icon> 新建模板
-      </el-button>
+    <!-- 页头 -->
+    <div class="a24-page-header">
+      <div>
+        <div class="crumb">首页 / <b>模板管理</b></div>
+        <div class="title-row">
+          <span class="icon"><el-icon><Files /></el-icon></span>
+          <h3>标准条款模板管理</h3>
+        </div>
+        <div class="desc">维护各类合同的标准条款范本，用于 RAG 检索与条款比对</div>
+      </div>
+      <div class="actions">
+        <el-button type="primary" @click="openCreate">
+          <el-icon><Plus /></el-icon> 新建模板
+        </el-button>
+      </div>
     </div>
-    <el-divider />
 
     <el-card shadow="hover">
       <el-table v-loading="loading" :data="templates" stripe border>
@@ -63,7 +72,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, Files } from '@element-plus/icons-vue'
 import { getTemplates, createTemplate, updateTemplate, deleteTemplate } from '../api/template.js'
 import { CONTRACT_TYPES } from '../constants/contractTypes.js'
 
@@ -166,10 +175,5 @@ onMounted(() => fetchList())
   max-width: 1200px;
   padding: 24px;
   margin: 0 auto;
-}
-.list-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
 }
 </style>

@@ -22,55 +22,46 @@
     </div>
 
     <template v-else>
-      <!-- 页面导航 -->
-      <div class="page-nav-bar">
-        <el-button @click="$router.push('/audit/result')">
-          <el-icon><ArrowLeft /></el-icon>返回审核结果列表
-        </el-button>
-        <el-button-group>
-          <el-button type="primary" size="small" @click="$router.push(`/contracts/${contractId}`)">
-            查看合同详情
+      <!-- 页头 -->
+      <div class="a24-page-header">
+        <div>
+          <div class="crumb">首页 / 审核中心 / 审核历史 / <b>风险明细</b></div>
+          <div class="title-row">
+            <span class="icon"><el-icon><Search /></el-icon></span>
+            <h3>{{ contractName }}</h3>
+          </div>
+          <div class="desc">风险明细 · 共 {{ riskSummary.total }} 条风险</div>
+        </div>
+        <div class="actions">
+          <el-button text @click="$router.push('/audit/result')">
+            <el-icon><ArrowLeft /></el-icon> 返回列表
           </el-button>
-          <el-button type="primary" size="small" @click="$router.push(`/audit/report/${contractId}`)">
-            查看审核报告
-          </el-button>
-        </el-button-group>
+          <el-button-group>
+            <el-button type="primary" @click="$router.push(`/contracts/${contractId}`)">查看合同详情</el-button>
+            <el-button type="primary" plain @click="$router.push(`/audit/report/${contractId}`)">查看审核报告</el-button>
+          </el-button-group>
+        </div>
       </div>
 
-      <!-- 合同名称 -->
-      <div class="contract-title" v-if="contractName">
-        <h3>{{ contractName }}</h3>
+      <!-- 统计卡 -->
+      <div class="a24-stat-grid">
+        <div class="a24-stat-card">
+          <span class="ic" style="background:#E8EBF9">📋</span>
+          <div><div class="n">{{ riskSummary.total }}</div><div class="l">风险总数</div></div>
+        </div>
+        <div class="a24-stat-card">
+          <span class="ic" style="background:#FDECEC">🔴</span>
+          <div><div class="n" style="color:#E60012">{{ riskSummary.high }}</div><div class="l">高风险</div></div>
+        </div>
+        <div class="a24-stat-card">
+          <span class="ic" style="background:#FEF3E2">🟠</span>
+          <div><div class="n" style="color:#C77A12">{{ riskSummary.mid }}</div><div class="l">中风险</div></div>
+        </div>
+        <div class="a24-stat-card">
+          <span class="ic" style="background:#E8F7EE">🟢</span>
+          <div><div class="n" style="color:#1E9E54">{{ riskSummary.low }}</div><div class="l">低风险</div></div>
+        </div>
       </div>
-
-      <!-- 统计卡片 -->
-      <el-row :gutter="20">
-        <el-col :span="6">
-          <el-card shadow="hover">
-            <el-statistic title="风险总数" :value="riskSummary.total" />
-          </el-card>
-        </el-col>
-        <el-col :span="6">
-          <el-card shadow="hover">
-            <el-statistic title="高风险" :value="riskSummary.high">
-              <template #suffix><span class="suffix-red">条</span></template>
-            </el-statistic>
-          </el-card>
-        </el-col>
-        <el-col :span="6">
-          <el-card shadow="hover">
-            <el-statistic title="中风险" :value="riskSummary.mid">
-              <template #suffix><span class="suffix-orange">条</span></template>
-            </el-statistic>
-          </el-card>
-        </el-col>
-        <el-col :span="6">
-          <el-card shadow="hover">
-            <el-statistic title="低风险" :value="riskSummary.low">
-              <template #suffix><span class="suffix-green">条</span></template>
-            </el-statistic>
-          </el-card>
-        </el-col>
-      </el-row>
 
       <!-- 风险列表 -->
       <el-card shadow="hover" class="risk-card">
@@ -129,7 +120,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
-import { ArrowLeft } from '@element-plus/icons-vue'
+import { ArrowLeft, Search } from '@element-plus/icons-vue'
 import { getAuditResult, getContractDetail, getFeedback, deleteFeedback } from '../api/contract.js'
 import { useFeedback } from '../composables/useFeedback.js'
 import FeedbackPanel from '../components/FeedbackPanel.vue'
@@ -249,21 +240,7 @@ onMounted(() => {
   padding: 60px 0;
 }
 
-.page-nav-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
 
-.contract-title {
-  margin-bottom: 16px;
-}
-.contract-title h3 {
-  margin: 0;
-  font-size: 18px;
-  color: #303133;
-}
 
 .risk-card {
   margin-top: 20px;

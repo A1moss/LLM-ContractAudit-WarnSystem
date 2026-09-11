@@ -1,12 +1,41 @@
 <template>
   <div class="page-container">
-    <div class="list-header">
-      <h3>合同列表</h3>
-      <el-button type="primary" @click="$router.push('/contracts/upload')">
-        <el-icon><Plus /></el-icon> 上传合同
-      </el-button>
+    <!-- 页头 -->
+    <div class="a24-page-header">
+      <div>
+        <div class="crumb">首页 / 合同管理 / <b>合同列表</b></div>
+        <div class="title-row">
+          <span class="icon"><el-icon><Folder /></el-icon></span>
+          <h3>合同列表</h3>
+        </div>
+        <div class="desc">管理已上传的合同文件，查看解析、审核进度与风险结果</div>
+      </div>
+      <div class="actions">
+        <el-button type="primary" @click="$router.push('/contracts/upload')">
+          <el-icon><Plus /></el-icon> 上传合同
+        </el-button>
+      </div>
     </div>
-    <el-divider />
+
+    <!-- KPI 统计 -->
+    <div class="a24-kpi-grid">
+      <div class="a24-kpi">
+        <span class="ic" style="background:#E8EBF9"><el-icon><Files /></el-icon></span>
+        <div><div class="num">{{ totalContracts }}</div><div class="lbl">全部合同</div></div>
+      </div>
+      <div class="a24-kpi">
+        <span class="ic" style="background:#FEF3E2"><el-icon><Clock /></el-icon></span>
+        <div><div class="num">{{ stats.pending }}</div><div class="lbl">待处理</div></div>
+      </div>
+      <div class="a24-kpi">
+        <span class="ic" style="background:#FDECEC"><el-icon><Warning /></el-icon></span>
+        <div><div class="num">{{ stats.month_risks }}</div><div class="lbl">本月风险</div></div>
+      </div>
+      <div class="a24-kpi">
+        <span class="ic" style="background:#E8F7EE"><el-icon><CircleCheck /></el-icon></span>
+        <div><div class="num">{{ stats.approval_rate }}<small style="font-size:16px">%</small></div><div class="lbl">通过率</div></div>
+      </div>
+    </div>
 
     <!-- 搜索筛选栏 -->
     <el-card shadow="hover" class="search-card">
@@ -149,8 +178,9 @@
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Plus, Search } from '@element-plus/icons-vue'
+import { Plus, Search, Folder, Files, Clock, Warning, CircleCheck } from '@element-plus/icons-vue'
 import { getContractList, deleteContract } from '../api/contract.js'
+import request from '../utils/request.js'
 import { formatTime } from '../utils/format.js'
 import { CONTRACT_TYPES, typeLabel } from '../constants/contractTypes.js'
 
@@ -173,6 +203,24 @@ const pagination = reactive({
   page_size: 10,
   total: 0,
 })
+
+// ── KPI 统计（数据来自 /stats/dashboard + 全量合同数）──
+const totalContracts = ref(0)
+const stats = reactive({ pending: 0, month_risks: 0, approval_rate: 0 })
+
+async function fetchStats() {
+  try {
+    const [s, list] = await Promise.all([
+      request.get('/stats/dashboard'),
+      getContractList({ page: 1, page_size: 1 }),
+    ])
+    const d = s.data || {}
+    stats.pending = d.pending ?? 0
+    stats.month_risks = d.month_risks ?? 0
+    stats.approval_rate = d.approval_rate ?? 0
+    totalContracts.value = list.data?.total || 0
+  } catch { /* 后端未启动时保持默认值 */ }
+}
 
 async function fetchList() {
   loading.value = true
@@ -275,6 +323,7 @@ function statusTag(status) {
 
 onMounted(() => {
   fetchList()
+  fetchStats()
 })
 
 onUnmounted(() => {
@@ -290,12 +339,6 @@ onUnmounted(() => {
   max-width: 1200px;
   padding: 24px;
   margin: 0 auto;
-}
-
-.list-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
 }
 
 .search-card {

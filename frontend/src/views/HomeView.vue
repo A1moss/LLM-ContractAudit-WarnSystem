@@ -194,7 +194,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.home { background: #fff; }
+.home { background: transparent; }
 
 /* ── hero ── */
 .hero {
@@ -235,10 +235,10 @@ onUnmounted(() => {
 .hero-right img { width: 100%; border-radius: 12px; display: block; border: 1px solid rgba(255,255,255,.15); box-shadow: 0 20px 50px rgba(3,12,30,.5); }
 
 /* ── 数据条 ── */
-.metrics { background: #fff; border-bottom: 1px solid #EDF0F5; }
-.metrics-inner { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); padding: 40px 0; }
-.metric { text-align: center; position: relative; }
-.metric + .metric::before { content: ""; position: absolute; left: 0; top: 12%; bottom: 12%; width: 1px; background: #EDF0F5; }
+.metrics { background: transparent; margin: -34px auto 0; padding: 0 40px; position: relative; z-index: 2; }
+.metrics-inner { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); background: #fff; border: 1px solid #E5EAF2; border-radius: 14px; overflow: hidden; box-shadow: 0 10px 34px rgba(13, 36, 71, 0.10); }
+.metric { text-align: center; padding: 26px 10px; position: relative; }
+.metric + .metric::before { content: ""; position: absolute; left: 0; top: 22%; bottom: 22%; width: 1px; background: #EDF0F5; }
 .metric .num { font-size: 36px; font-weight: 700; color: #1935C3; line-height: 1.1; }
 .metric .num small { font-size: 18px; color: #1935C3; margin-left: 2px; }
 .metric .lbl { margin-top: 8px; font-size: 14px; color: #8A93A6; }
