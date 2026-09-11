@@ -149,29 +149,99 @@ def _compare_chunk(chunk_text: str, contract_type: str, standards: str) -> list[
     return []
 
 
-def compare_clauses(full_text: str, contract_type: str, is_outsourcing: bool = False) -> dict:
+def _normalize_db_clauses(raw, contract_type: str) -> list[dict]:
+    """把数据库模板的 clauses JSON 归一化成与 standard_clauses.json 一致的结构。
+
+    支持两种常见写法（前端模板管理页保存的是第一种）：
+      1) {"验收标准": "合同应约定明确的验收标准与流程", "付款条件": {...}}
+      2) [{"title": "验收标准", "content": "...", "priority": "required"}, ...]
+    """
+    if not raw:
+        return []
+    if isinstance(raw, dict) and isinstance(raw.get("clauses"), list):
+        raw = raw["clauses"]
+
+    items: list[dict] = []
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            if isinstance(value, dict):
+                items.append({
+                    "title": value.get("title") or value.get("name") or str(key),
+                    "content": value.get("content") or value.get("text") or value.get("description") or "",
+                    "priority": value.get("priority", "required"),
+                    "depends_on": value.get("depends_on") or [],
+                    "conflict_with": value.get("conflict_with") or [],
+                    "related_law": value.get("related_law", ""),
+                })
+            else:
+                items.append({"title": str(key), "content": str(value), "priority": "required"})
+    elif isinstance(raw, list):
+        for i, value in enumerate(raw):
+            if isinstance(value, str):
+                items.append({"title": f"条款{i+1}", "content": value, "priority": "required"})
+            elif isinstance(value, dict):
+                items.append({
+                    "title": value.get("title") or value.get("name") or value.get("clause") or f"条款{i+1}",
+                    "content": value.get("content") or value.get("text") or value.get("description") or "",
+                    "priority": value.get("priority", "required"),
+                    "depends_on": value.get("depends_on") or [],
+                    "conflict_with": value.get("conflict_with") or [],
+                    "related_law": value.get("related_law", ""),
+                })
+
+    normalized: list[dict] = []
+    seen = set()
+    for i, item in enumerate(items):
+        title = (item.get("title") or "").strip()
+        if not title or title in seen:
+            continue
+        seen.add(title)
+        item["id"] = item.get("id") or f"TPL-{i+1:03d}"
+        item["type"] = contract_type
+        item["priority"] = item.get("priority") or "required"
+        normalized.append(item)
+    return normalized
+
+
+def compare_clauses(
+    full_text: str,
+    contract_type: str,
+    is_outsourcing: bool = False,
+    standard_clauses: list[dict] | None = None,
+) -> dict:
     """将合同全文与对应类型的标准条款模板进行逐条比对（长合同分块）。
 
     Args:
         contract_type: 法理分类（10 类）
         is_outsourcing: 业务标签——是否属服务外包；为真时叠加服务外包标准条款。
+        standard_clauses: 数据库模板的 clauses JSON；传入时优先使用企业自定义模板，
+                          为空则回退到内置 standard_clauses.json。
     """
-    all_clauses = _load_standard_clauses()
+    json_all = _load_standard_clauses()
 
-    # 用户侧 10 类法理 → 标准条款库 type：直接类型 + 别名类型都查
-    # （如 技术合同 直接命中 TEC 条款；承揽/委托 经别名命中服务外包条款）
-    alias_type = TYPE_ALIAS.get(contract_type, contract_type)
-    match_types = {contract_type, alias_type}
-    # 服务外包业务标签：叠加服务外包标准条款（SLA/知识产权/源代码/人员独立性）
-    if is_outsourcing:
-        match_types.add("服务外包合同")
+    # 企业自定义模板优先：数据库 templates 表里该合同类型的最新版本
+    custom_docs = _normalize_db_clauses(standard_clauses, contract_type)
+    if custom_docs:
+        docs = custom_docs
+        # 服务外包业务标签：叠加内置的服务外包补充条款（SLA/知识产权/数据安全等）
+        if is_outsourcing:
+            docs = docs + [c for c in json_all if c.get("type") == "服务外包合同"]
+        logger.info("条款比对使用企业自定义模板：%s（%d 条）", contract_type, len(docs))
+    else:
+        # 用户侧 10 类法理 → 标准条款库 type：直接类型 + 别名类型都查
+        # （如 技术合同 直接命中 TEC 条款；承揽/委托 经别名命中服务外包条款）
+        alias_type = TYPE_ALIAS.get(contract_type, contract_type)
+        match_types = {contract_type, alias_type}
+        # 服务外包业务标签：叠加服务外包标准条款（SLA/知识产权/源代码/人员独立性）
+        if is_outsourcing:
+            match_types.add("服务外包合同")
 
-    # 按合同类型结构过滤（PAKTON 结构检索：类型精确匹配，而非语义模糊检索）
-    docs = [c for c in all_clauses if c.get("type") in match_types]
-    if not docs:
-        # 类型名不匹配（如"其他合同"）时回退到全部条款，避免比对空白
-        logger.info("未找到类型 %s 的标准条款，回退到全部 %d 条", contract_type, len(all_clauses))
-        docs = all_clauses
+        # 按合同类型结构过滤（PAKTON 结构检索：类型精确匹配，而非语义模糊检索）
+        docs = [c for c in json_all if c.get("type") in match_types]
+        if not docs:
+            # 类型名不匹配（如"其他合同"）时回退到全部条款，避免比对空白
+            logger.info("未找到类型 %s 的标准条款，回退到全部 %d 条", contract_type, len(json_all))
+            docs = json_all
 
     if not docs:
         return {"clauses": [], "summary": {"total": 0, "covered": 0, "partial": 0, "missing": 0, "coverage_rate": 0}, "missing_critical": [], "cross_clause_risks": []}

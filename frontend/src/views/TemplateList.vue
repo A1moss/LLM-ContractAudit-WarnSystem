@@ -19,9 +19,10 @@
           </template>
         </el-table-column>
         <el-table-column prop="version" label="版本" width="80" />
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <el-button size="small" type="primary" link @click="openEdit(row)">编辑</el-button>
+            <el-button size="small" type="info" link @click="openHistory(row)">历史</el-button>
             <el-popconfirm title="确定删除该模板？" @confirm="handleDelete(row.id)">
               <template #reference>
                 <el-button size="small" type="danger" link>删除</el-button>
@@ -57,6 +58,31 @@
         <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 历史版本对话框 -->
+    <el-dialog v-model="history.visible" :title="`历史版本 - ${history.name}`" width="720px">
+      <el-table v-loading="history.loading" :data="history.items" stripe border>
+        <template #empty><el-empty description="暂无历史版本" /></template>
+        <el-table-column prop="version" label="版本" width="90">
+          <template #default="{ row }">
+            v{{ row.version }}
+            <el-tag v-if="row.id === history.latestId" size="small" type="success" style="margin-left:6px">当前</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="条款数" width="100">
+          <template #default="{ row }">{{ clauseCount(row.clauses) }}</template>
+        </el-table-column>
+        <el-table-column label="创建时间" min-width="180">
+          <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+        </el-table-column>
+        <el-table-column label="上一版本 ID" width="120">
+          <template #default="{ row }">{{ row.previous_version_id ?? '—' }}</template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="history.visible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -64,8 +90,9 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import { getTemplates, createTemplate, updateTemplate, deleteTemplate } from '../api/template.js'
+import { getTemplates, getTemplateHistory, createTemplate, updateTemplate, deleteTemplate } from '../api/template.js'
 import { CONTRACT_TYPES } from '../constants/contractTypes.js'
+import { formatTime } from '../utils/format.js'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -78,6 +105,14 @@ const dialog = reactive({
   name: '',
   contract_type: '买卖合同',
   clausesText: '',
+})
+
+const history = reactive({
+  visible: false,
+  loading: false,
+  name: '',
+  latestId: null,
+  items: [],
 })
 
 function clauseCount(clauses) {
@@ -117,6 +152,23 @@ function openEdit(row) {
   dialog.clausesText = JSON.stringify(row.clauses, null, 2)
 }
 
+async function openHistory(row) {
+  history.visible = true
+  history.loading = true
+  history.name = row.name
+  history.latestId = row.id
+  history.items = []
+  try {
+    const res = await getTemplateHistory(row.id)
+    history.items = res.data?.items || []
+    history.latestId = history.items[history.items.length - 1]?.id ?? row.id
+  } catch {
+    // 错误已在拦截器处理
+  } finally {
+    history.loading = false
+  }
+}
+
 async function handleSave() {
   if (!dialog.name.trim()) {
     ElMessage.warning('请填写模板名称')
@@ -133,8 +185,8 @@ async function handleSave() {
   saving.value = true
   try {
     if (dialog.isEdit) {
-      await updateTemplate(dialog.id, { name: dialog.name, clauses })
-      ElMessage.success('模板已更新（版本 +1）')
+      const res = await updateTemplate(dialog.id, { name: dialog.name, clauses })
+      ElMessage.success(`模板已更新（新版本 v${res.data?.version ?? ''}）`)
     } else {
       await createTemplate({ name: dialog.name, contract_type: dialog.contract_type, clauses })
       ElMessage.success('模板已创建')
