@@ -9,6 +9,14 @@ export function getTemplates(params = {}) {
 }
 
 /**
+ * 获取模板的历史版本链（从最早到最新）
+ * @param {number|string} id — 模板 ID
+ */
+export function getTemplateHistory(id) {
+  return request.get(`/templates/${id}/history`)
+}
+
+/**
  * 创建标准条款模板
  * @param {Object} data — { name, contract_type, clauses }
  */

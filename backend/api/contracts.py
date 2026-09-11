@@ -30,6 +30,7 @@ from ai.matcher import compare_clauses
 from ai.reviser import revise_clause, generate_clause
 from ai.taxonomy import business_tag_names
 from models.audit_record import AuditRecord
+from models.template import Template
 from services.docx_converter import docx_to_pdf
 from models.audit_report import AuditReport
 from models.clause_revision import ClauseRevision
@@ -106,6 +107,19 @@ def _can_view_contract(user: User, c: Contract) -> bool:
     if user.role in WORKFLOW_ROLES:
         return True
     return c.user_id == user.id
+
+
+def _db_template_clauses(db: Session, contract_type: str | None):
+    """取该合同类型最新版本的数据库模板 clauses；没有企业模板时返回 None（回退内置 JSON）。"""
+    if not contract_type:
+        return None
+    t = (
+        db.query(Template)
+        .filter(Template.contract_type == contract_type)
+        .order_by(Template.version.desc(), Template.id.desc())
+        .first()
+    )
+    return t.clauses if t else None
 
 
 def _build_evidence(r: dict, rag_ctx: list | None) -> dict | None:
@@ -659,7 +673,12 @@ def _run_audit(contract_id: int):
         # 导致并发审核 database is locked，BUG-009）。失败不阻断审核，报告标注待重试。
         compare_result = None
         try:
-            compare_result = compare_clauses(full_text, c.contract_type or "买卖合同", c.is_outsourcing or False)
+            compare_result = compare_clauses(
+                full_text,
+                c.contract_type or "买卖合同",
+                c.is_outsourcing or False,
+                standard_clauses=_db_template_clauses(db, c.contract_type),
+            )
             logger.info("条款比对完成: %s", compare_result.get("summary") if compare_result else None)
         except Exception as e:
             logger.warning("条款比对失败，报告将标注待重试: %s", e)
@@ -1200,7 +1219,12 @@ def compare_contract_clauses(
     if not c.parsed_text:
         raise HTTPException(status_code=400, detail="contract has no parsed text")
     
-    result = compare_clauses(c.parsed_text, c.contract_type or "other", c.is_outsourcing or False)
+    result = compare_clauses(
+        c.parsed_text,
+        c.contract_type or "other",
+        c.is_outsourcing or False,
+        standard_clauses=_db_template_clauses(db, c.contract_type),
+    )
     return {"code": 0, "message": "ok", "data": result}
 
 
@@ -1225,7 +1249,12 @@ def get_clause_comparison(
 
     try:
         from ai.matcher import compare_clauses
-        result = compare_clauses(c.parsed_text, c.contract_type or "买卖合同", c.is_outsourcing or False)
+        result = compare_clauses(
+            c.parsed_text,
+            c.contract_type or "买卖合同",
+            c.is_outsourcing or False,
+            standard_clauses=_db_template_clauses(db, c.contract_type),
+        )
         if report:
             report.missing_clauses = result
             db.commit()
@@ -1250,7 +1279,12 @@ def trigger_clause_comparison(
 
     try:
         from ai.matcher import compare_clauses
-        result = compare_clauses(c.parsed_text, c.contract_type or "买卖合同", c.is_outsourcing or False)
+        result = compare_clauses(
+            c.parsed_text,
+            c.contract_type or "买卖合同",
+            c.is_outsourcing or False,
+            standard_clauses=_db_template_clauses(db, c.contract_type),
+        )
     except Exception as e:
         logger.warning("条款比对失败: %s", e)
         return {"code": 0, "message": "ok", "data": None}
