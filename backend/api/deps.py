@@ -30,6 +30,19 @@ def get_current_user(
     return user
 
 
+def require_llm_key_configured() -> None:
+    """LLM 前置检查：本次请求是否有可用的 DeepSeek Key（个人 Key 或 .env 默认 Key）。
+
+    两者都没有时抛 400 并给出明确指引，避免"看似操作成功、实际全链路降级"的静默失败。
+    读取的是中间件已绑定到请求上下文的用户 Key（实测依赖可读到中间件 set 的值）。
+    """
+    from ai.llm_client import resolve_api_key, NO_KEY_MESSAGE
+
+    key, _source = resolve_api_key()
+    if not key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=NO_KEY_MESSAGE)
+
+
 def require_role(*roles: str):
     """角色守卫：要求当前用户属于给定角色之一（admin 恒有权限）。
 

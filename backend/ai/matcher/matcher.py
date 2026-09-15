@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from ai.chunker import split_chunks
 from ai.llm_client import llm_client
+from ai.llm_context import submit_with_context
 from ai.taxonomy import TYPE_ALIAS
 from ai.utils import extract_json
 
@@ -260,7 +261,9 @@ def compare_clauses(
     merged = []
     if len(chunks) > 1:
         with ThreadPoolExecutor(max_workers=min(len(chunks), 6)) as ex:
-            for clauses in ex.map(lambda c: _compare_chunk(c, contract_type, standards), chunks):
+            # 复制上下文后提交：保证工作线程能读到用户个人 DeepSeek Key（见 ai/llm_context.py）
+            futs = [submit_with_context(ex, _compare_chunk, c, contract_type, standards) for c in chunks]
+            for clauses in (f.result() for f in futs):
                 merged.extend(clauses)
     else:
         merged.extend(_compare_chunk(chunks[0], contract_type, standards))

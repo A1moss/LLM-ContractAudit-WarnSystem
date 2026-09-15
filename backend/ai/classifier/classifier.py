@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from ai.chunker import split_chunks
 from ai.llm_client import llm_client
+from ai.llm_context import submit_with_context
 from ai.taxonomy import ENABLED_TYPES
 from ai.utils import extract_json_dict
 
@@ -121,7 +122,9 @@ def classify_contract(full_text: str) -> dict:
     # 并行分类采样块（LLM 调用并发，缩短上传等待）
     if len(sampled) > 1:
         with ThreadPoolExecutor(max_workers=min(len(sampled), 5)) as ex:
-            results = list(ex.map(_classify_one_chunk, sampled))
+            # 复制上下文后提交：保证工作线程里能读到用户个人 DeepSeek Key（见 ai/llm_context.py）
+            futs = [submit_with_context(ex, _classify_one_chunk, c) for c in sampled]
+            results = [f.result() for f in futs]
     else:
         results = [_classify_one_chunk(sampled[0])]
 

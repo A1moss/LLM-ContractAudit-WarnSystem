@@ -1,5 +1,6 @@
 from ai.chunker import split_chunks
 from ai.llm_client import llm_client
+from ai.llm_context import submit_with_context
 from ai.utils import extract_json_dict
 import logging
 from concurrent.futures import ThreadPoolExecutor
@@ -114,7 +115,9 @@ def extract_elements(full_text: str, contract_type: str) -> dict:
     # 并行抽取各块（LLM 调用并发，缩短上传等待）
     if len(chunks) > 1:
         with ThreadPoolExecutor(max_workers=min(len(chunks), 6)) as ex:
-            results = [r for r in ex.map(lambda c: _extract_chunk(c, contract_type), chunks) if r]
+            # 复制上下文后提交：保证工作线程能读到用户个人 DeepSeek Key（见 ai/llm_context.py）
+            futs = [submit_with_context(ex, _extract_chunk, c, contract_type) for c in chunks]
+            results = [r for r in (f.result() for f in futs) if r]
     else:
         results = [r for r in [_extract_chunk(chunks[0], contract_type)] if r]
 

@@ -57,19 +57,18 @@
         <span class="t">DeepSeek API 配置 <small>AI 审核引擎调用大模型所需</small></span>
       </div>
 
-      <!-- 已配置状态 -->
-      <div v-if="savedKey && !editing" class="key-saved">
+      <!-- 已配置状态（后端只回状态，不回 Key 本身，因此这里不展示任何 Key 片段） -->
+      <div v-if="keyConfigured && !editing" class="key-saved">
         <div class="key-status">
           <span class="status-dot"></span>
           <span>已配置</span>
-          <code class="masked-key">{{ maskKey(savedKey) }}</code>
         </div>
         <div class="key-actions">
           <el-button type="primary" plain @click="startEdit">
             <el-icon><EditPen /></el-icon> 修改
           </el-button>
-          <el-button type="danger" plain @click="clearKey">
-            <el-icon><Delete /></el-icon> 清除
+          <el-button type="danger" plain :loading="saving" @click="clearKey">
+            <el-icon><Delete /></el-icon> 删除
           </el-button>
         </div>
       </div>
@@ -80,32 +79,36 @@
           v-model="apiKeyDraft"
           type="password"
           show-password
-          placeholder="请输入 DeepSeek API Key（以 sk- 开头）"
+          placeholder="请输入你自己的 DeepSeek API Key（以 sk- 开头）"
           clearable
           @keyup.enter="saveKey"
         >
           <template #prefix><el-icon><Key /></el-icon></template>
         </el-input>
-        <el-button type="primary" @click="saveKey">
+        <el-button type="primary" :loading="saving" @click="saveKey">
           <el-icon><CircleCheck /></el-icon> 保存
         </el-button>
-        <el-button v-if="savedKey" @click="cancelEdit">取消</el-button>
+        <el-button v-if="keyConfigured" @click="cancelEdit">取消</el-button>
       </div>
 
       <div class="key-hint">
-        <el-icon><WarningFilled /></el-icon>
-        <span>API Key 仅保存在当前浏览器本地（localStorage），不会上传服务器。当前服务端 AI 引擎从项目根目录 <code>.env</code> 的 <code>DEEPSEEK_API_KEY</code> 读取密钥；如需按用户独立生效，请与后端（C/D/E）对接按用户存储接口。</span>
+        <el-icon><InfoFilled /></el-icon>
+        <span>
+          保存后，该 Key 将用于<strong>当前账号</strong>调用 DeepSeek，<strong>不会展示给其他用户</strong>（管理员也只看得到「已配置」）。
+          服务器加密存储，接口不回显明文。<br />
+          优先级：<strong>个人 Key &gt; 系统默认 Key</strong>（<code>.env</code> 的 <code>DEEPSEEK_API_KEY</code>）。
+          删除个人 Key 后自动回退系统默认 Key。
+        </span>
       </div>
     </el-card>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { User, Message, Star, Key, Delete, EditPen, CircleCheck, WarningFilled } from '@element-plus/icons-vue'
-
-const STORAGE_KEY = 'deepseek_api_key'
+import { User, Message, Star, Key, Delete, EditPen, CircleCheck, InfoFilled } from '@element-plus/icons-vue'
+import { getProfile, saveMyDeepseekKey, deleteMyDeepseekKey } from '../api/profile.js'
 
 const username = ref(localStorage.getItem('username') || '—')
 const email = ref(localStorage.getItem('email') || '')
@@ -117,18 +120,35 @@ const ROLE_TAG_TYPES = { uploader: 'primary', reviewer: 'warning', approver: 'su
 const roleLabel = computed(() => ROLE_LABELS[role.value] || role.value || '—')
 const roleTagType = computed(() => ROLE_TAG_TYPES[role.value] || 'info')
 
-const savedKey = ref(localStorage.getItem(STORAGE_KEY) || '')
+// 个人 Key：只从后端拿「是否已配置」的布尔状态；**不在前端保存真实 Key**
+const keyConfigured = ref(false)
 const apiKeyDraft = ref('')
 const editing = ref(false)
+const saving = ref(false)
 
-function maskKey(k) {
-  if (!k) return ''
-  if (k.length <= 8) return '****'
-  return k.slice(0, 4) + '****' + k.slice(-4)
+// 兼容旧版本地缓存：把历史遗留的明文 Key 从 localStorage 清掉（安全清理）
+function purgeLegacyLocalKey() {
+  if (localStorage.getItem('deepseek_api_key')) {
+    localStorage.removeItem('deepseek_api_key')
+  }
+}
+
+async function loadProfile() {
+  purgeLegacyLocalKey()
+  try {
+    const res = await getProfile()
+    const d = res.data || {}
+    keyConfigured.value = !!d.deepseek_key_configured
+    if (d.username) username.value = d.username
+    if (d.email) email.value = d.email
+    if (d.role) role.value = d.role
+  } catch {
+    // 未登录/网络异常：保持默认展示，由 request 拦截器提示
+  }
 }
 
 function startEdit() {
-  apiKeyDraft.value = savedKey.value
+  apiKeyDraft.value = ''   // 绝不回填历史 Key（后端也不返回）
   editing.value = true
 }
 
@@ -137,30 +157,46 @@ function cancelEdit() {
   editing.value = false
 }
 
-function saveKey() {
+async function saveKey() {
   const v = apiKeyDraft.value.trim()
   if (!v) {
     ElMessage.warning('请输入 API Key')
     return
   }
-  if (v.length < 10) {
+  if (v.length < 8) {
     ElMessage.warning('API Key 长度不足，请检查是否完整')
     return
   }
-  savedKey.value = v
-  localStorage.setItem(STORAGE_KEY, v)
-  editing.value = false
-  apiKeyDraft.value = ''
-  ElMessage.success('DeepSeek API Key 已保存')
+  saving.value = true
+  try {
+    const res = await saveMyDeepseekKey(v)
+    keyConfigured.value = !!(res.data || {}).deepseek_key_configured
+    editing.value = false
+    apiKeyDraft.value = ''
+    ElMessage.success('已保存，将用于当前账号调用 DeepSeek')
+  } catch {
+    // 错误已由 request 拦截器提示
+  } finally {
+    saving.value = false
+  }
 }
 
-function clearKey() {
-  savedKey.value = ''
-  localStorage.removeItem(STORAGE_KEY)
-  apiKeyDraft.value = ''
-  editing.value = false
-  ElMessage.success('已清除 API Key')
+async function clearKey() {
+  saving.value = true
+  try {
+    await deleteMyDeepseekKey()
+    keyConfigured.value = false
+    apiKeyDraft.value = ''
+    editing.value = false
+    ElMessage.success('已删除个人 Key，后续将使用系统默认 Key')
+  } catch {
+    // 错误已由 request 拦截器提示
+  } finally {
+    saving.value = false
+  }
 }
+
+onMounted(loadProfile)
 </script>
 
 <style scoped>

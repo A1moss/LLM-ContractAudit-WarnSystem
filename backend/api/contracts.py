@@ -17,7 +17,9 @@ from sqlalchemy.orm import Session
 from database import get_db, SessionLocal
 from models.contract import Contract
 from models.user import User
-from api.deps import get_current_user, require_role, ROLE_ADMIN, ROLE_UPLOADER
+from api.deps import (
+    get_current_user, require_role, require_llm_key_configured, ROLE_ADMIN, ROLE_UPLOADER,
+)
 from ai.parser import detect_and_parse
 from ai.classifier import classify_contract
 from ai.extractor import extract_elements
@@ -28,6 +30,7 @@ from ai.auditor.recommendation_engine import build_recommendations
 from ai.confidence import enrich_confidences
 from ai.matcher import compare_clauses
 from ai.reviser import revise_clause, generate_clause
+from ai.llm_context import submit_with_context
 from ai.taxonomy import business_tag_names
 from models.audit_record import AuditRecord
 from models.template import Template
@@ -338,6 +341,8 @@ def upload_contract(
     # 上传限 uploader（admin 经 require_role 恒通过）；reviewer/approver 返回 403。
     # 上传者与审核者分离，避免"自己上传自己审"的角色混同。
     current_user: User = Depends(require_role(ROLE_UPLOADER)),
+    # 上传会调用 LLM（分类/要素抽取），没有任何可用 Key 时明确提示而不是静默降级
+    _llm_ready=Depends(require_llm_key_configured),
 ):
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in (".pdf", ".docx", ".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp"):
@@ -380,8 +385,10 @@ def upload_contract(
     cls_result = {"contract_type": contract_type or "other", "confidence": 0.0, "is_outsourcing": False}
     elements = {}
     with ThreadPoolExecutor(max_workers=2) as ex:
-        cls_fut = ex.submit(classify_contract, full_text)
-        ele_fut = ex.submit(extract_elements, full_text, contract_type or "合同")
+        # submit_with_context：把当前请求上下文（含用户个人 DeepSeek Key）复制进工作线程，
+        # 否则线程内读不到用户 Key，LLM 会静默回退到 .env 默认 Key（个人 Key 失效）
+        cls_fut = submit_with_context(ex, classify_contract, full_text)
+        ele_fut = submit_with_context(ex, extract_elements, full_text, contract_type or "合同")
         try:
             cls_result = cls_fut.result()
         except Exception as e:
@@ -801,6 +808,7 @@ def trigger_audit(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _llm_ready=Depends(require_llm_key_configured),
 ):
     c = db.query(Contract).filter(Contract.id == contract_id).first()
     if not c or not _can_view_contract(current_user, c):
@@ -897,6 +905,7 @@ def get_add_clause_suggestion(
     body: AddClauseSuggestionRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _llm_ready=Depends(require_llm_key_configured),
 ):
     """R09 缺失条款的新增建议：RAG 同类范本 + 法律依据 + 建议插入位置。
 
@@ -942,6 +951,7 @@ def revise_contract_clause(
     body: ReviseRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _llm_ready=Depends(require_llm_key_configured),
 ):
     """多轮对话式改条款（Leader-Follower 多智能体，参考 RCBSF）。
 

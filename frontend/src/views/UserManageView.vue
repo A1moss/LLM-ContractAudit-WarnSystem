@@ -45,6 +45,13 @@
             <el-tag :type="ROLE_TAG_TYPES[row.role] || 'info'" effect="light">{{ ROLE_LABELS[row.role] || row.role }}</el-tag>
           </template>
         </el-table-column>
+        <!-- 个人 DeepSeek Key：管理员也只能看到「是否已配置」，看不到 Key 本身 -->
+        <el-table-column label="个人 Key" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.deepseek_key_configured" type="success" effect="plain" size="small">已配置</el-tag>
+            <el-tag v-else type="info" effect="plain" size="small">未配置</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="修改角色" width="260" align="center">
           <template #default="{ row }">
             <template v-if="isMe(row)">

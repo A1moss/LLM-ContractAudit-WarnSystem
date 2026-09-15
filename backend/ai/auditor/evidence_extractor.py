@@ -14,6 +14,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 
 from ai.llm_client import llm_client
+from ai.llm_context import submit_with_context
 from ai.utils import extract_json
 from ai.chunker import split_chunks
 
@@ -110,7 +111,9 @@ def _extract_one(text: str) -> dict:
     merged = {}
     fail = 0
     with ThreadPoolExecutor(max_workers=min(len(chunks), 6)) as ex:
-        for ev in ex.map(_extract_chunk, chunks):
+        # 复制上下文后提交：保证工作线程能读到用户个人 DeepSeek Key（见 ai/llm_context.py）
+        futs = [submit_with_context(ex, _extract_chunk, c) for c in chunks]
+        for ev in (f.result() for f in futs):
             if ev is None:
                 fail += 1
             else:
@@ -195,8 +198,9 @@ def extract_evidence_detailed(full_text: str) -> dict:
     if supplement.strip():
         # 正文与补全条款并行抽取（各自动分块），缩短审核等待
         with ThreadPoolExecutor(max_workers=2) as ex:
-            body_fut = ex.submit(_extract_one, body)
-            supp_fut = ex.submit(_extract_one, supplement)
+            # 复制上下文后提交：保证工作线程能读到用户个人 DeepSeek Key（见 ai/llm_context.py）
+            body_fut = submit_with_context(ex, _extract_one, body)
+            supp_fut = submit_with_context(ex, _extract_one, supplement)
             body_r = body_fut.result()
             supp_r = supp_fut.result()
         evidence = _merge_override(body_r["evidence"], supp_r["evidence"])

@@ -69,7 +69,28 @@ start-backend.bat
 start-frontend.bat
 ```
 
-环境变量见 `.env.example`：`DEEPSEEK_API_KEY`、`DATABASE_URL`、`SECRET_KEY`、`CORS_ORIGINS`。
+### 前置：请自行配置 DeepSeek API Key
+
+本项目**不携带任何作者 API Key**。Key 有两条来源，**优先级：个人 Key > 系统默认 Key**：
+
+| 来源 | 配置位置 | 说明 |
+|---|---|---|
+| **系统默认 Key**（可选） | 项目根目录 `.env` 的 `DEEPSEEK_API_KEY` | 部署方配置，供**所有未配个人 Key 的用户**共用 |
+| **用户个人 Key** | 登录后进「个人信息」页填写 | 只用于**该账号自己**的请求 |
+
+**部署方**：
+
+1. 到 [DeepSeek 开放平台](https://platform.deepseek.com) 申请 API Key；
+2. 复制 `.env.example` 为**项目根目录**下的 `.env`；
+3. 在 `.env` 中填写 `DEEPSEEK_API_KEY=sk-你的key`（**可留空** —— 留空时用户必须各自在「个人信息」页配自己的 Key，否则调用 LLM 会给出明确报错）；
+4. **不要把真实 Key 提交到 Git** —— `.env` 已被 `.gitignore` 忽略，仓库只保留 Key 项留空的 `.env.example` 模板。
+
+**使用者**：登录 → 右上角头像 →「个人信息」→ 填写自己的 DeepSeek API Key → 保存。
+保存后该 Key 用于本账号调用 DeepSeek；删除后自动回退系统默认 Key。
+
+> 个人 Key 由服务器**加密存储**（Fernet），接口**只回「是否已配置」**，不回显 Key 本身；
+> 其他用户、管理员都看不到你的 Key；Key 也不会写入日志、不会下发到浏览器。
+> 其余变量（`DATABASE_URL`、`SECRET_KEY`、`CORS_ORIGINS` 等）见 `.env.example` 注释。
 
 ---
 
@@ -77,6 +98,7 @@ start-frontend.bat
 
 | 文档 | 说明 |
 |---|---|
+| [docs/变更记录.md](docs/变更记录.md) | **变更台账**：逐轮记录改了什么/为什么/影响面/需同步的文档 |
 | [docs/系统架构.md](docs/系统架构.md) | 四层架构、技术栈、模块划分、审核主链路 |
 | [docs/审核流程.md](docs/审核流程.md) | 审核流水线逐步说明（含对应代码文件） |
 | [docs/数据集说明.md](docs/数据集说明.md) | 数据来源、构建、划分、Gold 与泄漏排查 |

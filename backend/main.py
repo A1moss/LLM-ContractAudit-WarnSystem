@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from database import Base, engine, SessionLocal
 from sqlalchemy import text
@@ -14,6 +14,9 @@ from api.stats import router as stats_router
 from ai.taxonomy import to_dict as taxonomy_dict
 from services import warmup as warmup_service
 from services import role_bootstrap
+from services import user_secret
+from services.auth import decode_access_token
+from ai.llm_context import set_user_api_key, reset_user_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +121,14 @@ def _ensure_columns():
                 _migrate_fk_column_type(db, table, "user_id", "INTEGER")
             except Exception as e:
                 logger.warning("迁移 %s.user_id 列类型失败: %s", table, e)
+        # users 新增列：用户个人 DeepSeek Key 的加密密文（C-008）
+        try:
+            existing_u = {row[1] for row in db.execute("PRAGMA table_info(users)")}
+            if existing_u and "deepseek_api_key_enc" not in existing_u:
+                db.execute("ALTER TABLE users ADD COLUMN deepseek_api_key_enc TEXT")
+                db.commit()
+        except Exception as e:
+            logger.debug("users 表尚不存在，跳过个人 Key 列迁移: %s", e)
         # 旧数据角色 backfill：历史 "user" 统一归为 "uploader"
         try:
             db.execute("UPDATE users SET role='uploader' WHERE role='user'")
@@ -163,6 +174,36 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
 )
+
+
+@app.middleware("http")
+async def bind_user_llm_key(request: Request, call_next):
+    """把当前登录用户的个人 DeepSeek Key 绑定到本次请求上下文（**个人 Key > .env 默认 Key**）。
+
+    * 无 Authorization 头 / 该用户没配个人 Key → 不绑定，LLM 层自动回退 .env 系统默认 Key
+    * 绑定必须放在**中间件**：实测「在依赖里 set」无效（依赖运行在线程池线程，改不到端点上下文），
+      而中间件里 set 之后，同步端点 / 依赖 / 后台任务（BackgroundTasks）都能读到
+    * 代价：每个带 Authorization 的请求多一次按主键的用户查询（可忽略）
+    * 任何异常都不得影响请求本身，统一降级为「使用 .env 默认 Key」
+    """
+    token = None
+    auth_header = request.headers.get("Authorization") or ""
+    if auth_header.lower().startswith("bearer "):
+        try:
+            payload = decode_access_token(auth_header.split(" ", 1)[1].strip())
+            uid = int(payload["sub"]) if payload and payload.get("sub") else None
+            if uid:
+                with SessionLocal() as db:
+                    user_key = user_secret.get_user_api_key(db, uid)
+                token = set_user_api_key(user_key)
+        except Exception as e:
+            # 只记异常类型，绝不输出 token / key 内容
+            logger.debug("绑定用户 LLM Key 失败（回退 .env 默认 Key）: %s", type(e).__name__)
+    try:
+        return await call_next(request)
+    finally:
+        if token is not None:
+            reset_user_api_key(token)
 
 
 @app.get("/")

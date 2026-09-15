@@ -6,9 +6,10 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models.user import User
 from api.deps import (
-    ROLE_UPLOADER, ROLE_REVIEWER, ROLE_APPROVER, ROLE_ADMIN, require_role,
+    ROLE_UPLOADER, ROLE_REVIEWER, ROLE_APPROVER, ROLE_ADMIN, require_role, get_current_user,
 )
 from services.auth import hash_password, verify_password, create_access_token
+from services import user_secret
 
 router = APIRouter(prefix='/auth', tags=['auth'])
 
@@ -111,12 +112,19 @@ class UserRoleUpdate(BaseModel):
     role: str = Field(..., pattern=r"^(uploader|reviewer|approver|admin)$")
 
 
+class ProfileKeyUpdate(BaseModel):
+    """设置个人 DeepSeek Key。只做长度下限校验，不限制前缀（兼容代理/网关发放的 Key）。"""
+    api_key: str = Field(..., min_length=8, max_length=200)
+
+
 def _user_item(u: User) -> dict:
+    """用户对外表示。**只暴露"是否已配置个人 Key"的布尔值**，绝不返回 Key 本身或其片段。"""
     return {
         'id': u.id,
         'username': u.username,
         'email': u.email,
         'role': u.role,
+        'deepseek_key_configured': bool(u.deepseek_api_key_enc),
         'created_at': u.created_at.isoformat() + 'Z' if u.created_at else None,
     }
 
@@ -168,3 +176,45 @@ def update_user_role(
     db.commit()
     db.refresh(target)
     return {'code': 0, 'message': 'ok', 'data': _user_item(target)}
+
+
+# ── 个人信息 / 用户个人 DeepSeek Key ────────────────────────────────────────
+# 只能操作**当前登录用户自己**的 Key；任何接口都不返回 Key 本身或其片段。
+# 生效优先级：个人 Key > .env 的 DEEPSEEK_API_KEY（系统默认 Key），
+# 解析逻辑在 ai/llm_client.py，请求级绑定在 main.py 的中间件。
+
+
+@router.get('/profile')
+def get_profile(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """当前登录用户的个人信息 + 个人 Key 是否已配置（**永不返回 Key**）。"""
+    return {'code': 0, 'message': 'ok', 'data': {
+        'id': current_user.id,
+        'username': current_user.username,
+        'email': current_user.email,
+        'role': current_user.role,
+        'deepseek_key_configured': bool(current_user.deepseek_api_key_enc),
+    }}
+
+
+@router.put('/profile/deepseek-key')
+def set_my_deepseek_key(
+    body: ProfileKeyUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """保存**当前用户自己**的 DeepSeek Key（加密落库）；只返回是否已配置，不回显 Key。"""
+    user_secret.set_user_api_key(db, current_user.id, body.api_key)
+    return {'code': 0, 'message': 'ok', 'data': {'deepseek_key_configured': True}}
+
+
+@router.delete('/profile/deepseek-key')
+def delete_my_deepseek_key(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """删除当前用户的个人 Key；此后自动回退到 .env 系统默认 Key。"""
+    user_secret.clear_user_api_key(db, current_user.id)
+    return {'code': 0, 'message': 'ok', 'data': {'deepseek_key_configured': False}}
