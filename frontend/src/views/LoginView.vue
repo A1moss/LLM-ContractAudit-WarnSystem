@@ -114,6 +114,7 @@ async function handleLogin() {
     localStorage.setItem('token', res.data.token)
     localStorage.setItem('username', res.data.user.username)
     localStorage.setItem('role', res.data.user.role || '')
+    localStorage.setItem('email', res.data.user.email || '')
     ElMessage.success('登录成功')
     router.replace('/')
   } catch {
@@ -169,6 +170,7 @@ async function handleRegister() {
     localStorage.setItem('token', res.data.token)
     localStorage.setItem('username', res.data.user.username)
     localStorage.setItem('role', res.data.user.role || '')
+    localStorage.setItem('email', res.data.user.email || '')
     ElMessage.success('注册成功')
     router.replace('/')
   } catch {

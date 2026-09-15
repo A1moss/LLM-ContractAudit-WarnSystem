@@ -57,9 +57,9 @@
           <span>{{ username }}</span>
           <el-tag v-if="roleLabel" size="small" type="info" effect="plain">{{ roleLabel }}</el-tag>
         </template>
-        <el-menu-item index="profile" disabled>
+        <el-menu-item index="/profile">
           <el-icon><User /></el-icon>
-          个人信息（开发中）
+          个人信息
         </el-menu-item>
         <el-menu-item index="logout" divided @click="handleLogout">
           <el-icon><SwitchButton /></el-icon>
@@ -152,6 +152,7 @@ function handleLogout() {
   localStorage.removeItem('token')
   localStorage.removeItem('username')
   localStorage.removeItem('role')
+  localStorage.removeItem('email')
   router.push('/login')
 }
 </script>

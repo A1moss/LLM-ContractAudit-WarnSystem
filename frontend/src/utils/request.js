@@ -43,6 +43,7 @@ request.interceptors.response.use(
         localStorage.removeItem('token')
         localStorage.removeItem('username')
         localStorage.removeItem('role')
+        localStorage.removeItem('email')
         // 不在登录页时才跳转，避免登录失败时死循环
         if (router.currentRoute.value.path !== '/login') {
           router.push('/login')
