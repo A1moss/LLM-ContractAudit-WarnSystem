@@ -3,7 +3,7 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from database import Base, engine
+from database import Base, engine, SessionLocal
 from sqlalchemy import text
 from config import CORS_ORIGINS
 from api.auth import router as auth_router
@@ -13,6 +13,7 @@ from api.templates import router as templates_router
 from api.stats import router as stats_router
 from ai.taxonomy import to_dict as taxonomy_dict
 from services import warmup as warmup_service
+from services import role_bootstrap
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,14 @@ async def lifespan(app: FastAPI):
             conn.execute(text("UPDATE contracts SET status='parsed' WHERE status='auditing'"))
     except Exception as e:
         logger.warning("启动复位 auditing 状态失败: %s", e)
+    # 一次性部署初始化：仅当库中**完全没有 admin** 时，把 BOOTSTRAP_ADMIN_USERNAME
+    # 指定的**已存在账号**提升为 admin（绝不自动建号；已有 admin 则完全不动）。
+    # 用于在「公开注册只能得到 uploader」之后，安全地产生第一个管理员（详见服务模块）。
+    try:
+        with SessionLocal() as db:
+            role_bootstrap.bootstrap_admin(db)
+    except Exception as e:
+        logger.warning("bootstrap admin 失败（非致命，不阻断启动）: %s", e)
     # 静启动：后台线程预热 torch/向量模型/向量库，启动立即就绪（不阻塞、用户无感知），
     # 避免懒加载把冷启动成本推到「第一次上传合同」上（详见 services/warmup.py）。
     warmup_service.start_warmup()

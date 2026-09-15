@@ -65,6 +65,14 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    // 用户管理：菜单仅 admin 显示；此处只做登录校验，
+    // 页面内与接口层都不以 localStorage 为权限依据（后端 require_role("admin") 才是边界）
+    path: '/users',
+    name: 'UserManage',
+    component: () => import('../views/UserManageView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
     component: () => import('../views/NotFoundView.vue'),

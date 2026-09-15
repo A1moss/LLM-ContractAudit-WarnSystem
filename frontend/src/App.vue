@@ -63,6 +63,11 @@
           <el-icon><User /></el-icon>
           个人信息
         </el-menu-item>
+        <!-- 用户管理仅 admin 显示（与后端 require_role("admin") 一致）；同样只是 UI 显隐 -->
+        <el-menu-item v-if="isAdmin" index="/users">
+          <el-icon><Setting /></el-icon>
+          用户管理
+        </el-menu-item>
         <el-menu-item index="logout" divided @click="handleLogout">
           <el-icon><SwitchButton /></el-icon>
           退出登录
@@ -94,7 +99,7 @@ import { ref, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
   HomeFilled, FolderOpened, Checked, User,
-  SwitchButton, ArrowLeft, Document, Files,
+  SwitchButton, ArrowLeft, Document, Files, Setting,
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -135,6 +140,9 @@ const roleLabel = ref(ROLE_LABELS[role.value] || '')
 // 上传入口可见性（仅 UI）：uploader/admin 可见，reviewer/approver 不可见。
 // localStorage.role 可被用户手工篡改，因此这里**不是**安全控制，后端 require_role 才是。
 const canUpload = computed(() => isLoggedIn.value && (role.value === 'uploader' || role.value === 'admin'))
+
+// 用户管理入口可见性（仅 UI）：只看 admin。后端 require_role("admin") 才是权限边界。
+const isAdmin = computed(() => isLoggedIn.value && role.value === 'admin')
 
 router.afterEach(() => {
   isLoggedIn.value = !!localStorage.getItem('token')

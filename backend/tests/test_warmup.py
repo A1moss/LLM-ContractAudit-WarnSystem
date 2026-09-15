@@ -92,12 +92,19 @@ class TestWarmup(unittest.TestCase):
         self.assertIn("ocr", res["warmup"])
 
     def test_lifespan_starts_warmup(self):
-        """lifespan 必须接上静启动（防回归：把 start_warmup 删掉会被测出来）。"""
+        """lifespan 必须接上静启动（防回归：把 start_warmup 删掉会被测出来）。
+
+        同时把 lifespan 里另一个副作用 role_bootstrap.bootstrap_admin 打桩：
+        本用例会真实执行 lifespan，若不隔离，而恰好 .env 配了 BOOTSTRAP_ADMIN_USERNAME，
+        就会在**真实库**里提升账号。与 warmup 行为无关，纯测试隔离。
+        """
         async def _run():
-            with mock.patch.object(app_main.warmup_service, "start_warmup") as sw:
+            with mock.patch.object(app_main.warmup_service, "start_warmup") as sw, \
+                 mock.patch.object(app_main.role_bootstrap, "bootstrap_admin") as sb:
                 async with app_main.lifespan(app_main.app):
                     pass
                 sw.assert_called_once()
+                sb.assert_called_once()
 
         asyncio.run(_run())
 
