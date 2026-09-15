@@ -99,6 +99,11 @@ def _ensure_columns():
             if existing_ar and "result_status" not in existing_ar:
                 db.execute("ALTER TABLE audit_records ADD COLUMN result_status VARCHAR(20) DEFAULT 'valid'")
                 db.commit()
+            # Feedback RAG 留痕：本次审核实际使用了哪些经验/哪版经验库。
+            # 独立新列，绝不复用 corex_agent_log（Corex 已归档，不得恢复其语义）。
+            if existing_ar and "learning_context" not in existing_ar:
+                db.execute("ALTER TABLE audit_records ADD COLUMN learning_context JSON")
+                db.commit()
         except Exception as e:
             logger.debug("audit_records 表尚不存在，跳过 evidence 迁移: %s", e)
         # clause_revisions 新增列（DOCX 导出替换锚点 + 新增条款操作/位置）
@@ -115,6 +120,36 @@ def _ensure_columns():
                 db.commit()
         except Exception as e:
             logger.debug("clause_revisions 表尚不存在，跳过迁移: %s", e)
+        # feedback_logs 扩列（反馈池 → 学习层；只在旧表缺列时补齐，不动已有数据）
+        try:
+            existing_fb = {row[1] for row in db.execute("PRAGMA table_info(feedback_logs)")}
+            _fb_cols = (
+                ("contract_id", "INTEGER"),
+                ("contract_type", "VARCHAR(50)"),
+                ("risk_type", "VARCHAR(10)"),
+                ("feedback_reason", "VARCHAR(30)"),
+                ("status", "VARCHAR(20) NOT NULL DEFAULT 'pending'"),
+                ("target_type", "VARCHAR(20) NOT NULL DEFAULT 'risk'"),
+                ("revision_id", "INTEGER"),
+                ("target_ref", "JSON"),
+                ("reviewed_by", "INTEGER"),
+                ("reviewed_at", "DATETIME"),
+                ("review_comment", "TEXT"),
+                ("approved_by", "INTEGER"),
+                ("approved_at", "DATETIME"),
+                ("model_evidence", "JSON"),
+                ("model_result", "JSON"),
+            )
+            for _col, _ddl in _fb_cols:
+                if existing_fb and _col not in existing_fb:
+                    db.execute(f"ALTER TABLE feedback_logs ADD COLUMN {_col} {_ddl}")
+                    db.commit()
+            # 历史行 status 兜底（旧表新增列时由 DEFAULT 覆盖；此处仅防御性补齐 NULL）
+            if existing_fb and "status" not in existing_fb:
+                db.execute("UPDATE feedback_logs SET status='pending' WHERE status IS NULL")
+                db.commit()
+        except Exception as e:
+            logger.debug("feedback_logs 表尚不存在，跳过迁移: %s", e)
         # FK 类型对齐：历史遗留 VARCHAR(36) → INTEGER（切 MySQL 前保证一致）
         for table in ("contracts", "feedback_logs"):
             try:

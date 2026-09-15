@@ -658,11 +658,37 @@ def _run_audit(contract_id: int):
         # 1. Rule engine (fast 基线，始终先跑)
         rule_results = run_rules(full_text)
 
+        # Feedback RAG（人工反馈驱动的持续优化）：默认关闭。
+        # 只在证据抽取阶段注入"已由人工审核并批准"的历史经验，作为**事实核查提示**。
+        # 边界：① 任何失败都降级为不使用经验，绝不导致主审核失败；
+        #      ② 不进入 rule_engine / adjudicate_risks（裁决仍为纯 Python 决定）；
+        #      ③ 官方评测路径（evaluate/run_evidence.py）不经过本函数、不读该开关。
+        feedback_ctx = None
+        learning_context = {
+            "enabled": False, "collection": None, "index_version": None,
+            "experience_ids": [], "applied_chunks": 0, "error": None,
+            "reason": "fast_mode" if c.audit_mode != "precise" else "disabled",
+        }
+        if c.audit_mode == "precise":
+            try:
+                from services.feedback_experience import feedback_rag_enabled
+                if feedback_rag_enabled():
+                    from ai.rag.feedback_store import build_feedback_context_provider
+                    feedback_ctx = build_feedback_context_provider(contract_type=c.contract_type)
+                    learning_context = {
+                        "enabled": True, "collection": "feedback_experiences",
+                        "index_version": None, "experience_ids": [], "applied_chunks": 0,
+                        "error": None, "reason": "enabled",
+                    }
+            except Exception as e:
+                logger.warning("Feedback RAG 初始化失败，本次审核不使用历史经验: %s", e)
+                feedback_ctx = None
+                learning_context["error"] = str(e)
 
         # 2. 证据抽取 + 确定性裁决（precise 主口径，v6.4 架构）
         if c.audit_mode == "precise":
             try:
-                res = extract_evidence_detailed(full_text)
+                res = extract_evidence_detailed(full_text, feedback_context=feedback_ctx)
                 evidence = res["evidence"]
                 status = res["status"]
                 if status == "failed":
@@ -688,6 +714,15 @@ def _run_audit(contract_id: int):
                 all_risks = list(rule_results)
         else:
             all_risks = list(rule_results)
+
+        # Feedback RAG 使用留痕：本次实际检索命中的经验 id 与经验库版本
+        # （无论启用与否都写，字段结构一致，便于事后回答"这次审核用了哪些经验、哪一版"）
+        if feedback_ctx is not None:
+            try:
+                learning_context = feedback_ctx.audit_summary()
+            except Exception as e:
+                logger.warning("Feedback RAG 留痕生成失败: %s", e)
+                learning_context["error"] = str(e)
 
         # 条款比对：先于 DB 写事务执行（LLM ~30s；若放进写事务会长时间持有 SQLite 写锁，
         # 导致并发审核 database is locked，BUG-009）。失败不阻断审核，报告标注待重试。
@@ -738,6 +773,7 @@ def _run_audit(contract_id: int):
                     "grounding": r.get("grounding"),
                 } if r.get("risk_description") or r.get("example") else None,
                 feedback_status="pending",
+                learning_context=learning_context,
             )
             db.add(record)
             records.append(record)
