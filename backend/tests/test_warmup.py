@@ -11,8 +11,10 @@
     python -m unittest tests.test_warmup -v
 """
 import asyncio
+import gc
 import os
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -24,6 +26,9 @@ if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 os.environ.setdefault("SECRET_KEY", "test-secret-key-not-weak-123456")
 os.environ.setdefault("DEEPSEEK_API_KEY", "sk-test-not-real")
+
+from sqlalchemy import create_engine, inspect  # noqa: E402
+from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 from services import warmup  # noqa: E402
 import main as app_main  # noqa: E402
@@ -94,19 +99,60 @@ class TestWarmup(unittest.TestCase):
     def test_lifespan_starts_warmup(self):
         """lifespan 必须接上静启动（防回归：把 start_warmup 删掉会被测出来）。
 
-        同时把 lifespan 里另一个副作用 role_bootstrap.bootstrap_admin 打桩：
-        本用例会真实执行 lifespan，若不隔离，而恰好 .env 配了 BOOTSTRAP_ADMIN_USERNAME，
-        就会在**真实库**里提升账号。与 warmup 行为无关，纯测试隔离。
-        """
-        async def _run():
-            with mock.patch.object(app_main.warmup_service, "start_warmup") as sw, \
-                 mock.patch.object(app_main.role_bootstrap, "bootstrap_admin") as sb:
-                async with app_main.lifespan(app_main.app):
-                    pass
-                sw.assert_called_once()
-                sb.assert_called_once()
+        ## 为什么必须隔离数据库（本用例的数据库隔离说明）
 
-        asyncio.run(_run())
+        `lifespan` 里有真实的 DDL/DML 副作用：
+
+            Base.metadata.create_all(bind=engine)   # 建表
+            _ensure_columns()                       # ALTER TABLE 补列
+            UPDATE contracts SET status='parsed' WHERE status='auditing'
+            role_bootstrap.bootstrap_admin(db)      # 可能提升账号角色
+
+        这些副作用**读的是 `main` 模块里的 `engine` / `SessionLocal` 全局名**，
+        默认指向 `database.engine`（即真实开发库 `backend/contract.db`）。
+        因此本用例若不隔离，跑一次单测就会改动真实库的 schema/数据。
+
+        隔离方式（方案 B：只换数据库依赖，不改生产逻辑）：
+        * `mock.patch.object(app_main, "engine", <临时 engine>)`
+        * `mock.patch.object(app_main, "SessionLocal", <临时 sessionmaker>)`
+          —— `lifespan`、`_ensure_columns()`（内部按 `engine.url` 解析路径、
+          并用 `_migrate_fk_column_type` 重建表）全部随之落到临时库；
+        * 生产 `lifespan` 的代码路径与行为**一行未改**，只是把它依赖的库换成临时库；
+        * 用例结束 `engine.dispose()` + 删除临时目录，不留残留文件。
+
+        同时把 `warmup_service.start_warmup` 与 `role_bootstrap.bootstrap_admin` 打桩，
+        语义与改造前完全一致（断言两者各被调用一次）。
+        """
+        tmp = tempfile.TemporaryDirectory()
+        eng = None
+        try:
+            db_path = Path(tmp.name) / "warmup_lifespan.db"
+            eng = create_engine(
+                f"sqlite:///{db_path}",
+                connect_args={"check_same_thread": False, "timeout": 30},
+            )
+            TempSession = sessionmaker(bind=eng)
+
+            async def _run():
+                with mock.patch.object(app_main, "engine", eng), \
+                     mock.patch.object(app_main, "SessionLocal", TempSession), \
+                     mock.patch.object(app_main.warmup_service, "start_warmup") as sw, \
+                     mock.patch.object(app_main.role_bootstrap, "bootstrap_admin") as sb:
+                    async with app_main.lifespan(app_main.app):
+                        pass
+                    sw.assert_called_once()
+                    sb.assert_called_once()
+
+            asyncio.run(_run())
+
+            # 隔离生效的正面证据：建表 DDL 落在【临时库】里（真实库因此完全不受影响）
+            self.assertIn("contracts", inspect(eng).get_table_names())
+            self.assertTrue(db_path.exists())
+        finally:
+            if eng is not None:
+                eng.dispose()
+            gc.collect()   # Windows：确保 sqlite 句柄释放后再删临时库
+            tmp.cleanup()
 
 
 if __name__ == "__main__":
