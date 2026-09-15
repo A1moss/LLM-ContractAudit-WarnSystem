@@ -30,7 +30,9 @@
           合同管理
         </template>
         <el-menu-item index="/contracts">合同列表</el-menu-item>
-        <el-menu-item index="/contracts/upload" :disabled="!isLoggedIn">上传合同</el-menu-item>
+        <!-- 上传入口仅 uploader/admin（与后端 require_role("uploader") 一致）；
+             reviewer/approver 不显示。注意：此处只是 UI 显隐，后端才是权限边界。 -->
+        <el-menu-item v-if="canUpload" index="/contracts/upload">上传合同</el-menu-item>
       </el-sub-menu>
 
       <el-sub-menu index="audit-sub">
@@ -129,6 +131,10 @@ const role = ref(localStorage.getItem('role') || '')
 
 const ROLE_LABELS = { uploader: '上传者', reviewer: '审核人', approver: '验收人', admin: '管理员' }
 const roleLabel = ref(ROLE_LABELS[role.value] || '')
+
+// 上传入口可见性（仅 UI）：uploader/admin 可见，reviewer/approver 不可见。
+// localStorage.role 可被用户手工篡改，因此这里**不是**安全控制，后端 require_role 才是。
+const canUpload = computed(() => isLoggedIn.value && (role.value === 'uploader' || role.value === 'admin'))
 
 router.afterEach(() => {
   isLoggedIn.value = !!localStorage.getItem('token')

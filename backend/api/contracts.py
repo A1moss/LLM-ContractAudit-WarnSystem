@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from database import get_db, SessionLocal
 from models.contract import Contract
 from models.user import User
-from api.deps import get_current_user, require_role, ROLE_ADMIN
+from api.deps import get_current_user, require_role, ROLE_ADMIN, ROLE_UPLOADER
 from ai.parser import detect_and_parse
 from ai.classifier import classify_contract
 from ai.extractor import extract_elements
@@ -335,7 +335,9 @@ def upload_contract(
     contract_type: str = Form(None),
     audit_mode: str = Form("precise"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    # 上传限 uploader（admin 经 require_role 恒通过）；reviewer/approver 返回 403。
+    # 上传者与审核者分离，避免"自己上传自己审"的角色混同。
+    current_user: User = Depends(require_role(ROLE_UPLOADER)),
 ):
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in (".pdf", ".docx", ".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp"):
@@ -836,6 +838,9 @@ def review_contract(
     c = db.query(Contract).filter(Contract.id == contract_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="contract not found")
+    # 职责分离：不得复核自己上传的合同（自审自过），否则审核环节形同虚设
+    if c.user_id == current_user.id:
+        raise HTTPException(status_code=403, detail="不能复核自己上传的合同")
     if c.status != "completed":
         raise HTTPException(status_code=400, detail=f"当前状态 {c.status} 不可复核，需先完成审核")
     if action == "approve":
@@ -860,6 +865,9 @@ def approve_contract(
     c = db.query(Contract).filter(Contract.id == contract_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="contract not found")
+    # 职责分离：不得验收自己上传的合同（自验自过）
+    if c.user_id == current_user.id:
+        raise HTTPException(status_code=403, detail="不能验收自己上传的合同")
     if c.status != "reviewed":
         raise HTTPException(status_code=400, detail=f"当前状态 {c.status} 不可验收，需先复核通过")
     c.status = "approved"

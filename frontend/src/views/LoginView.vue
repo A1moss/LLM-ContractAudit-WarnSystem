@@ -36,13 +36,14 @@
             <el-form-item label="确认密码" prop="confirmPassword">
               <el-input v-model="regForm.confirmPassword" type="password" show-password placeholder="再次输入密码" />
             </el-form-item>
-            <el-form-item label="角色" prop="role">
-              <el-select v-model="regForm.role" style="width: 100%">
-                <el-option label="上传者（上传并触发审核）" value="uploader" />
-                <el-option label="审核人（复核审核结果）" value="reviewer" />
-                <el-option label="验收人（最终验收）" value="approver" />
-                <el-option label="管理员（全部权限）" value="admin" />
-              </el-select>
+            <!-- 角色不可自选：注册一律为「上传者」，审核人/验收人/管理员由管理员分配 -->
+            <el-form-item>
+              <el-alert
+                title="注册后为「上传者」角色；审核人 / 验收人 / 管理员需由管理员分配。"
+                type="info"
+                :closable="false"
+                show-icon
+              />
             </el-form-item>
             <el-form-item>
               <el-button type="success" class="login-btn" :loading="loading" @click="handleRegister">
@@ -126,7 +127,8 @@ async function handleLogin() {
 
 // ── 注册 ──
 const regFormRef = ref(null)
-const regForm = ref({ username: '', email: '', password: '', confirmPassword: '', role: 'uploader' })
+// 不含 role：角色由后端固定为 uploader，客户端无权指定（权限边界）
+const regForm = ref({ username: '', email: '', password: '', confirmPassword: '' })
 
 const validateConfirmPassword = (_rule, value, callback) => {
   if (value !== regForm.value.password) {
@@ -161,11 +163,11 @@ async function handleRegister() {
 
   loading.value = true
   try {
+    // 不提交 role：后端固定建为 uploader（前端不作为权限依据）
     const res = await request.post('/auth/register', {
       username: regForm.value.username,
       email: regForm.value.email,
       password: regForm.value.password,
-      role: regForm.value.role,
     })
     localStorage.setItem('token', res.data.token)
     localStorage.setItem('username', res.data.user.username)

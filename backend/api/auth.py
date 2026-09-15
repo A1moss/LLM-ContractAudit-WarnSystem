@@ -5,17 +5,24 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models.user import User
+from api.deps import ROLE_UPLOADER
 from services.auth import hash_password, verify_password, create_access_token
 
 router = APIRouter(prefix='/auth', tags=['auth'])
 
 
 class RegisterRequest(BaseModel):
+    """注册请求。
+
+    注意：**不接受 role 字段**。角色是权限边界，绝不能由客户端自选——
+    否则任何人都能自注册为 admin 从而获得全局合同读取/审核/验收/删除权限。
+    自助注册一律固定为 uploader；reviewer/approver/admin 只能由数据库预置或
+    管理员在后台分配（本版本尚无用户管理接口，故不在注册路径上放开）。
+    客户端即使额外传 role=admin，pydantic 也会忽略该未知字段，最终仍建为 uploader。
+    """
     username: str = Field(..., min_length=2, max_length=50)
     email: EmailStr
     password: str = Field(..., min_length=6, max_length=128)
-    # 多用户角色：uploader(上传者)/reviewer(审核人)/approver(验收人)/admin(管理员)
-    role: str = Field(default="uploader", pattern=r"^(uploader|reviewer|approver|admin)$")
 
 
 class LoginRequest(BaseModel):
@@ -54,7 +61,8 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)):
         username=body.username,
         email=body.email,
         hashed_password=hash_password(body.password),
-        role=body.role,
+        # 硬编码 uploader：不读取任何客户端传入的角色（权限边界，见 RegisterRequest 注释）
+        role=ROLE_UPLOADER,
     )
     db.add(user)
     db.commit()
