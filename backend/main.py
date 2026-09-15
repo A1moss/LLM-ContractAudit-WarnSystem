@@ -12,6 +12,7 @@ from api.feedback import router as feedback_router
 from api.templates import router as templates_router
 from api.stats import router as stats_router
 from ai.taxonomy import to_dict as taxonomy_dict
+from services import warmup as warmup_service
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +139,9 @@ async def lifespan(app: FastAPI):
             conn.execute(text("UPDATE contracts SET status='parsed' WHERE status='auditing'"))
     except Exception as e:
         logger.warning("启动复位 auditing 状态失败: %s", e)
+    # 静启动：后台线程预热 torch/向量模型/向量库，启动立即就绪（不阻塞、用户无感知），
+    # 避免懒加载把冷启动成本推到「第一次上传合同」上（详见 services/warmup.py）。
+    warmup_service.start_warmup()
     yield
 
 
@@ -159,7 +163,8 @@ def root():
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    """健康检查。warmup 为静启动进度（被动可查：warming/ready/failed），不影响接口可用性。"""
+    return {"status": "ok", "warmup": warmup_service.status()}
 
 
 @app.get("/api/contract-types")
