@@ -31,6 +31,10 @@ _client: Optional[chromadb.PersistentClient] = None
 _embedder: Optional[SentenceTransformer] = None
 _init_lock = threading.Lock()
 _init_done = False
+# 单例构建锁：静启动在后台线程预热（services/warmup.py），可能与请求线程并发首次访问，
+# 双检锁避免重复构建（重复加载向量模型既慢又占内存）。
+_client_lock = threading.Lock()
+_embedder_lock = threading.Lock()
 
 COLLECTIONS = {
     "laws": "法律法规库",
@@ -53,20 +57,24 @@ REALTEST_PATH = os.path.join(_SERVICE_DIR, "03_数据集", "测试集", "realtes
 def _get_client() -> chromadb.PersistentClient:
     global _client
     if _client is None:
-        os.makedirs(CHROMA_DIR, exist_ok=True)
-        _client = chromadb.PersistentClient(
-            path=CHROMA_DIR,
-            settings=Settings(anonymized_telemetry=False),
-        )
+        with _client_lock:
+            if _client is None:
+                os.makedirs(CHROMA_DIR, exist_ok=True)
+                _client = chromadb.PersistentClient(
+                    path=CHROMA_DIR,
+                    settings=Settings(anonymized_telemetry=False),
+                )
     return _client
 
 
 def _get_embedder() -> SentenceTransformer:
     global _embedder
     if _embedder is None:
-        _embedder = SentenceTransformer("shibing624/text2vec-base-chinese")
-        # 默认 max_seq_length=128（约128汉字）对长合同太短，提到 512（BERT 上限）
-        _embedder.max_seq_length = 512
+        with _embedder_lock:
+            if _embedder is None:
+                _embedder = SentenceTransformer("shibing624/text2vec-base-chinese")
+                # 默认 max_seq_length=128（约128汉字）对长合同太短，提到 512（BERT 上限）
+                _embedder.max_seq_length = 512
     return _embedder
 
 
