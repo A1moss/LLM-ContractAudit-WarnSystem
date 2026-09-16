@@ -13,7 +13,7 @@
           </div>
         </div>
         <div class="hero-right">
-          <img src="/images/hero.png" alt="A24 平台示意" />
+          <img src="/images/hero.svg" alt="A24 平台示意" />
         </div>
       </div>
     </section>
@@ -135,10 +135,10 @@ const recentContracts = ref([])
 
 // 核心能力（描述不含固定数字，数据由后端实时提供；跳转到明确的功能页面）
 const capabilities = [
-  { no: '01', title: '智能合同分类', desc: '基于 RAG 检索范本 + 大模型推理，将合同自动归类到民法典 11 类法理分类，并叠加「服务外包」等业务标签。', img: '/images/feat-1.png', link: '/contracts', action: '进入合同列表' },
-  { no: '02', title: '风险识别与预警', desc: '「LLM 只抽事实证据 + 确定性规则裁决」架构，覆盖 R01–R13 风险规则，风险判定不做 LLM 自由发挥，确保判定可解释、可溯源。', img: '/images/feat-2.png', link: '/audit/result', action: '查看审核历史' },
-  { no: '03', title: '合同要素抽取', desc: '自动抽取合同关键要素（主体、金额、期限、违约责任等），为审核与比对提供结构化底座。', img: '/images/feat-3.png', link: '/contracts/upload', action: '去上传合同' },
-  { no: '04', title: '审核报告生成', desc: '一键生成结构化审核报告：风险清单、修改建议、条款比对与风险热力图，支持反馈标注闭环，人机协同完成最终审核。', img: '/images/feat-4.png', link: '/audit/report', action: '查看审核报告' },
+  { no: '01', title: '智能合同分类', desc: '基于 RAG 检索范本 + 大模型推理，将合同自动归类到民法典 11 类法理分类，并叠加「服务外包」等业务标签。', img: '/images/feat-1.svg', link: '/contracts', action: '进入合同列表' },
+  { no: '02', title: '风险识别与预警', desc: '「LLM 只抽事实证据 + 确定性规则裁决」架构，覆盖 R01–R13 风险规则，风险判定不做 LLM 自由发挥，确保判定可解释、可溯源。', img: '/images/feat-2.svg', link: '/audit/result', action: '查看审核历史' },
+  { no: '03', title: '合同要素抽取', desc: '自动抽取合同关键要素（主体、金额、期限、违约责任等），为审核与比对提供结构化底座。', img: '/images/feat-3.svg', link: '/contracts/upload', action: '去上传合同' },
+  { no: '04', title: '审核报告生成', desc: '一键生成结构化审核报告：风险清单、修改建议、条款比对与风险热力图，支持反馈标注闭环，人机协同完成最终审核。', img: '/images/feat-4.svg', link: '/audit/report', action: '查看审核报告' },
 ]
 
 function statusLabel(s) {

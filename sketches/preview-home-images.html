@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8">
+<title>A24 首页装饰图预览（SVG 无 AI 水印）</title>
+<style>
+  body { font-family: "PingFang SC","Microsoft YaHei",sans-serif; background:#0F1B33; color:#E7EEFB; margin:0; padding:32px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:#8FA6CC; font-size:13px; margin-bottom:28px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(420px,1fr)); gap:24px; }
+  .card { background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 12px 34px rgba(0,0,0,.35); }
+  .img svg { width:100%; height:auto; display:block; }
+  .cap { padding:12px 16px; }
+  .t { font-size:15px; font-weight:600; color:#131313; }
+  .f { font-size:12px; color:#8A93A6; margin-top:3px; }
+  .old { color:#B9C1D4; }
+</style></head><body>
+  <h1>A24 首页装饰图预览</h1>
+  <div class="sub">已用 SVG 矢量图替换豆包 AI 水印 PNG，品牌色 #1935C3，零水印、清晰可缩放</div>
+  <div class="grid">
+    <div class="card">
+      <div class="img"> <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" font-family="'PingFang SC','Microsoft YaHei',sans-serif">
+  <defs>
+    <linearGradient id="hbg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0A1A3A"/><stop offset="1" stop-color="#123063"/>
+    </linearGradient>
+    <linearGradient id="hlogo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1935C3"/><stop offset="1" stop-color="#1B70F0"/>
+    </linearGradient>
+    <linearGradient id="hblue" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#1B70F0"/><stop offset="1" stop-color="#3D87F5"/>
+    </linearGradient>
+    <radialGradient id="hglow" cx="0.85" cy="0" r="0.7">
+      <stop offset="0" stop-color="#1B70F0" stop-opacity="0.35"/><stop offset="1" stop-color="#1B70F0" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="640" height="360" fill="url(#hbg)"/>
+  <rect width="640" height="360" fill="url(#hglow)"/>
+
+  <!-- 侧边栏 -->
+  <rect x="0" y="0" width="64" height="360" fill="#081426"/>
+  <rect x="16" y="16" width="32" height="32" rx="9" fill="url(#hlogo)"/>
+  <text x="32" y="37.5" font-size="16" font-weight="700" fill="#fff" text-anchor="middle">A</text>
+  <g fill="#33507D">
+    <rect x="20" y="70" width="24" height="6" rx="3"/>
+    <rect x="20" y="92" width="24" height="6" rx="3" fill="#1B70F0"/>
+    <rect x="20" y="114" width="24" height="6" rx="3"/>
+    <rect x="20" y="136" width="24" height="6" rx="3"/>
+    <rect x="20" y="158" width="24" height="6" rx="3"/>
+  </g>
+  <rect x="0" y="330" width="64" height="30" fill="#0A1A3A"/>
+
+  <!-- 顶栏 -->
+  <rect x="64" y="0" width="576" height="48" fill="#0D2447"/>
+  <text x="84" y="30" font-size="14" font-weight="600" fill="#E7EEFB">合同审核工作台</text>
+  <rect x="400" y="14" width="160" height="22" rx="11" fill="#122B58"/>
+  <circle cx="416" cy="25" r="4" fill="#33507D"/>
+  <rect x="426" y="22" width="90" height="6" rx="3" fill="#33507D"/>
+  <circle cx="592" cy="25" r="12" fill="#1B70F0"/>
+  <circle cx="592" cy="25" r="5" fill="#fff" opacity="0.7"/>
+
+  <!-- 4 个统计卡片 -->
+  <g>
+    <rect x="84" y="66" width="126" height="70" rx="10" fill="#0E2650"/>
+    <text x="98" y="92" font-size="12" fill="#8FA6CC">今日审核</text>
+    <text x="98" y="122" font-size="26" font-weight="700" fill="#fff">128</text>
+    <text x="132" y="122" font-size="13" fill="#5B7FB8">份</text>
+
+    <rect x="222" y="66" width="126" height="70" rx="10" fill="#0E2650"/>
+    <text x="236" y="92" font-size="12" fill="#8FA6CC">待处理</text>
+    <text x="236" y="122" font-size="26" font-weight="700" fill="#F5A623">16</text>
+    <text x="266" y="122" font-size="13" fill="#5B7FB8">份</text>
+
+    <rect x="360" y="66" width="126" height="70" rx="10" fill="#0E2650"/>
+    <text x="374" y="92" font-size="12" fill="#8FA6CC">本月风险</text>
+    <text x="374" y="122" font-size="26" font-weight="700" fill="#E60012">23</text>
+    <text x="400" y="122" font-size="13" fill="#5B7FB8">条</text>
+
+    <rect x="498" y="66" width="122" height="70" rx="10" fill="#0E2650"/>
+    <text x="512" y="92" font-size="12" fill="#8FA6CC">通过率</text>
+    <text x="512" y="122" font-size="26" font-weight="700" fill="#23B26D">96.4</text>
+    <text x="568" y="122" font-size="13" fill="#5B7FB8">%</text>
+  </g>
+
+  <!-- 左：风险分布柱状图 -->
+  <rect x="84" y="150" width="300" height="186" rx="10" fill="#0E2650"/>
+  <text x="98" y="174" font-size="13" font-weight="600" fill="#E7EEFB">风险分布</text>
+  <g stroke="#1D3560" stroke-width="1">
+    <line x1="98" y1="306" x2="370" y2="306"/>
+    <line x1="98" y1="306" x2="98" y2="196"/>
+  </g>
+  <!-- 三根柱 -->
+  <rect x="140" y="270" width="34" height="36" rx="4" fill="#23B26D"/>
+  <rect x="212" y="238" width="34" height="68" rx="4" fill="#F5A623"/>
+  <rect x="284" y="204" width="34" height="102" rx="4" fill="#E60012"/>
+  <text x="157" y="322" font-size="11" fill="#8FA6CC">低</text>
+  <text x="229" y="322" font-size="11" fill="#8FA6CC">中</text>
+  <text x="301" y="322" font-size="11" fill="#8FA6CC">高</text>
+
+  <!-- 右：合同列表 -->
+  <rect x="396" y="150" width="224" height="186" rx="10" fill="#0E2650"/>
+  <text x="410" y="174" font-size="13" font-weight="600" fill="#E7EEFB">最近合同</text>
+  <g font-size="11">
+    <rect x="410" y="188" width="196" height="34" rx="6" fill="#122B58"/>
+    <text x="420" y="209" fill="#CDD9EE">采购服务合同.pdf</text>
+    <rect x="560" y="195" width="36" height="18" rx="9" fill="#1B70F0" opacity="0.25"/>
+    <text x="568" y="208" fill="#8FB4FF">已审核</text>
+
+    <rect x="410" y="228" width="196" height="34" rx="6" fill="#122B58"/>
+    <text x="420" y="249" fill="#CDD9EE">技术开发合同.pdf</text>
+    <rect x="560" y="235" width="36" height="18" rx="9" fill="#E60012" opacity="0.25"/>
+    <text x="568" y="248" fill="#FF8A93">高风险</text>
+
+    <rect x="410" y="268" width="196" height="34" rx="6" fill="#122B58"/>
+    <text x="420" y="289" fill="#CDD9EE">房屋租赁合同.pdf</text>
+    <rect x="560" y="275" width="36" height="18" rx="9" fill="#23B26D" opacity="0.25"/>
+    <text x="568" y="288" fill="#7BD9AE">低风险</text>
+  </g>
+</svg> </div>
+      <div class="cap">
+        <div class="t">首页 Hero 平台示意（深色仪表盘）</div>
+        <div class="f">hero.svg <span class="old">(原 hero.png 已弃用)</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="img"> <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" font-family="'PingFang SC','Microsoft YaHei',sans-serif">
+  <defs>
+    <linearGradient id="f1bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F8FAFD"/><stop offset="1" stop-color="#EEF3FC"/>
+    </linearGradient>
+    <linearGradient id="f1doc" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1935C3"/><stop offset="1" stop-color="#1B70F0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="640" height="360" fill="url(#f1bg)"/>
+  <!-- 浅网格 -->
+  <g stroke="#E3EAF5" stroke-width="1">
+    <line x1="0" y1="120" x2="640" y2="120"/><line x1="0" y1="240" x2="640" y2="240"/>
+    <line x1="160" y1="0" x2="160" y2="360"/><line x1="320" y1="0" x2="320" y2="360"/><line x1="480" y1="0" x2="480" y2="360"/>
+  </g>
+
+  <!-- 左侧：合同文档 -->
+  <g transform="translate(110 70)">
+    <rect x="0" y="0" width="130" height="180" rx="10" fill="#fff" stroke="#DCE4F2"/>
+    <rect x="0" y="0" width="130" height="30" rx="10" fill="url(#f1doc)"/>
+    <rect x="10" y="40" width="70" height="6" rx="3" fill="#C7D4EC"/>
+    <rect x="10" y="54" width="100" height="6" rx="3" fill="#E6EDF7"/>
+    <rect x="10" y="68" width="90" height="6" rx="3" fill="#E6EDF7"/>
+    <rect x="10" y="82" width="104" height="6" rx="3" fill="#E6EDF7"/>
+    <rect x="10" y="96" width="60" height="6" rx="3" fill="#E6EDF7"/>
+    <rect x="10" y="116" width="96" height="6" rx="3" fill="#E6EDF7"/>
+    <rect x="10" y="130" width="84" height="6" rx="3" fill="#E6EDF7"/>
+    <rect x="10" y="144" width="100" height="6" rx="3" fill="#E6EDF7"/>
+  </g>
+
+  <!-- 中间：抽取箭头 -->
+  <g stroke="#1B70F0" stroke-width="2" fill="none">
+    <path d="M270 160 H300"/>
+  </g>
+  <path d="M300 154 L312 160 L300 166 Z" fill="#1B70F0"/>
+
+  <!-- 右侧：分类标签 -->
+  <g transform="translate(330 60)">
+    <rect x="0" y="0" width="190" height="36" rx="18" fill="#1935C3"/>
+    <text x="95" y="23" font-size="14" fill="#fff" text-anchor="middle">买卖合同</text>
+    <rect x="0" y="48" width="150" height="36" rx="18" fill="#fff" stroke="#C9D6F0"/>
+    <text x="75" y="71" font-size="14" fill="#1935C3" text-anchor="middle">服务外包</text>
+    <rect x="160" y="48" width="150" height="36" rx="18" fill="#fff" stroke="#C9D6F0"/>
+    <text x="235" y="71" font-size="14" fill="#585E7D" text-anchor="middle">民法典 · 合同编</text>
+    <rect x="0" y="96" width="130" height="36" rx="18" fill="#fff" stroke="#C9D6F0"/>
+    <text x="65" y="119" font-size="14" fill="#585E7D" text-anchor="middle">技术合同</text>
+    <rect x="140" y="96" width="140" height="36" rx="18" fill="#fff" stroke="#C9D6F0"/>
+    <text x="210" y="119" font-size="14" fill="#585E7D" text-anchor="middle">租赁合同</text>
+    <rect x="0" y="144" width="140" height="36" rx="18" fill="#fff" stroke="#C9D6F0"/>
+    <text x="70" y="167" font-size="14" fill="#585E7D" text-anchor="middle">承揽合同</text>
+    <rect x="150" y="144" width="140" height="36" rx="18" fill="#fff" stroke="#C9D6F0"/>
+    <text x="220" y="167" font-size="14" fill="#585E7D" text-anchor="middle">+ 8 类</text>
+  </g>
+</svg> </div>
+      <div class="cap">
+        <div class="t">智能合同分类</div>
+        <div class="f">feat-1.svg <span class="old">(原 feat-1.png 已弃用)</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="img"> <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" font-family="'PingFang SC','Microsoft YaHei',sans-serif">
+  <defs>
+    <linearGradient id="f2bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F8FAFD"/><stop offset="1" stop-color="#FDF2F3"/>
+    </linearGradient>
+    <linearGradient id="f2shield" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#E60012"/><stop offset="1" stop-color="#FF4D5A"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="640" height="360" fill="url(#f2bg)"/>
+
+  <!-- 左侧：文档 + 扫描高亮 -->
+  <g transform="translate(90 70)">
+    <rect x="0" y="0" width="150" height="200" rx="10" fill="#fff" stroke="#DCE4F2"/>
+    <rect x="0" y="0" width="150" height="32" rx="10" fill="#1935C3"/>
+    <rect x="12" y="48" width="110" height="8" rx="4" fill="#E6EDF7"/>
+    <rect x="12" y="66" width="90" height="8" rx="4" fill="#E6EDF7"/>
+    <!-- 高亮风险行 -->
+    <rect x="8" y="88" width="134" height="20" rx="4" fill="#FFE1E3"/>
+    <rect x="12" y="94" width="80" height="8" rx="4" fill="#E60012" opacity="0.75"/>
+    <rect x="12" y="120" width="100" height="8" rx="4" fill="#E6EDF7"/>
+    <rect x="12" y="138" width="70" height="8" rx="4" fill="#E6EDF7"/>
+    <!-- 第二处高亮 -->
+    <rect x="8" y="156" width="134" height="20" rx="4" fill="#FFF3D6"/>
+    <rect x="12" y="162" width="66" height="8" rx="4" fill="#F5A623" opacity="0.8"/>
+  </g>
+
+  <!-- 扫描线 -->
+  <rect x="90" y="170" width="150" height="3" rx="1.5" fill="#1B70F0" opacity="0.8"/>
+  <circle cx="240" cy="171.5" r="5" fill="#1B70F0"/>
+
+  <!-- 右侧：风险规则 + 盾牌 -->
+  <g transform="translate(340 60)">
+    <rect x="0" y="0" width="190" height="44" rx="10" fill="#fff" stroke="#DCE4F2"/>
+    <circle cx="22" cy="22" r="8" fill="#E60012"/>
+    <text x="30" y="18" font-size="13" fill="#fff" text-anchor="middle">!</text>
+    <text x="40" y="27" font-size="13.5" font-weight="600" fill="#131313">违约金条款缺失</text>
+    <text x="152" y="27" font-size="12" fill="#E60012" text-anchor="end">R03 · 高</text>
+
+    <rect x="0" y="54" width="190" height="44" rx="10" fill="#fff" stroke="#DCE4F2"/>
+    <circle cx="22" cy="76" r="8" fill="#F5A623"/>
+    <text x="30" y="72" font-size="13" fill="#fff" text-anchor="middle">!</text>
+    <text x="40" y="81" font-size="13.5" font-weight="600" fill="#131313">付款期限不明确</text>
+    <text x="152" y="81" font-size="12" fill="#F5A623" text-anchor="end">R07 · 中</text>
+
+    <rect x="0" y="108" width="190" height="44" rx="10" fill="#fff" stroke="#DCE4F2"/>
+    <circle cx="22" cy="130" r="8" fill="#23B26D"/>
+    <text x="27" y="135" font-size="13" fill="#fff" text-anchor="middle">✓</text>
+    <text x="40" y="135" font-size="13.5" font-weight="600" fill="#131313">主体资格已核验</text>
+    <text x="152" y="135" font-size="12" fill="#23B26D" text-anchor="end">通过</text>
+
+    <!-- 盾牌徽标 -->
+    <g transform="translate(24 166)">
+      <path d="M72 0 L140 28 V78 C140 118 110 142 72 152 C34 142 4 118 4 78 V28 Z" fill="url(#f2shield)"/>
+      <path d="M72 12 L124 34 V78 C124 110 100 130 72 139 C44 130 20 110 20 78 V34 Z" fill="#fff"/>
+      <path d="M72 52 L94 74 L72 96 L50 74 Z" fill="#E60012"/>
+    </g>
+  </g>
+</svg> </div>
+      <div class="cap">
+        <div class="t">风险识别与预警</div>
+        <div class="f">feat-2.svg <span class="old">(原 feat-2.png 已弃用)</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="img"> <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" font-family="'PingFang SC','Microsoft YaHei',sans-serif">
+  <defs>
+    <linearGradient id="f3bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F8FAFD"/><stop offset="1" stop-color="#EDF3FC"/>
+    </linearGradient>
+    <linearGradient id="f3doc" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1935C3"/><stop offset="1" stop-color="#1B70F0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="640" height="360" fill="url(#f3bg)"/>
+
+  <!-- 左侧：合同文档 -->
+  <g transform="translate(100 70)">
+    <rect x="0" y="0" width="140" height="190" rx="10" fill="#fff" stroke="#DCE4F2"/>
+    <rect x="0" y="0" width="140" height="30" rx="10" fill="url(#f3doc)"/>
+    <rect x="12" y="44" width="90" height="7" rx="3.5" fill="#E6EDF7"/>
+    <rect x="12" y="60" width="110" height="7" rx="3.5" fill="#E6EDF7"/>
+    <rect x="12" y="76" width="70" height="7" rx="3.5" fill="#E6EDF7"/>
+    <!-- 被抽取的高亮要素 -->
+    <rect x="8" y="94" width="124" height="16" rx="4" fill="#E3EDFF"/>
+    <rect x="12" y="99" width="56" height="6" rx="3" fill="#1B70F0" opacity="0.8"/>
+    <rect x="12" y="120" width="100" height="7" rx="3.5" fill="#E6EDF7"/>
+    <rect x="8" y="138" width="124" height="16" rx="4" fill="#E3EDFF"/>
+    <rect x="12" y="143" width="42" height="6" rx="3" fill="#1B70F0" opacity="0.8"/>
+    <rect x="12" y="162" width="80" height="7" rx="3.5" fill="#E6EDF7"/>
+  </g>
+
+  <!-- 抽取箭头 -->
+  <g stroke="#1B70F0" stroke-width="2" fill="none">
+    <path d="M262 130 H300"/>
+    <path d="M262 150 H300"/>
+  </g>
+  <path d="M300 124 L312 130 L300 136 Z" fill="#1B70F0"/>
+  <path d="M300 144 L312 150 L300 156 Z" fill="#1B70F0"/>
+
+  <!-- 右侧：结构化要素卡片 -->
+  <g transform="translate(336 62)">
+    <rect x="0" y="0" width="180" height="52" rx="10" fill="#fff" stroke="#DCE4F2"/>
+    <text x="16" y="22" font-size="12" fill="#8A93A6">合同主体</text>
+    <text x="16" y="42" font-size="14.5" font-weight="600" fill="#131313">甲乙双方公司</text>
+
+    <rect x="0" y="62" width="180" height="52" rx="10" fill="#fff" stroke="#DCE4F2"/>
+    <text x="16" y="84" font-size="12" fill="#8A93A6">合同金额</text>
+    <text x="16" y="104" font-size="14.5" font-weight="600" fill="#1935C3">¥ 1,280,000</text>
+
+    <rect x="0" y="124" width="180" height="52" rx="10" fill="#fff" stroke="#DCE4F2"/>
+    <text x="16" y="146" font-size="12" fill="#8A93A6">履行期限</text>
+    <text x="16" y="166" font-size="14.5" font-weight="600" fill="#131313">2026-03-01 至 2027-02-28</text>
+
+    <rect x="0" y="186" width="180" height="52" rx="10" fill="#fff" stroke="#DCE4F2"/>
+    <text x="16" y="208" font-size="12" fill="#8A93A6">违约责任</text>
+    <text x="16" y="228" font-size="14.5" font-weight="600" fill="#131313">违约金 20%</text>
+  </g>
+</svg> </div>
+      <div class="cap">
+        <div class="t">合同要素抽取</div>
+        <div class="f">feat-3.svg <span class="old">(原 feat-3.png 已弃用)</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="img"> <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" font-family="'PingFang SC','Microsoft YaHei',sans-serif">
+  <defs>
+    <linearGradient id="f4bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F8FAFD"/><stop offset="1" stop-color="#EDF3FC"/>
+    </linearGradient>
+    <linearGradient id="f4head" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1935C3"/><stop offset="1" stop-color="#1B70F0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="640" height="360" fill="url(#f4bg)"/>
+
+  <!-- 报告主体 -->
+  <g transform="translate(96 54)">
+    <rect x="0" y="0" width="300" height="252" rx="12" fill="#fff" stroke="#DCE4F2"/>
+    <rect x="0" y="0" width="300" height="46" rx="12" fill="url(#f4head)"/>
+    <text x="24" y="30" font-size="16" font-weight="700" fill="#fff">合同审核报告</text>
+    <rect x="16" y="62" width="40" height="14" rx="7" fill="#E60012"/>
+    <text x="26" y="72.5" font-size="10" fill="#fff" text-anchor="middle">高风险</text>
+    <text x="64" y="73" font-size="12" fill="#585E7D">3 项风险 · 5 条建议</text>
+
+    <!-- 风险清单 -->
+    <g font-size="12">
+      <circle cx="20" cy="100" r="4" fill="#E60012"/>
+      <text x="32" y="104" fill="#131313">违约金条款缺失</text>
+      <circle cx="20" cy="124" r="4" fill="#F5A623"/>
+      <text x="32" y="128" fill="#131313">付款期限不明确</text>
+      <circle cx="20" cy="148" r="4" fill="#23B26D"/>
+      <text x="32" y="152" fill="#131313">主体资格已核验</text>
+    </g>
+
+    <!-- 内部迷你柱状图 -->
+    <g>
+      <line x1="16" y1="226" x2="284" y2="226" stroke="#E3EAF5"/>
+      <rect x="40" y="198" width="26" height="28" rx="3" fill="#23B26D"/>
+      <rect x="86" y="182" width="26" height="44" rx="3" fill="#F5A623"/>
+      <rect x="132" y="164" width="26" height="62" rx="3" fill="#E60012"/>
+      <rect x="178" y="206" width="26" height="20" rx="3" fill="#1B70F0"/>
+      <rect x="224" y="190" width="26" height="36" rx="3" fill="#1935C3"/>
+    </g>
+  </g>
+
+  <!-- 右侧：闭环标注 -->
+  <g transform="translate(440 96)">
+    <g>
+      <circle cx="0" cy="0" r="26" fill="#E8F0FE"/>
+      <path d="M-10 0 L-2 8 L12 -8" stroke="#1935C3" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <text x="0" y="46" font-size="13" font-weight="600" fill="#131313" text-anchor="middle">风险清单</text>
+    <g transform="translate(0 96)">
+      <circle cx="0" cy="0" r="26" fill="#E8F0FE"/>
+      <path d="M-10 0 L-2 8 L12 -8" stroke="#1935C3" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <text x="0" y="142" font-size="13" font-weight="600" fill="#131313" text-anchor="middle">修改建议</text>
+    <g transform="translate(0 192)">
+      <circle cx="0" cy="0" r="26" fill="#E8F0FE"/>
+      <path d="M-10 0 L-2 8 L12 -8" stroke="#1935C3" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <text x="0" y="238" font-size="13" font-weight="600" fill="#131313" text-anchor="middle">反馈闭环</text>
+    <!-- 连接线 -->
+    <line x1="0" y1="26" x2="0" y2="70" stroke="#C9D6F0" stroke-width="2"/>
+    <line x1="0" y1="122" x2="0" y2="166" stroke="#C9D6F0" stroke-width="2"/>
+  </g>
+</svg> </div>
+      <div class="cap">
+        <div class="t">审核报告生成</div>
+        <div class="f">feat-4.svg <span class="old">(原 feat-4.png 已弃用)</span></div>
+      </div>
+    </div></div>
+</body></html>
