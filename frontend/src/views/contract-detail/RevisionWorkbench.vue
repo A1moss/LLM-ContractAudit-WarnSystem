@@ -1018,9 +1018,12 @@ function groupTag(g) {
 .wb-warn { font-size: 12px; color: #B45309; background: #FFFBEB; border-radius: 6px; padding: 7px 9px; margin-bottom: 6px; line-height: 1.7; }
 .wb-suggest { font-size: 12.5px; color: #B45309; display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
 
-/* 底部固定下载状态条 */
+/* 下载状态条：随右栏滚动内容自然排在最后一块（不再固定在右栏底部）。
+   原来是 position: sticky + bottom: 0 + margin-top: auto，会把它钉在右栏可视底部，
+   在「非 Word 文档」等状态下长期占住底部空间；现改为普通文档流块。
+   卡片本身的尺寸/边框/留白/阴影保持原样，只增加与上方内容的间距。 */
 .wb-downloadbar {
-  position: sticky; bottom: 0; margin-top: auto;
+  margin-top: 10px;
   border: 1px solid var(--a24-border); border-radius: 10px; padding: 10px 12px;
   background: #fff; box-shadow: 0 -2px 10px rgba(19, 19, 19, 0.04);
   flex-shrink: 0;
