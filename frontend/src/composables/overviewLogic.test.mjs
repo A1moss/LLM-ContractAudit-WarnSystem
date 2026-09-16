@@ -282,3 +282,26 @@ test('三态标签用用户语言且互不相同（不暴露预检/锚点等术�
   assert.equal(LOCATION_STATES.locatable.dot, 'blue')
   assert.equal(LOCATION_STATES.confirmed.dot, 'green')
 })
+
+// ════════════════════════════════════════════════════════════════
+// 8. 采用态（adopted）与「已确认修改 N」
+// ════════════════════════════════════════════════════════════════
+
+test('采用态：多轮 session 只计 1（按会话计，不按 adopted 轮次数计）', () => {
+  // V1 false / V2 false / V3 true / V4 false —— 同一会话
+  const one = [{ key: '11', kind: 'risk', export: { exportable: true, applied: 1, blocker: '' } }]
+  assert.equal(countConfirmedSessions(one), 1, '同一会话多轮只 +1')
+})
+
+test('采用态：不可导出的 session 不计入「已确认修改」', () => {
+  const notConfirmed = [{ key: '11', kind: 'risk', export: { exportable: false, blocker: '尚未确认采用' } }]
+  assert.equal(countConfirmedSessions(notConfirmed), 0)
+})
+
+test('采用态：计数单位是会话，不是 adopted 轮次', () => {
+  const many = [
+    { key: '11', kind: 'risk', export: { exportable: true } },
+    { key: '12', kind: 'cmp', export: { exportable: true } },
+  ]
+  assert.equal(countConfirmedSessions(many), 2)
+})

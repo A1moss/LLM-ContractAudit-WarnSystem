@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import String, Integer, Text, DateTime, JSON, ForeignKey
+from sqlalchemy import String, Integer, Text, DateTime, JSON, ForeignKey, Boolean, Index
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base, utcnow_naive
@@ -12,9 +12,23 @@ class ClauseRevision(Base):
     每条 = 一轮修订：用户 instruction + 原始条款 + 修订结果 + AI 输出元信息。
     多轮对话通过 clause_key 分组 + created_at/id 排序；同一链条（连续改同一条款）
     在导出 DOCX 时按 clause_text→revised_clause 链式归并到最终结果。
+
+    ``adopted``（采用态，V2.2）：
+      「生成一轮」与「用户确认采用这一轮」是两件事。``/revise`` 每成功一轮就落一行
+      （adopted=False），只有用户点「确认采用此版」/「确认新增」或从总体方案
+      ``/overview/confirm`` 落库时才置 True。DOCX 归并时**归并组内优先取 adopted**，
+      组内没有 adopted 才回退到今天的行为（取 id 最大的一条）——保证历史数据零回归。
+
+    唯一范围：``(contract_id, clause_key)`` —— 一个合同的一个会话至多一个 adopted。
+    注意 DOCX 归并单位是锚点/位置（不是 clause_key），不同会话命中同一锚点时
+    仍按后写覆盖（已知边界，本轮不处理）。
     """
 
     __tablename__ = "clause_revisions"
+    __table_args__ = (
+        # 采用确认与 DOCX 归并都按 (contract_id, clause_key) 过滤，加复合索引
+        Index("ix_clause_revisions_contract_key", "contract_id", "clause_key"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     contract_id: Mapped[int] = mapped_column(Integer, ForeignKey("contracts.id"), nullable=False, index=True)
@@ -38,4 +52,6 @@ class ClauseRevision(Base):
     constraints: Mapped[list] = mapped_column(JSON, nullable=True, default=None)
     legal_basis: Mapped[list] = mapped_column(JSON, nullable=True, default=None)
     remaining_risks: Mapped[list] = mapped_column(JSON, nullable=True, default=None)
+    # 是否用户明确确认采用的版本（同一 contract_id + clause_key 下至多一条为 True）
+    adopted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)

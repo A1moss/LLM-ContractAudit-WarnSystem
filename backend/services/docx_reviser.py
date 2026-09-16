@@ -63,6 +63,37 @@ def _find_paragraph_indices(paragraphs, clause_text: str):
     return []
 
 
+def _is_adopted(rev) -> bool:
+    """该修订是否为用户明确确认采用的版本。
+
+    必须用 ``getattr`` 兜底：测试夹具（SimpleNamespace）与历史数据都可能没有该属性，
+    直接 ``rev.adopted`` 会 AttributeError。
+    """
+    return bool(getattr(rev, "adopted", False))
+
+
+def _pick_final(group: list):
+    """从一个**归并组**里选出最终生效的那一条修订。
+
+    采用态优先（V2.2）：
+      1. 组内存在 adopted=True 的行 → 在这些行里取"最后一条"；
+      2. 组内没有任何 adopted   → 取整组"最后一条"（**与加入 adopted 之前逐字一致**）。
+
+    "最后一条"的判定对测试夹具必须同样成立：现有 fixture 用 ``types.SimpleNamespace``
+    构造修订，**连 id 都没有**，旧的 ``_pick_final`` 实现是靠"按遍历顺序覆盖"决定胜负的。
+    因此这里用 ``getattr(r, "id", None)``：id 可用时按 id 最大（等价于时间序最后），
+    缺失时退回列表末位（等价于遍历顺序最后）。两种情况都不会抛 AttributeError。
+
+    关键：判断必须是「整个组有没有 adopted」，不能写成"逐行 if not rev.adopted: continue"——
+    否则历史数据（全部 adopted=False）会让所有归并组变空，导致全库 DOCX 无法导出。
+    """
+    adopted_rows = [r for r in group if _is_adopted(r)]
+    pool = adopted_rows or group
+    if all(getattr(r, "id", None) is not None for r in pool):
+        return max(pool, key=lambda r: r.id)
+    return pool[-1]
+
+
 def _final_clause_map(revisions) -> dict:
     """按时间顺序链式归并：同一链条的「真实原文锚点 → 最终修订结果」。
 
@@ -71,10 +102,12 @@ def _final_clause_map(revisions) -> dict:
 
     锚点优先用 original_clause_text（审核时定位到的逐字原文），缺失时退回
     clause_text（LLM 证据）。返回 {verbatim_anchor: final_revised_clause}。
+
+    归并组 = 同一个 anchor；组内选谁生效见 ``_pick_final``（adopted 优先，否则最后一条）。
     """
+    groups = {}       # anchor -> [rev, ...]（按遍历顺序 = id 升序）
     chain_root = {}   # revised_value -> root_clause_text
-    anchor_of = {}    # root_clause_text -> verbatim anchor
-    final = {}        # verbatim anchor -> final_revised
+    root_anchor = {}  # root_clause_text -> verbatim anchor
     for rev in revisions:
         if getattr(rev, "scope", "clause") != "clause":
             continue
@@ -84,10 +117,10 @@ def _final_clause_map(revisions) -> dict:
         # 只用审核阶段保存的真实原文锚点；无锚点的旧修订跳过（需重新审核）
         anchor = (getattr(rev, "original_clause_text", "") or "").strip()
         if anchor:
-            anchor_of[root] = anchor
-            final[anchor] = rev.revised_clause
+            root_anchor[root] = anchor
+            groups.setdefault(anchor, []).append(rev)
         chain_root[rev.revised_clause] = root
-    return final
+    return {anchor: _pick_final(rows).revised_clause for anchor, rows in groups.items()}
 
 
 # ── 新增条款（add_clause）插入 + 最小可靠编号 ──────────────────────────────
@@ -172,13 +205,16 @@ def _pos_key(position) -> str:
 
 
 def _final_add_clause_map(revisions) -> list:
-    """收集新增条款（operation="add_clause"）：同一插入位置只保留最后一条。
+    """收集新增条款（operation="add_clause"）：同一插入位置只保留最终一条。
 
     用户对同一条新增条款多轮修改（继续修改）会生成多条 add_clause 修订，
     位置相同 → 只保留最终版，避免重复插入。
+
+    归并组 = 同一个 ``_pos_key(position)``；组内选谁生效见 ``_pick_final``
+    （adopted 优先，否则最后一条 —— 与加入 adopted 之前的行为一致）。
     返回 [{"position": {...}, "clause_text": "..."}, ...]（按首次出现顺序）。
     """
-    final = {}
+    groups = {}
     order = []
     for rev in revisions:
         if getattr(rev, "operation", "replace") != "add_clause":
@@ -187,10 +223,18 @@ def _final_add_clause_map(revisions) -> list:
             continue
         pos = getattr(rev, "position", None) or {}
         key = _pos_key(pos)
-        if key not in final:
+        if key not in groups:
             order.append(key)
-        final[key] = {"position": pos, "clause_text": rev.revised_clause}
-    return [final[k] for k in order]
+            groups[key] = []
+        groups[key].append(rev)
+    out = []
+    for k in order:
+        chosen = _pick_final(groups[k])
+        out.append({
+            "position": (getattr(chosen, "position", None) or {}),
+            "clause_text": chosen.revised_clause,
+        })
+    return out
 
 
 def _has_paragraph_heading(doc, anchor_num: int) -> bool:

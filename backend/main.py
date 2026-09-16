@@ -107,7 +107,7 @@ def _ensure_columns():
                 db.commit()
         except Exception as e:
             logger.debug("audit_records 表尚不存在，跳过 evidence 迁移: %s", e)
-        # clause_revisions 新增列（DOCX 导出替换锚点 + 新增条款操作/位置）
+        # clause_revisions 新增列（DOCX 导出替换锚点 + 新增条款操作/位置 + 采用态 adopted）
         try:
             existing_cr = {row[1] for row in db.execute("PRAGMA table_info(clause_revisions)")}
             if existing_cr and "original_clause_text" not in existing_cr:
@@ -118,6 +118,17 @@ def _ensure_columns():
                 db.commit()
             if existing_cr and "position" not in existing_cr:
                 db.execute("ALTER TABLE clause_revisions ADD COLUMN position JSON")
+                db.commit()
+            # 采用态：历史行由 DEFAULT 0 回填，等价于「未采用」，因此旧数据行为完全不变
+            if existing_cr and "adopted" not in existing_cr:
+                db.execute("ALTER TABLE clause_revisions ADD COLUMN adopted BOOLEAN NOT NULL DEFAULT 0")
+                db.commit()
+            # (contract_id, clause_key) 复合索引：采用确认与 DOCX 归并都按这两个字段过滤
+            if existing_cr:
+                db.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_clause_revisions_contract_key "
+                    "ON clause_revisions (contract_id, clause_key)"
+                )
                 db.commit()
         except Exception as e:
             logger.debug("clause_revisions 表尚不存在，跳过迁移: %s", e)

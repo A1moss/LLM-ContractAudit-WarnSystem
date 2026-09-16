@@ -200,6 +200,42 @@ class TestAddClauseHelpers(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]["clause_text"], "V2")
 
+    def test_final_add_clause_map_adopted_wins(self):
+        """采用态优先：同位置多轮里被确认采用的那一条胜出（即使它不是最后一条）。"""
+        v1 = _rev(operation="add_clause", scope="clause", clause_text="", revised_clause="V1",
+                  position={"anchor": "五"})
+        v1.id = 1
+        v1.adopted = True
+        v2 = _rev(operation="add_clause", scope="clause", clause_text="", revised_clause="V2",
+                  position={"anchor": "五"})
+        v2.id = 2
+        v2.adopted = False
+        out = _final_add_clause_map([v1, v2])
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["clause_text"], "V1")
+
+    def test_final_add_clause_map_no_adopted_keeps_old_behaviour(self):
+        """历史数据（无 adopted 字段）必须与加入采用态之前完全一致。"""
+        revs = [
+            _rev(operation="add_clause", scope="clause", clause_text="", revised_clause="V1",
+                 position={"anchor": "五"}),
+            _rev(operation="add_clause", scope="clause", clause_text="", revised_clause="V2",
+                 position={"anchor": "五"}),
+        ]
+        self.assertFalse(hasattr(revs[0], "adopted"), "夹具本身不带 adopted 字段")
+        out = _final_add_clause_map(revs)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["clause_text"], "V2")
+
+    def test_final_add_clause_map_different_positions_keep_both(self):
+        revs = [
+            _rev(operation="add_clause", scope="clause", clause_text="", revised_clause="V1",
+                 position={"anchor": "五"}),
+            _rev(operation="add_clause", scope="clause", clause_text="", revised_clause="V2",
+                 position={"append": True}),
+        ]
+        self.assertEqual(len(_final_add_clause_map(revs)), 2)
+
 
 class TestAddClauseApi(unittest.TestCase):
     """API 层：新增建议接口 + revise(add_clause) 持久化 + 修订版下载。"""

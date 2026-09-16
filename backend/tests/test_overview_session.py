@@ -588,6 +588,50 @@ class TestOverviewConfirm(OverviewSessionTestBase):
             eng.dispose()
             tmp.cleanup()
 
+    def test_confirm_marks_revision_adopted(self):
+        """总体方案的「确认」本身就是用户确认动作 → 落库即 adopted=True。
+
+        并且同一 (contract_id, clause_key) 下旧采用版本会被取消（一个会话至多一个 adopted）。
+        """
+        tmp, eng, S = self._setup()
+        try:
+            with tempfile.TemporaryDirectory() as fdir:
+                docx = Path(fdir) / "原合同.docx"
+                _make_docx(docx)
+                cid = self._add_contract(S, docx)
+                rid = self._seed_special_sessions(S, cid)
+
+                # 种子里先手工放一条"已采用"的旧行，验证会被新确认取代
+                self._add_clause_revision(
+                    S, cid, scope="clause", operation="replace", clause_key=rid, clause_no="3",
+                    clause_text="第三条 违约责任与违约金上限为合同总价的30%。",
+                    original_clause_text=RISK_ANCHOR, instruction="旧轮",
+                    revised_clause="违约责任与违约金上限为合同总价的20%。", adopted=True)
+
+                data = self._propose(S, cid, [{
+                    "operation": "replace", "target_session_key": rid, "clause_no": "3",
+                    "original_quote": "违约责任与违约金上限为合同总价的30%",
+                    "revised_clause": "违约责任与违约金上限为合同总价的10%。",
+                    "reason": "整体压降", "legal_basis": [],
+                }])
+                res = self._confirm(S, cid, data["proposal_id"],
+                                    [overview.OverviewConfirmItem(id="p1")])
+                new_rid = res["data"]["applied"][0]["revision_id"]
+
+                s = S()
+                rows = (s.query(ClauseRevision)
+                        .filter(ClauseRevision.contract_id == cid,
+                                ClauseRevision.clause_key == rid)
+                        .order_by(ClauseRevision.id.asc()).all())
+                s.close()
+                adopted_ids = [r.id for r in rows if r.adopted]
+                self.assertEqual(adopted_ids, [new_rid],
+                                 "总体方案确认产生的修订应为唯一 adopted，旧采用版本被取消")
+                self.assertEqual(len(rows), 3, "历史轮次一条都不能少")
+        finally:
+            eng.dispose()
+            tmp.cleanup()
+
     def test_confirm_add_clause_without_position_is_refused(self):
         """位置必须由用户确认：AI 没给位置时拒绝落库并回传建议位置。"""
         tmp, eng, S = self._setup()

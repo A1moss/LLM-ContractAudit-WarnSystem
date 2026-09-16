@@ -29,6 +29,8 @@ import {
   getAuditReport,
   triggerAudit, reviewContract, approveContract,
   getFeedback, submitFeedback, deleteFeedback,
+  // 采用态（「确认采用此版」）
+  adoptRevision,
   // 总体修改（整份合同总控台）—— 只读汇总 + 结构化方案
   // 注意：/overview/confirm 当前无业务调用（[纳入方案] 是纯前端会话态，见下方注释），
   // 因此这里不导入 confirmOverviewProposal，避免死导入。
@@ -144,6 +146,9 @@ export function useContractWorkspace() {
 
   // ── DOCX ──
   const docx = reactive({ loading: false, error: '' })
+
+  // ── 采用态确认请求（「确认采用此版」）──
+  const adopting = ref(false)
 
   // ── 每个会话的 UI 状态（**仅 UI，非后端字段**）──
   // 结构：{ input, pending, locate, locateLoading, confirmAnchor, refineMode }
@@ -1538,44 +1543,73 @@ export function useContractWorkspace() {
     return !!(ui.confirmAnchor?.original_text || s.risk?.clause_position?.original_text)
   }
 
+  // ══════════════════════════════════════════════════════════════
+  // 采用态（adopted）：来自 GET /revisions 的 adopted 字段
+  // ══════════════════════════════════════════════════════════════
+
+  /** 该轮修订是否已被用户确认采用 */
+  function isRevisionAdopted(rev) {
+    return !!(rev && rev.adopted === true)
+  }
+
   /**
-   * 「采纳此版」（风险 / 比对）与「确认新增」（新增条款）共用的一次提交动作。
-   *
-   * 语义：这就是**专项会话里的最终确认**——按现有 POST /revise 落库成 ClauseRevision，
-   * 之后才会进入 DOCX 链路。前端不新增任何"确认接口"，也不改动 DOCX 安全链路。
-   *
-   * 前置条件（缺一不可，缺则明确提示、不提交）：
-   *   - 替换修改：必须有可提交的逐字原文（用户确认的候选，或审核阶段锚点）
-   *   - 新增条款：必须有用户确认的插入位置（绝不用 AI 建议位置替代用户选择）
+   * 会话当前被采用的修订（同一 clause_key 下至多一条）。
+   * 刷新后由 /revisions 的 adopted 字段恢复，不依赖任何前端内存态。
    */
-  async function adoptCurrentVersion() {
-    const s = activeSession.value
+  function sessionAdoptedRev(s) {
+    if (!s) return null
+    return (s.revs || []).find((r) => r.adopted === true) || null
+  }
+
+  /**
+   * 「确认采用此版」（风险 / 比对）与「确认新增」（新增条款）共用的确认动作。
+   *
+   * 语义（V2.2 修正）：这是**确认当前已有版本**，不是"再生成一轮"。
+   *   - 调 POST /{id}/revisions/{rid}/adopt
+   *   - **不调 LLM、不新建 ClauseRevision、不改变轮次、不改变 lastRev**
+   *   - 只把该轮置为采用态（后端同时取消同会话旧采用版本）
+   *   - DOCX 导出优先使用被采用的这一版
+   *
+   * 前置条件（缺一不可，缺则明确提示、不发请求）：
+   *   - 替换修改：该轮必须已建立可靠原文锚点（否则后端 400）
+   *   - 新增条款：该轮必须有用户确认过的合法插入位置
+   *
+   * @param {Object} session  当前会话
+   * @param {Object} rev      要采用的那一轮（默认取最新一轮）
+   */
+  async function confirmAdopt(session, rev = null) {
+    const s = session || activeSession.value
     if (!s) return
+    const target = rev || s.lastRev
+    if (!target?.id) {
+      ElMessage.warning('当前会话还没有可采用的修改版本，请先在中栏告诉 AI 你的修改要求')
+      return
+    }
     const ui = uiFor(s.key)
 
-    if (sessionAction(s) === 'add_clause') {
-      return confirmNewClause(s)
+    if ((target.operation || 'replace') === 'add_clause') {
+      const pos = ui.confirmAnchor?.position || target.position
+      if (!addPositionOk(pos)) {
+        ElMessage.warning('请先确认插入位置（系统不会替你决定，也不会默认追加到合同末尾）')
+        return
+      }
+    } else if (!hasConfirmedLocation(s) && !target.original_clause_text) {
+      ElMessage.warning('这一版还没有可靠的原文定位，无法采用：请先在「修改位置」中确认改的是合同的哪一段')
+      return
     }
 
-    const clauseText = String(s.clauseText || '').trim()
-    if (!clauseText) {
-      ElMessage.warning('还没有可用于替换的原文：请先在右侧「修改位置」中确认改的是合同的哪一段')
-      return
+    adopting.value = true
+    try {
+      await adoptRevision(contractId.value, target.id, s.key)
+      // 以服务端为准刷新（adopted 字段与「已确认修改」计数都来自后端）
+      await Promise.all([loadRevisions(), loadOverview()])
+      ElMessage.success('已采用这一版（下载修改后的合同时会使用它）')
+    } catch (e) {
+      const detail = e?.response?.data?.detail
+      if (detail) ElMessage.error(detail)
+    } finally {
+      adopting.value = false
     }
-    const last = s.lastRev
-    if (!last?.revised_clause) {
-      ElMessage.warning('当前会话还没有可采纳的修改版本，请先在中栏告诉 AI 你的修改要求')
-      return
-    }
-    const instruction = displayInstruction(last.instruction) || '确认采纳当前版本'
-    return submitRevise(s, ui, {
-      clause_text: clauseText,
-      instruction: withSessionContext(s, `【采纳当前版本】${instruction}`),
-      history: buildHistory(s.revs),
-      scope: 'clause',
-      clause_key: s.key,
-      clause_no: ui.confirmAnchor?.clause_no ? String(ui.confirmAnchor.clause_no) : s.clauseNo ? String(s.clauseNo) : '',
-    }, `采纳此版：${instruction}`)
   }
 
   /**
@@ -1919,7 +1953,9 @@ export function useContractWorkspace() {
     runLocate, confirmLocate, clearLocate, startRelocate,
     locationStateForSession, hasReliableLocationNow, LOCATION_STATES,
     // 修改
-    sendRevise, adoptCurrentVersion, confirmNewClause,
+    sendRevise, confirmAdopt, confirmNewClause, adopting,
+    // 采用态查询
+    sessionAdoptedRev, isRevisionAdopted,
     // 总体修改（总控台）
     overview, overviewLoading, overviewError, loadOverview,
     proposals, loadProposals, activeProposal, activeProposalId,

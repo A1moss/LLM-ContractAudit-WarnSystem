@@ -145,18 +145,37 @@ def _rev_exportable(rev) -> bool:
     return scope == "overview" and op == "add_clause"
 
 
+def _is_adopted(rev) -> bool:
+    """该修订是否被用户明确确认采用（历史数据无该属性 → False）。"""
+    return bool(getattr(rev, "adopted", False))
+
+
 def _session_export_state(revs: list) -> dict:
     """会话是否能被写进修订版 DOCX（依据后端真实判据，不做乐观假设）。
 
     - 替换型（scope=clause 的 replace）：必须有原文锚点，否则 ``_final_clause_map`` 会把它
       丢掉、导出端点会显式 400；
     - 新增型（operation=add_clause）：不需要原文锚点（由插入位置定位），只要位置可解析即可。
+
+    采用态（V2.2）：
+      「已确认修改 N」= **有 adopted 版本且可导出**的会话数。
+      历史会话里没有任何 adopted 行（全部 False）时，退回"有可导出行即算"的旧口径，
+      保证旧合同的状态展示与加入 adopted 之前完全一致。
     """
     exportable = [r for r in revs if _rev_exportable(r)]
     if not exportable:
         return {"exportable": False, "applied": 0, "blocker": "记录不参与修订版合同导出"}
+
+    adopted_rows = [r for r in exportable if _is_adopted(r)]
+    if adopted_rows:
+        # 已采用：只以采用版本为准；未采用的轮次留在历史里但不算"已确认修改"
+        candidates = adopted_rows
+    else:
+        # 无采用态（含全部历史数据）：沿用旧口径，逐行检查可导出行
+        candidates = exportable
+
     blockers = []
-    for r in exportable:
+    for r in candidates:
         op = (getattr(r, "operation", "replace") or "replace")
         if op == "add_clause":
             if not (getattr(r, "position", None) or {}):
@@ -167,10 +186,10 @@ def _session_export_state(revs: list) -> dict:
     if blockers:
         return {
             "exportable": False,
-            "applied": max(0, len(exportable) - len(blockers)),
+            "applied": max(0, len(candidates) - len(blockers)),
             "blocker": f"有 {len(blockers)} 条修改尚未建立可靠原文定位",
         }
-    return {"exportable": True, "applied": len(exportable), "blocker": ""}
+    return {"exportable": True, "applied": len(candidates), "blocker": ""}
 
 
 def _classify_session(key: str, revs: list, risk_ids: set) -> str:
@@ -1019,6 +1038,22 @@ def confirm_overview_plan(
             )
 
         try:
+            # 总体方案的「确认」本身就是用户的确认动作 → 落库即 adopted（与专项会话
+            # 「确认采用此版」同一语义，不引入第二套确认概念）。
+            # 先把同一 (contract_id, clause_key) 下旧的采用版本取消，再插入新行，
+            # 与 db.commit() 处于**同一事务**（逐项独立事务的既有边界不变）。
+            rev_key = rev.clause_key or ""
+            for old in (
+                db.query(ClauseRevision)
+                .filter(
+                    ClauseRevision.contract_id == c.id,
+                    ClauseRevision.clause_key == rev_key,
+                    ClauseRevision.adopted.is_(True),
+                )
+                .all()
+            ):
+                old.adopted = False
+            rev.adopted = True
             db.add(rev)
             db.commit()
         except Exception as e:

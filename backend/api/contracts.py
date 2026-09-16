@@ -1411,9 +1411,97 @@ def get_contract_revisions(
         "constraints": r.constraints or [],
         "legal_basis": r.legal_basis or [],
         "remaining_risks": r.remaining_risks or [],
+        # 采用态：前端据此恢复「已采用」标记（历史数据为 False，语义等同"未采用"）
+        "adopted": bool(getattr(r, "adopted", False)),
         "created_at": _iso(r.created_at),
     } for r in revs]
     return {"code": 0, "message": "ok", "data": data}
+
+
+class AdoptRevisionRequest(BaseModel):
+    clause_key: str            # 会话标识，用于二次校验（必须与目标 revision 一致）
+
+
+@router.post("/{contract_id}/revisions/{revision_id}/adopt")
+def adopt_contract_revision(
+    contract_id: int,
+    revision_id: int,
+    body: AdoptRevisionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """「确认采用此版」：把用户明确确认的那一轮修订标记为采用态。
+
+    语义（与"生成一轮修改"彻底分开）：
+    - **不调用 LLM**、**不新建 ClauseRevision**、**不改动轮次**；
+    - 只把目标 revision 置 ``adopted=True``，并把同一 (contract_id, clause_key)
+      下其它行的 adopted 清掉（一个会话至多一个采用版本）；
+    - 两者在**同一个事务**里完成，一次 commit。
+
+    为什么需要它：``/revise`` 每成功一轮就落一行，DOCX 过去取"同锚点最后一行"，
+    于是"继续调整"会静默覆盖用户已经认可的版本。有了采用态，DOCX 归并时优先取 adopted。
+
+    已知边界（本轮接受，不处理）：采用态唯一范围是 (contract_id, clause_key)，
+    而 DOCX 最终按 **anchor** 归并；若两个不同会话命中同一段原文且都 adopted，
+    导出时仍会后写覆盖前写。
+    """
+    c = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not c or not _can_view_contract(current_user, c):
+        raise HTTPException(status_code=404, detail="contract not found")
+
+    if not (body.clause_key or "").strip():
+        raise HTTPException(status_code=400, detail="clause_key is required")
+
+    # 查询同时带 contract_id：防止拿别的合同的 revision_id 来确认
+    rev = (
+        db.query(ClauseRevision)
+        .filter(ClauseRevision.id == revision_id, ClauseRevision.contract_id == contract_id)
+        .first()
+    )
+    if not rev:
+        raise HTTPException(status_code=404, detail="revision not found in this contract")
+    if (rev.clause_key or "") != body.clause_key.strip():
+        raise HTTPException(status_code=400, detail="clause_key 与该修订不一致")
+
+    # 只有"能真正写进修订版合同"的修订才允许被采用
+    if (getattr(rev, "operation", "replace") or "replace") == "add_clause":
+        pos = getattr(rev, "position", None) or {}
+        if not (pos.get("append") or _cn_to_int(str(pos.get("anchor", "")))):
+            raise HTTPException(status_code=400, detail="该新增条款尚未确认合法插入位置，不能采用")
+    else:
+        if not (getattr(rev, "original_clause_text", "") or "").strip():
+            raise HTTPException(status_code=400, detail="该修订尚未建立可靠原文定位，不能采用")
+
+    key = rev.clause_key or ""
+    try:
+        # ① 同会话旧采用版本全部取消 ② 目标行置采用 —— 同一事务，一次 commit
+        superseded = (
+            db.query(ClauseRevision)
+            .filter(
+                ClauseRevision.contract_id == contract_id,
+                ClauseRevision.clause_key == key,
+                ClauseRevision.id != rev.id,
+                ClauseRevision.adopted.is_(True),
+            )
+            .all()
+        )
+        for old in superseded:
+            old.adopted = False
+        rev.adopted = True
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error("采用修订失败 revision_id=%s: %s", revision_id, e)
+        raise HTTPException(status_code=500, detail="确认采用失败，请重试")
+
+    db.refresh(rev)
+    return {"code": 0, "message": "ok", "data": {
+        "revision_id": rev.id,
+        "clause_key": key,
+        "adopted": True,
+        "superseded_revision_id": superseded[0].id if superseded else None,
+        "superseded_count": len(superseded),
+    }}
 
 
 @router.get("/{contract_id}/revised-docx")

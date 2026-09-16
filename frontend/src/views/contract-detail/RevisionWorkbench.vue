@@ -109,7 +109,8 @@
                 <el-tag size="small" effect="plain">{{ r.operation === 'add_clause' ? '新增条款' : '条款修改' }}</el-tag>
                 <span v-if="r.clause_no" class="wb-muted">{{ clauseNoText(r.clause_no) }}</span>
                 <span class="wb-muted">{{ fmtTime(r.created_at) }}</span>
-                <el-tag v-if="confirmedRoundId === r.id" size="small" type="success" effect="light">已确认修改</el-tag>
+                <!-- 采用态来自后端 /revisions 的 adopted 字段（刷新后仍能恢复） -->
+                <el-tag v-if="r.adopted === true" size="small" type="success" effect="dark">已采用</el-tag>
               </div>
 
               <div class="wb-user-card">
@@ -274,13 +275,22 @@
             </div>
 
             <div class="wb-card">
-              <div class="wb-card-t">操作</div>
+              <div class="wb-card-t">
+                操作
+                <el-tag v-if="shownRevIsAdopted" size="small" type="success" effect="light">✓ 已采用</el-tag>
+              </div>
               <div class="wb-actions">
-                <el-button type="primary" :loading="!!uiFor.pending" @click="ws.adoptCurrentVersion()">采纳此版</el-button>
+                <el-button
+                  type="primary"
+                  :loading="ws.adopting"
+                  :disabled="!s.lastRev || shownRevIsAdopted"
+                  @click="ws.confirmAdopt(s, currentRev)"
+                >确认采用此版</el-button>
                 <el-button @click="focusChatInput">继续调整</el-button>
               </div>
               <div class="wb-muted">
-                采纳后这条修改即成为最终版本，会写入下载的合同文件。
+                确认采用后，下载的合同文件会使用这一版。
+                继续调整生成的新版本不会自动取代它，需再次确认采用。
               </div>
             </div>
 
@@ -422,18 +432,22 @@
               </div>
 
               <div class="wb-card">
-                <div class="wb-card-t">操作</div>
+                <div class="wb-card-t">
+                  操作
+                  <el-tag v-if="shownRevIsAdopted" size="small" type="success" effect="light">✓ 已采用</el-tag>
+                </div>
                 <div class="wb-actions">
                   <el-button
                     type="primary"
-                    :disabled="!currentPosition || !s.lastRev?.revised_clause"
-                    :loading="!!uiFor.pending"
-                    @click="ws.confirmNewClause(s)"
+                    :disabled="!currentPosition || !s.lastRev?.revised_clause || shownRevIsAdopted"
+                    :loading="ws.adopting"
+                    @click="ws.confirmAdopt(s, currentRev)"
                   >确认新增</el-button>
                   <el-button @click="focusChatInput">继续调整</el-button>
                 </div>
                 <div class="wb-muted">
                   确认新增后，这条新条款会按你选择的位置插入下载的合同文件。
+                  继续调整生成的新版本不会自动取代它，需再次确认。
                 </div>
               </div>
             </template>
@@ -584,9 +598,15 @@ const confirmRev = computed(() => {
   const revs = s.value?.revs || []
   return revs.length ? revs[revs.length - 1] : null
 })
-const confirmedRoundId = computed(
-  () => (props.ws.isSessionExportable(s.value?.key) ? confirmRev.value?.id : null),
-)
+/**
+ * 右栏当前正在展示的那一轮（默认最新一轮，点了「查看此版对比」则是该历史轮）。
+ * 「确认采用此版」采用的就是它——用户看到哪一版就确认哪一版。
+ */
+const currentRev = computed(() => shownRev.value || confirmRev.value)
+/** 右栏当前这一轮是否已被采用（来自后端 adopted 字段，刷新后可恢复） */
+const shownRevIsAdopted = computed(() => props.ws.isRevisionAdopted(currentRev.value))
+/** 该会话当前被采用的轮次（同 clause_key 至多一条） */
+const adoptedRev = computed(() => props.ws.sessionAdoptedRev(s.value))
 
 // ── 标题 / 标签（用户语言，不出现 scope / operation / API 路径）──
 const centerTitle = computed(() => {
@@ -828,7 +848,7 @@ const sessionDownloadDetail = computed(() => {
   if (!located.value) {
     return '请先用下方任一种方式确认这条修改对应合同里的哪一段。'
   }
-  return '确认无误后点「采纳此版」，这条修改才会写入下载的合同文件。'
+  return '确认无误后点「确认采用此版」，这条修改才会写入下载的合同文件。'
 })
 
 // ── 下载状态标记 ──

@@ -104,10 +104,27 @@ export function reviseClause(id, data) {
 }
 
 /**
- * 获取合同全部修订会话（用于刷新后重建对话）
+ * 获取合同全部修订会话（用于刷新后重建对话）。
+ * 每条记录含 `adopted`：该轮是否为用户明确「确认采用」的版本。
  */
 export function getRevisions(id) {
   return request.get(`/contracts/${id}/revisions`)
+}
+
+/**
+ * 「确认采用此版」：把用户确认的那一轮修订标记为采用态。
+ *
+ * 语义（与"生成新一轮修改"彻底分开）：
+ *  - **不调用 LLM**、**不新建修订记录**、**不改变轮次**；
+ *  - 只把该 revision 置 adopted，并把同一会话下其它行取消采用；
+ *  - 之后 DOCX 导出优先使用被采用的是这一版。
+ *
+ * @param {number|string} id — 合同 ID
+ * @param {number|string} revisionId — 用户确认的那一轮修订 id
+ * @param {string} clauseKey — 会话标识（后端二次校验，必须与该修订一致）
+ */
+export function adoptRevision(id, revisionId, clauseKey) {
+  return request.post(`/contracts/${id}/revisions/${revisionId}/adopt`, { clause_key: clauseKey })
 }
 
 /**

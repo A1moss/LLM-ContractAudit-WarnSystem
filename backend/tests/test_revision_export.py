@@ -34,7 +34,8 @@ from fastapi import HTTPException  # noqa: E402
 
 from database import Base  # noqa: E402
 from models.contract import Contract  # noqa: E402
-from services.docx_reviser import build_revised_docx  # noqa: E402
+from models.clause_revision import ClauseRevision  # noqa: E402
+from services.docx_reviser import build_revised_docx, _final_clause_map  # noqa: E402
 import api.contracts as contracts  # noqa: E402
 
 
@@ -49,6 +50,293 @@ def _make_docx(path, paragraphs):
 def _rev(scope="clause", clause_text="", revised_clause="", original_clause_text=None):
     return types.SimpleNamespace(scope=scope, clause_text=clause_text, revised_clause=revised_clause,
                                  original_clause_text=original_clause_text)
+
+
+def _arev(adopted=None, rev_id=None, **kw):
+    """带 adopted / id 的修订夹具（adopted=None 表示"该字段不存在"，模拟历史数据与旧夹具）。"""
+    ns = types.SimpleNamespace(**kw)
+    if adopted is not None:
+        ns.adopted = adopted
+    if rev_id is not None:
+        ns.id = rev_id
+    return ns
+
+
+class TestAdoptedInFinalMap(unittest.TestCase):
+    """采用态（adopted）对 DOCX 归并的影响 + 历史数据零回归。
+
+    夹具刻意用 types.SimpleNamespace：**没有 adopted 字段、甚至没有 id**，
+    用来锁死"实现必须 getattr 兜底"与"历史数据 fallback 行为逐字不变"。
+    """
+
+    def test_no_adopted_falls_back_to_last_preserving_old_behaviour(self):
+        # 旧夹具形状（无 adopted、无 id）：最后一条胜 —— 与加入 adopted 之前完全一致
+        revs = [_rev(clause_text="A条款原文", revised_clause="A条款V1", original_clause_text="A条款原文"),
+                _rev(clause_text="A条款V1", revised_clause="A条款V2", original_clause_text="A条款原文")]
+        self.assertEqual(_final_clause_map(revs), {"A条款原文": "A条款V2"})
+
+    def test_no_adopted_with_ids_falls_back_to_max_id(self):
+        revs = [_arev(adopted=False, rev_id=1, scope="clause", clause_text="A", revised_clause="A1", original_clause_text="X"),
+                _arev(adopted=False, rev_id=2, scope="clause", clause_text="A1", revised_clause="A2", original_clause_text="X")]
+        self.assertEqual(_final_clause_map(revs), {"X": "A2"})
+
+    def test_adopted_earlier_version_wins_over_later_rounds(self):
+        # 用户确认了 V1，之后又继续聊出 V2（未确认）→ DOCX 仍用 V1
+        revs = [_arev(adopted=True, rev_id=1, scope="clause", clause_text="A", revised_clause="A1", original_clause_text="X"),
+                _arev(adopted=False, rev_id=2, scope="clause", clause_text="A1", revised_clause="A2", original_clause_text="X")]
+        self.assertEqual(_final_clause_map(revs), {"X": "A1"})
+
+    def test_adopted_latest_version_wins(self):
+        revs = [_arev(adopted=False, rev_id=1, scope="clause", clause_text="A", revised_clause="A1", original_clause_text="X"),
+                _arev(adopted=True, rev_id=2, scope="clause", clause_text="A1", revised_clause="A2", original_clause_text="X")]
+        self.assertEqual(_final_clause_map(revs), {"X": "A2"})
+
+    def test_multiple_adopted_in_group_takes_max_id(self):
+        # 理论脏数据（同组两个 adopted）不得抛异常，取 id 最大
+        revs = [_arev(adopted=True, rev_id=1, scope="clause", clause_text="A", revised_clause="A1", original_clause_text="X"),
+                _arev(adopted=True, rev_id=2, scope="clause", clause_text="A1", revised_clause="A2", original_clause_text="X")]
+        self.assertEqual(_final_clause_map(revs), {"X": "A2"})
+
+    def test_adopted_does_not_bypass_missing_anchor(self):
+        # 无原文锚点的修订即便 adopted 也必须被跳过（安全链路不被绕过）
+        revs = [_arev(adopted=True, rev_id=1, scope="clause", clause_text="A", revised_clause="A1", original_clause_text="")]
+        self.assertEqual(_final_clause_map(revs), {})
+
+    def test_overview_replace_still_excluded(self):
+        revs = [_arev(adopted=True, rev_id=1, scope="overview", clause_text="A", revised_clause="A1", original_clause_text="X")]
+        self.assertEqual(_final_clause_map(revs), {})
+
+
+class TestAdoptApi(unittest.TestCase):
+    """POST /contracts/{id}/revisions/{rid}/adopt 的采用语义与边界。"""
+
+    ANCHOR = "第二条 违约责任按合同总价30%支付违约金"
+
+    def _setup(self):
+        tmp = tempfile.TemporaryDirectory()
+        eng = create_engine(f"sqlite:///{Path(tmp.name) / 't.db'}", connect_args={"timeout": 30})
+        Base.metadata.create_all(eng)
+        return tmp, eng, sessionmaker(bind=eng)
+
+    def _user(self):
+        u = mock.MagicMock()
+        u.id = 1
+        u.role = "uploader"
+        return u
+
+    def _seed(self, S):
+        with tempfile.TemporaryDirectory() as fdir:
+            docx = Path(fdir) / "c.docx"
+            _make_docx(docx, ["第一条 标的", self.ANCHOR, "第三条 保密"])
+            stored = str(Path(fdir).parent / f"{os.path.basename(fdir)}_c.docx")
+            Path(stored).write_bytes(docx.read_bytes())
+        s = S()
+        c1 = Contract(user_id=1, file_name="c", stored_path=stored,
+                      parsed_text=f"第一条 标的\n{self.ANCHOR}\n第三条 保密", status="completed")
+        c2 = Contract(user_id=1, file_name="c2", stored_path=stored, parsed_text="x", status="completed")
+        s.add_all([c1, c2])
+        s.commit()
+        cid1, cid2 = c1.id, c2.id
+        for txt, rev in (("V0", "V1"), ("V1", "V2"), ("V2", "V3"), ("V3", "V4")):
+            s.add(ClauseRevision(contract_id=cid1, scope="clause", clause_key="11",
+                                 clause_text=self.ANCHOR if txt == "V0" else txt,
+                                 original_clause_text=self.ANCHOR, instruction="i", revised_clause=rev))
+        s.add(ClauseRevision(contract_id=cid1, scope="clause", clause_key="22",
+                             clause_text="第三条 保密", original_clause_text="第三条 保密",
+                             instruction="i", revised_clause="B1"))
+        s.add(ClauseRevision(contract_id=cid2, scope="clause", clause_key="11",
+                             clause_text=self.ANCHOR, original_clause_text=self.ANCHOR,
+                             instruction="i", revised_clause="其他合同"))
+        s.add(ClauseRevision(contract_id=cid1, scope="clause", clause_key="33",
+                             clause_text="无锚点", original_clause_text=None,
+                             instruction="i", revised_clause="X"))
+        s.add(ClauseRevision(contract_id=cid1, scope="clause", operation="add_clause", clause_key="44",
+                             clause_text="", position=None, instruction="i", revised_clause="新增"))
+        s.add(ClauseRevision(contract_id=cid1, scope="clause", operation="add_clause", clause_key="45",
+                             clause_text="", position={"anchor": "三"}, instruction="i", revised_clause="新增OK"))
+        s.commit()
+        v = [r.id for r in s.query(ClauseRevision)
+             .filter(ClauseRevision.contract_id == cid1, ClauseRevision.clause_key == "11")
+             .order_by(ClauseRevision.id.asc()).all()]
+        out = {
+            "cid1": cid1, "cid2": cid2,
+            "V1": v[0], "V2": v[1], "V3": v[2], "V4": v[3],
+            "other_key": s.query(ClauseRevision).filter(
+                ClauseRevision.contract_id == cid1, ClauseRevision.clause_key == "22").first().id,
+            "c2rev": s.query(ClauseRevision).filter(ClauseRevision.contract_id == cid2).first().id,
+            "no_anchor": s.query(ClauseRevision).filter(
+                ClauseRevision.contract_id == cid1, ClauseRevision.clause_key == "33").first().id,
+            "bad_pos": s.query(ClauseRevision).filter(
+                ClauseRevision.contract_id == cid1, ClauseRevision.clause_key == "44").first().id,
+            "good_pos": s.query(ClauseRevision).filter(
+                ClauseRevision.contract_id == cid1, ClauseRevision.clause_key == "45").first().id,
+        }
+        s.close()
+        return out
+
+    def _adopt(self, S, cid, rid, key):
+        s = S()
+        try:
+            return contracts.adopt_contract_revision(
+                cid, rid, contracts.AdoptRevisionRequest(clause_key=key),
+                db=s, current_user=self._user())
+        finally:
+            s.close()
+
+    def _adopted_ids(self, S, cid, key):
+        s = S()
+        try:
+            return [r.id for r in s.query(ClauseRevision).filter(
+                ClauseRevision.contract_id == cid, ClauseRevision.clause_key == key,
+                ClauseRevision.adopted.is_(True)).all()]
+        finally:
+            s.close()
+
+    def test_new_revision_defaults_to_not_adopted(self):
+        tmp, eng, S = self._setup()
+        try:
+            ids = self._seed(S)
+            s = S()
+            rows = s.query(ClauseRevision).filter(ClauseRevision.contract_id == ids["cid1"]).all()
+            s.close()
+            self.assertTrue(all(not r.adopted for r in rows), "新建 revision 必须默认 adopted=False")
+        finally:
+            eng.dispose()
+            tmp.cleanup()
+
+    def test_adopt_marks_target_and_supersedes_previous(self):
+        tmp, eng, S = self._setup()
+        try:
+            ids = self._seed(S)
+            res = self._adopt(S, ids["cid1"], ids["V3"], "11")
+            self.assertEqual(res["data"]["adopted"], True)
+            self.assertEqual(res["data"]["revision_id"], ids["V3"])
+            self.assertEqual(self._adopted_ids(S, ids["cid1"], "11"), [ids["V3"]])
+
+            res2 = self._adopt(S, ids["cid1"], ids["V4"], "11")
+            self.assertEqual(res2["data"]["superseded_revision_id"], ids["V3"])
+            self.assertEqual(res2["data"]["superseded_count"], 1)
+            self.assertEqual(self._adopted_ids(S, ids["cid1"], "11"), [ids["V4"]],
+                             "采用态必须迁移：同一会话至多一个 adopted")
+        finally:
+            eng.dispose()
+            tmp.cleanup()
+
+    def test_reject_revision_from_other_contract(self):
+        tmp, eng, S = self._setup()
+        try:
+            ids = self._seed(S)
+            with self.assertRaises(HTTPException) as ctx:
+                self._adopt(S, ids["cid1"], ids["c2rev"], "11")
+            self.assertEqual(ctx.exception.status_code, 404)
+        finally:
+            eng.dispose()
+            tmp.cleanup()
+
+    def test_reject_clause_key_mismatch(self):
+        tmp, eng, S = self._setup()
+        try:
+            ids = self._seed(S)
+            with self.assertRaises(HTTPException) as ctx:
+                self._adopt(S, ids["cid1"], ids["other_key"], "11")
+            self.assertEqual(ctx.exception.status_code, 400)
+        finally:
+            eng.dispose()
+            tmp.cleanup()
+
+    def test_reject_replace_without_anchor(self):
+        tmp, eng, S = self._setup()
+        try:
+            ids = self._seed(S)
+            with self.assertRaises(HTTPException) as ctx:
+                self._adopt(S, ids["cid1"], ids["no_anchor"], "33")
+            self.assertEqual(ctx.exception.status_code, 400)
+            self.assertIn("原文定位", str(ctx.exception.detail))
+        finally:
+            eng.dispose()
+            tmp.cleanup()
+
+    def test_reject_add_clause_with_bad_position(self):
+        tmp, eng, S = self._setup()
+        try:
+            ids = self._seed(S)
+            with self.assertRaises(HTTPException) as ctx:
+                self._adopt(S, ids["cid1"], ids["bad_pos"], "44")
+            self.assertEqual(ctx.exception.status_code, 400)
+            self.assertIn("插入位置", str(ctx.exception.detail))
+            # 合法位置可 adopt
+            self.assertTrue(self._adopt(S, ids["cid1"], ids["good_pos"], "45")["data"]["adopted"])
+        finally:
+            eng.dispose()
+            tmp.cleanup()
+
+    def test_reject_blank_clause_key(self):
+        tmp, eng, S = self._setup()
+        try:
+            ids = self._seed(S)
+            with self.assertRaises(HTTPException) as ctx:
+                self._adopt(S, ids["cid1"], ids["V4"], "")
+            self.assertEqual(ctx.exception.status_code, 400)
+        finally:
+            eng.dispose()
+            tmp.cleanup()
+
+    def test_revisions_endpoint_exposes_adopted_and_keeps_all_rounds(self):
+        tmp, eng, S = self._setup()
+        try:
+            ids = self._seed(S)
+            self._adopt(S, ids["cid1"], ids["V4"], "11")
+            s = S()
+            revs = contracts.get_contract_revisions(ids["cid1"], db=s, current_user=self._user())["data"]
+            s.close()
+            by_id = {x["id"]: x for x in revs}
+            self.assertTrue(by_id[ids["V4"]]["adopted"])
+            self.assertFalse(by_id[ids["V3"]]["adopted"])
+            # 历史轮次一条都不能少
+            self.assertEqual(len([x for x in revs if x["clause_key"] == "11"]), 4)
+        finally:
+            eng.dispose()
+            tmp.cleanup()
+
+    def test_continue_after_adopt_does_not_move_adopted(self):
+        """核心场景：确认 V4 后又聊出 V5（未确认）→ 采用态仍是 V4，DOCX 也用 V4。"""
+        tmp, eng, S = self._setup()
+        try:
+            ids = self._seed(S)
+            self._adopt(S, ids["cid1"], ids["V4"], "11")
+            s = S()
+            s.add(ClauseRevision(contract_id=ids["cid1"], scope="clause", clause_key="11",
+                                 clause_text="V4", original_clause_text=self.ANCHOR,
+                                 instruction="再严格一点", revised_clause="V5"))
+            s.commit()
+            s.close()
+            self.assertEqual(self._adopted_ids(S, ids["cid1"], "11"), [ids["V4"]],
+                             "继续调整不得自动迁移采用态")
+            s = S()
+            rows = (s.query(ClauseRevision)
+                    .filter(ClauseRevision.contract_id == ids["cid1"], ClauseRevision.scope == "clause")
+                    .order_by(ClauseRevision.id.asc()).all())
+            s.close()
+            # 只校验目标锚点（同合同其它会话的锚点也在同一个 map 里，属正常）
+            self.assertEqual(_final_clause_map(rows).get(self.ANCHOR), "V4",
+                             "DOCX 必须用已采用的 V4，而不是最新生成的 V5")
+
+            # 再确认新版本 → 采用态迁移，DOCX 跟着变
+            v5 = max((r.id for r in rows), default=None)
+            self._adopt(S, ids["cid1"], v5, "11")
+            s = S()
+            rows = (s.query(ClauseRevision)
+                    .filter(ClauseRevision.contract_id == ids["cid1"], ClauseRevision.scope == "clause")
+                    .order_by(ClauseRevision.id.asc()).all())
+            s.close()
+            self.assertEqual(_final_clause_map(rows).get(self.ANCHOR), "V5")
+        finally:
+            eng.dispose()
+            tmp.cleanup()
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
 
 
 class TestDocxReviser(unittest.TestCase):
