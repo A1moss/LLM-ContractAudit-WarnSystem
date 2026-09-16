@@ -281,13 +281,23 @@ export function isExportableRevision(rev) {
   return scope === 'overview' && op === 'add_clause'
 }
 
-/** 导出状态机（文案集中在此，避免组件与状态层口径不一致） */
-export function docxStateFor({ fileName = '', exportableCount = 0, blockerCount = 0 }) {
-  if (!/\.docx$/i.test(fileName)) {
+/**
+ * 导出状态机（文案集中在此，避免组件与状态层口径不一致）。
+ *
+ * **判断是否 DOCX 只看真实上传文件路径 `stored_path`**，绝不看 `file_name`：
+ * `file_name` 是用户可编辑的「合同显示名称」（上传时默认取文件名去后缀），
+ * 真实数据里大量 file_name 根本没有扩展名（如 '测试合同文件'、'111'），
+ * 拿它判断格式会把真 DOCX 误判成非 Word，导致下载按钮被永久禁用。
+ * 后端 `download_revised_docx` 用的正是 `stored_path.endswith(".docx")`，此处与之对齐。
+ */
+export function docxStateFor({ storedPath = '', fileName = '', exportableCount = 0, blockerCount = 0 }) {
+  // 优先 stored_path；仅当它缺失（历史脏数据）才退回显示名，避免回归出"永远不能下载"
+  const path = String(storedPath || '').trim() || String(fileName || '').trim()
+  if (!/\.docx$/i.test(path)) {
     return {
       key: 'not_docx',
       text: '仅 DOCX 原始合同支持导出修订版',
-      detail: '当前合同不是 .docx 文件，后端无法生成修订版 DOCX。',
+      detail: '当前上传的不是 Word 文档，后端无法生成修订版 DOCX。',
     }
   }
   if (!exportableCount) {

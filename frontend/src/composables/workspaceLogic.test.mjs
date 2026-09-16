@@ -209,12 +209,34 @@ test('DOCX 口径：scope=clause 全收；overview 只有 add_clause 收；overv
 })
 
 test('docxStateFor 状态机：非 DOCX → 无修改 → 暂不能导出 → 可以导出', () => {
-  assert.equal(docxStateFor({ fileName: '合同.pdf', exportableCount: 3, blockerCount: 0 }).key, 'not_docx')
-  assert.equal(docxStateFor({ fileName: '合同.docx', exportableCount: 0, blockerCount: 0 }).key, 'none')
-  assert.equal(docxStateFor({ fileName: '合同.docx', exportableCount: 2, blockerCount: 1 }).key, 'blocked')
-  assert.equal(docxStateFor({ fileName: '合同.DOCX', exportableCount: 2, blockerCount: 0 }).key, 'ready')
+  assert.equal(docxStateFor({ storedPath: '/data/x.pdf', exportableCount: 3, blockerCount: 0 }).key, 'not_docx')
+  assert.equal(docxStateFor({ storedPath: '/data/x.docx', exportableCount: 0, blockerCount: 0 }).key, 'none')
+  assert.equal(docxStateFor({ storedPath: '/data/x.docx', exportableCount: 2, blockerCount: 1 }).key, 'blocked')
+  assert.equal(docxStateFor({ storedPath: '/data/x.DOCX', exportableCount: 2, blockerCount: 0 }).key, 'ready')
   // blocked 文案必须带上条数，便于用户定位问题会话
-  assert.match(docxStateFor({ fileName: 'a.docx', exportableCount: 2, blockerCount: 3 }).text, /3 条/)
+  assert.match(docxStateFor({ storedPath: '/data/a.docx', exportableCount: 2, blockerCount: 3 }).text, /3 条/)
+})
+
+test('BUG：file_name 是显示名（无后缀）不能决定格式，必须以真实 stored_path 为准', () => {
+  // 真实现场：file_name='测试合同文件'（无扩展名）+ stored_path 是 .docx
+  const real = docxStateFor({
+    storedPath: 'C:/data/71a1988e-eadc-4e71-a058-4147dd231ffb.docx',
+    fileName: '测试合同文件',
+    exportableCount: 1,
+    blockerCount: 0,
+  })
+  assert.notEqual(real.key, 'not_docx', '真 DOCX 不得被判成非 Word')
+  assert.equal(real.key, 'ready')
+
+  // 反过来：file_name 恰好带 .docx，但真实文件是 PDF → 必须判为非 Word
+  assert.equal(
+    docxStateFor({ storedPath: '/data/x.pdf', fileName: '合同.docx', exportableCount: 2, blockerCount: 0 }).key,
+    'not_docx',
+  )
+
+  // stored_path 缺失时才退回显示名（兼容历史数据）
+  assert.equal(docxStateFor({ storedPath: '', fileName: '合同.docx', exportableCount: 1, blockerCount: 0 }).key, 'ready')
+  assert.equal(docxStateFor({ storedPath: '', fileName: '测试合同文件', exportableCount: 1, blockerCount: 0 }).key, 'not_docx')
 })
 
 // ════════════════════════════════════════════════════════════════

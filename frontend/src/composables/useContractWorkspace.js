@@ -1631,10 +1631,17 @@ export function useContractWorkspace() {
     return [...new Set(blocked)]
   })
 
-  /** 导出状态机（文案与判据集中在 workspaceLogic.docxStateFor，可单测） */
+  /**
+   * 导出状态机（文案与判据集中在 workspaceLogic.docxStateFor，可单测）。
+   *
+   * 格式判断用后端返回的 **`stored_path`**（真实上传文件路径），不用 `file_name`：
+   * `file_name` 是用户可编辑的合同显示名，真实数据里多数没有扩展名，
+   * 用它判断会把真 DOCX 判成非 Word（后端 /revised-docx 用的也是 stored_path）。
+   */
   const docxState = computed(() => {
     if (!contract.value) return { key: 'loading', text: '加载中…', detail: '' }
     return docxStateFor({
+      storedPath: contract.value.stored_path || '',
       fileName: contract.value.file_name || '',
       exportableCount: exportableRevisions.value.length,
       blockerCount: docxBlockers.value.length,
