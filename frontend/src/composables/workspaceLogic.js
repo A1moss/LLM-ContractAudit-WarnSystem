@@ -18,13 +18,13 @@
 export const OVERVIEW_KEY = '__overview__'
 export const CMP_PREFIX = '__cmp__'
 
-/** 会话分组（左栏展示顺序） */
+/** 会话分组（左栏展示顺序；文案与《修改合同 Tab·完整交互设计 V2.2》2.2 一致） */
 export const SESSION_GROUPS = [
-  { key: 'overview', label: '总体修改会话' },
-  { key: 'risk', label: '风险修改' },
-  { key: 'cmp', label: '条款比对修改' },
+  { key: 'overview', label: '总体修改' },
+  { key: 'risk', label: '待处理风险' },
+  { key: 'cmp', label: '条款比对' },
   { key: 'add', label: '新增条款' },
-  { key: 'history', label: '历史会话' },
+  { key: 'history', label: '历史修改' },
 ]
 
 /** 条款比对来源的会话 key（与后端 ClauseRevision.clause_key 的既有约定一致） */
@@ -309,4 +309,253 @@ export function docxStateFor({ fileName = '', exportableCount = 0, blockerCount 
     text: '修改位置已确认，可生成修订版',
     detail: '最终以下载时后端校验结果为准。',
   }
+}
+
+// ════════════════════════════════════════════════════════════════
+// 总体修改（整份合同总控台）—— 纯规则，无框架依赖
+// ════════════════════════════════════════════════════════════════
+
+/**
+ * 总控台修改点的四种状态（V2.2 第五节：必须彻底区分）。
+ *
+ *   pending    未纳入 —— 尚未纳入本轮综合方案
+ *   included   已纳入方案（待专项处理）—— **只是总控台工作流状态**：
+ *              不写后端、不产生 ClauseRevision、不进入 DOCX 可导出集合、
+ *              不计入左侧「已确认修改」。
+ *   processing 专项处理中 —— 已纳入且目标专项会话已有 AI 修订，但尚未最终确认
+ *   confirmed  已确认修改 —— 用户已在专项会话最终确认（[采纳此版]/[确认新增]）
+ *
+ * 已知边界（本轮明确接受，不自行补后端）：
+ *   后端没有持久化「已纳入方案」的位置，因此 `included` 属于**前端会话态**；
+ *   刷新页面后回到 `pending`，需要重新纳入。这不影响已确认修改、ClauseRevision 与 DOCX 链路。
+ */
+export const MODIFICATION_STATES = {
+  pending: { key: 'pending', label: '未纳入', tone: 'info', dot: 'grey' },
+  included: { key: 'included', label: '已纳入方案（待专项处理）', tone: 'warning', dot: 'yellow' },
+  processing: { key: 'processing', label: '专项处理中', tone: 'primary', dot: 'blue' },
+  confirmed: { key: 'confirmed', label: '已确认修改', tone: 'success', dot: 'green' },
+}
+
+/**
+ * 单个修改点的总控台状态。
+ *
+ * @param {{ included?: boolean, hasRevisions?: boolean, exportable?: boolean }} f
+ *   included     该修改点是否已被用户纳入本轮综合方案（仅前端会话态）
+ *   hasRevisions 目标专项会话是否已有修订记录
+ *   exportable   目标专项会话是否已具备写入修订版合同的条件（后端真实判定）
+ *                 —— 即「已确认修改」的唯一判据（见 countConfirmedSessions）
+ */
+export function modificationStateFor({ included = false, hasRevisions = false, exportable = false } = {}) {
+  // 已确认修改优先：后端判定为可写入，说明具体修改文本与位置都已可靠确定
+  if (exportable) return MODIFICATION_STATES.confirmed
+  if (included) return hasRevisions ? MODIFICATION_STATES.processing : MODIFICATION_STATES.included
+  return hasRevisions ? MODIFICATION_STATES.processing : MODIFICATION_STATES.pending
+}
+
+/**
+ * 「已确认修改 N」的唯一口径（V2.2 2.2）：
+ * 只统计**专项会话中用户最终确认、且原文位置可靠确定**的具体修改。
+ *
+ * 判据取后端 `/overview` 给出的 `sessions[].export.exportable`（后端真实判定，
+ * 与 download_revised_docx 取数口径镜像），因此：
+ *   - 不统计 AI 生成次数、不统计总控台方案数量、不统计 revision_count；
+ *   - **不统计「已纳入方案」**（那只是前端工作流状态，且不入 ClauseRevision）。
+ *
+ * 排除总体会话自身的 replace 讨论稿（它永不写入 DOCX，也不构成"具体修改"）。
+ */
+export function countConfirmedSessions(overviewSessions) {
+  const list = Array.isArray(overviewSessions) ? overviewSessions : []
+  return list.filter((s) => s && s.kind !== 'overview' && s.export && s.export.exportable === true).length
+}
+
+/** 某个 session key 是否有可写入修订版合同的条件（无该会话 / 无 overview 数据时返回 false） */
+export function sessionExportable(overviewSessions, key) {
+  const list = Array.isArray(overviewSessions) ? overviewSessions : []
+  const hit = list.find((s) => s && String(s.key) === String(key))
+  return !!(hit && hit.export && hit.export.exportable === true)
+}
+
+// ── 综合方案项的展示与操作 ──────────────────────────────────────
+
+/** 方案项类型（用户视角，不暴露 operation 枚举） */
+export function proposalItemKind(item) {
+  return (item && item.operation) === 'add_clause' ? '新增条款' : '条款修改'
+}
+
+/** 方案项标题：优先条款编号，其次逐字原文摘要，最后类型 */
+export function proposalItemTitle(item) {
+  if (!item) return '修改项'
+  const no = cnToInt(item.clause_no)
+  const quote = clipText(item.original_quote || '', 24)
+  if (no) return `第${cnNo(no)}条`
+  if (quote) return quote
+  return proposalItemKind(item)
+}
+
+/** 方案项状态（与总控台修改点状态同一套语义） */
+export function proposalItemState(item, includedSet) {
+  const included = !!(includedSet && includedSet.has && includedSet.has(item && item.id))
+  return modificationStateFor({ included }).key
+}
+
+/**
+ * 方案项是否可被「纳入方案」。
+ *
+ * 只有后端已确定性定位（`resolved === true`）的项才可以纳入；
+ * 未定位的项必须先由用户指定位置（或先进入专项会话确认位置），否则纳入后也无法落地。
+ */
+export function canIncludeProposalItem(item) {
+  return !!(item && item.resolved === true)
+}
+
+/** 方案项需要用户先确认位置时的引导文案（原样展示后端 blocking_reason） */
+export function proposalBlockingText(item) {
+  if (!item) return ''
+  return item.blocking_reason || '该修改项尚未建立可靠定位，请先指定位置的条款。'
+}
+
+/**
+ * 位置选择器：把「第 X 条之前」翻译成后端可表达的「第 X-1 条之后」。
+ * 已是第一条时返回 beforeAnchorOf 的 null → 前端必须提示无法表达，不得静默改成别的位置。
+ */
+
+// ── 条款比对的「真实参考条款」 ──────────────────────────────────
+/**
+ * 从标准条款模板（GET /templates）里取出与该比对项 title 匹配的参考条款正文。
+ *
+ * 为什么需要它：`GET /clause-comparison` **不返回**标准条款正文，只返回
+ * title/status/matched_text/deviation/completion/risk/related_law。
+ * 参考条款正文只存在于标准条款模板里（企业自定义模板 → templates.clauses）。
+ *
+ * **没有匹配到就返回空串** —— 前端绝不自己生成标准条款、绝不把 AI 建议当标准条款
+ * （V2.2 3.4 与 8.4 的硬约束）。模板不存在时比对区退化为两栏。
+ */
+export function referenceClauseText(templates, title) {
+  const t = String(title || '').trim()
+  if (!t) return ''
+  const list = Array.isArray(templates) ? templates : []
+  for (const tpl of list) {
+    const clauses = tpl && tpl.clauses
+    if (!clauses) continue
+    const arr = Array.isArray(clauses)
+      ? clauses
+      : Object.entries(clauses).map(([k, v]) => (v && typeof v === 'object' ? { title: v.title || k, ...v } : { title: k, content: v }))
+    for (const c of arr) {
+      if (!c) continue
+      const name = String(c.title || c.name || c.clause || '').trim()
+      if (name && name === t) {
+        const text = c.content || c.text || c.description || ''
+        if (text) return String(text)
+      }
+    }
+  }
+  return ''
+}
+
+/** 比对项是否应展示三栏（有真实参考条款正文才展示，否则按实际数据两栏） */
+export function comparisonLayout(row, referenceText) {
+  if (row && row.status === 'missing') return 'missing'
+  if (row && row.status === 'covered') return 'covered'
+  return referenceText ? 'three' : 'two'
+}
+
+// ── 定位候选（多候选必须由用户点选）────────────────────────────
+/**
+ * 把 `POST /locate-clause` 的结果整理成**必须由用户点选的候选列表**。
+ *
+ * 硬约束（V2.2 3.3 红线）：后端可能已给出唯一命中（found=true），但前端仍把它作为
+ * **候选项**渲染，由用户点选后才建立"已确认位置"。禁止自动替用户选中并继续。
+ *
+ * 返回 [{ key, clause_no, clause_title, original_text, start, end, chosen }]
+ */
+export function locateCandidates(locate) {
+  if (!locate) return []
+  const out = []
+  const push = (c, chosen) => {
+    if (!c || !c.original_text) return
+    const start = c.start == null ? null : c.start
+    if (out.some((x) => x.original_text === c.original_text && x.start === start)) return
+    out.push({
+      key: `${start == null ? 'x' : start}-${out.length}`,
+      clause_no: c.clause_no ?? null,
+      clause_title: c.clause_title || '',
+      original_text: c.original_text,
+      start,
+      end: c.end == null ? null : c.end,
+      chosen,
+    })
+  }
+  if (locate.found) push(locate, true)
+  for (const c of locate.candidates || []) push(c, false)
+  return out
+}
+
+/** 定位结果是否需要用户在多候选之间选择（>=1 个候选都要求点选，只是文案不同） */
+export function locateNeedsChoice(locate) {
+  if (!locate) return false
+  const cands = locateCandidates(locate)
+  if (!cands.length) return false
+  // found=true 且只有一个候选：仍需用户确认，但属于"确认"而非"多选一"
+  if (locate.found && cands.length === 1) return false
+  return cands.length > 1
+}
+
+/**
+ * 历史轮次的对比数据（V2.2 第七节最低要求：原文 ↔ 该轮修改文本）。
+ * 每轮的"原文"= 该轮写入的 clause_text（第一轮是条款原文，后续轮是上一轮修订稿）。
+ */
+export function roundDiff(rev) {
+  return {
+    before: (rev && rev.clause_text) || '',
+    after: (rev && rev.revised_clause) || '',
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// 右栏定位三态（统一口径：左栏徽标 / 右栏工作区共用同一份判定）
+// ════════════════════════════════════════════════════════════════
+/**
+ * 定位三态——必须区分"系统能定位"与"用户已确认"，两者语义不同：
+ *
+ *   unlocated    未定位           —— 没有系统锚点、也没预检到位置 → 只显示定位方式
+ *   locatable    可定位但未确认   —— 预检到位置或审核阶段有锚点，但用户没在这次会话里确认过
+ *   confirmed    已确认定位       —— 用户点了候选确认，或有已落库修订带锚点
+ *
+ * 为什么还要区分后两者：`previewLocatable` 只是**前端预检**（镜像后端 _pick_best_hit），
+ * 不等于"用户已确认"；而 `lastRev.original_clause_text` 是**已落库锚点**，
+ * 说明这条替换已经能安全写入 DOCX。三者混为一谈会让用户以为改的位置已经定了。
+ *
+ * 注意：本判定**只影响右栏工作区的进入条件**，不改变左栏 locateBadge 的既有口径。
+ */
+export const LOCATION_STATES = {
+  unlocated: { key: 'unlocated', label: '未定位', tone: 'warning', dot: 'grey' },
+  locatable: { key: 'locatable', label: '可定位但未确认', tone: 'primary', dot: 'blue' },
+  confirmed: { key: 'confirmed', label: '已确认定位', tone: 'success', dot: 'green' },
+}
+
+/**
+ * @param {Object} f
+ *   relocateMode   用户点了「重新指定位置」→ 强制回到未定位工作区
+ *   confirmedAnchor 用户本次会话内确认的候选（ui.confirmAnchor.original_text）
+ *   dbAnchor       已落库修订的原文锚点（lastRev.original_clause_text）
+ *   autoAnchor     审核阶段锚点（risk.clause_position.original_text）
+ *   locatable      前端预检结果（previewLocatable(...)）
+ */
+export function locationStateFor({
+  relocateMode = false,
+  confirmedAnchor = '',
+  dbAnchor = '',
+  autoAnchor = '',
+  locatable = false,
+} = {}) {
+  if (relocateMode) return LOCATION_STATES.unlocated
+  // 已落库锚点最可信：它意味着这条替换已经能写进修订版合同
+  if (dbAnchor || confirmedAnchor) return LOCATION_STATES.confirmed
+  if (autoAnchor || locatable) return LOCATION_STATES.locatable
+  return LOCATION_STATES.unlocated
+}
+
+/** 有"可靠当前位置"（可定位或已确认）→ 进入已定位工作区；只有 unlocated 才显示定位方式 */
+export function hasReliableLocation(state) {
+  return state === 'confirmed' || state === 'locatable'
 }

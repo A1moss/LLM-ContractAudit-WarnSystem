@@ -1,5 +1,7 @@
 import request from '../utils/request.js'
-import { REVISE_TIMEOUT, COMPARE_TIMEOUT, FILE_TIMEOUT, LOCATE_TIMEOUT } from './timeouts.js'
+import {
+  REVISE_TIMEOUT, COMPARE_TIMEOUT, FILE_TIMEOUT, LOCATE_TIMEOUT, OVERVIEW_PLAN_TIMEOUT,
+} from './timeouts.js'
 
 /**
  * 上传合同文件
@@ -135,6 +137,65 @@ export function getAddClauseSuggestion(id, data) {
  */
 export function downloadRevisedDocx(id) {
   return request.get(`/contracts/${id}/revised-docx`, { responseType: 'blob', timeout: FILE_TIMEOUT })
+}
+
+// ====== 总体修改会话（总控会话：scope=overview / clause_key=__overview__）======
+//
+// 语义（不要在 UI 里混同）：
+//  - 总体会话不是聊天区，也不是"整份合同重写后覆盖原文件"；
+//  - 它的链路是：读全部专项会话 → AI 出**结构化修改方案** → 用户逐项确认 →
+//    每项转换成现有安全的 clause/add_clause 修改 → 复用现有定位与 DOCX 安全导出；
+//  - 方案本身（revision_proposals）**永远不写入 DOCX**，只有确认后的具体修改项会被写入。
+
+/**
+ * 总体会话总览：当前合同全部专项修改会话的
+ * 原文 / 当前最新修改结果 / 法律依据 / 剩余风险 / 定位状态 / 导出状态（只读、不调 LLM）
+ * @param {number|string} id — 合同 ID
+ */
+export function getRevisionOverview(id) {
+  return request.get(`/contracts/${id}/overview`)
+}
+
+/**
+ * 在总体会话中提出整体修改要求 → 生成**结构化综合修改方案**（单次 LLM，不写任何修订记录）
+ * @param {number|string} id — 合同 ID
+ * @param {Object} data — { instruction, session_keys? }
+ *   instruction   用户对整个合同的修改要求
+ *   session_keys  可选：只针对这些专项会话统筹（不传 = 全部）
+ * 返回 data.items[]：每个修改项含 operation / original_quote / revised_clause / reason /
+ * legal_basis / position / resolved / anchor_text / blocking_reason。
+ * **resolved=false 的项必须先让用户确认位置**，否则确认落库会被后端拒绝。
+ */
+export function createOverviewProposal(id, data) {
+  return request.post(`/contracts/${id}/overview/plan`, data, { timeout: OVERVIEW_PLAN_TIMEOUT })
+}
+
+/**
+ * 历史综合修改方案列表（刷新后恢复）
+ * @param {number|string} id — 合同 ID
+ */
+export function listOverviewProposals(id) {
+  return request.get(`/contracts/${id}/overview/proposals`)
+}
+
+/**
+ * 读取某一份综合修改方案（逐项查看）
+ * @param {number|string} id — 合同 ID
+ * @param {number|string} proposalId — 方案 ID
+ */
+export function getOverviewProposal(id, proposalId) {
+  return request.get(`/contracts/${id}/overview/proposals/${proposalId}`)
+}
+
+/**
+ * 用户确认综合方案中的**具体修改项** → 后端逐项转换成安全的 clause/add_clause 修订
+ * （不调用 LLM；未定位的项会被拒绝并返回原因）
+ * @param {number|string} id — 合同 ID
+ * @param {Object} data — { proposal_id, items: [{ id, revised_clause?, position?, target_session_key?, original_quote?, clause_no? }] }
+ * 返回 data.applied[]（含 revision_id / clause_key / exportable）与 data.failed[]（含 reason / needs_location）
+ */
+export function confirmOverviewProposal(id, data) {
+  return request.post(`/contracts/${id}/overview/confirm`, data, { timeout: REVISE_TIMEOUT })
 }
 
 // ====== 反馈标注 ======

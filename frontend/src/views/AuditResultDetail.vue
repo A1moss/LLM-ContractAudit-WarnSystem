@@ -100,6 +100,11 @@
               />
             </template>
           </el-table-column>
+          <el-table-column label="操作" width="130" align="center" fixed="right">
+            <template #default="{ row }">
+              <el-button type="warning" size="small" @click="goRevise(row)">去修改合同</el-button>
+            </template>
+          </el-table-column>
         </el-table>
 
         <!-- 反馈标注面板 -->
@@ -119,13 +124,14 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Search } from '@element-plus/icons-vue'
 import { getAuditResult, getContractDetail, getFeedback, deleteFeedback } from '../api/contract.js'
 import { useFeedback } from '../composables/useFeedback.js'
 import FeedbackPanel from '../components/FeedbackPanel.vue'
 
 const route = useRoute()
+const router = useRouter()
 const contractId = computed(() => route.params.contractId || '')
 
 // ── 反馈标注 ──
@@ -170,6 +176,17 @@ const riskSummary = computed(() => {
   const low = riskItems.value.filter(r => r.level === '低风险').length
   return { total: riskItems.value.length, high, mid, low }
 })
+
+// ── 风险预警 → 修改合同：只传「来源 + 风险 ID」的轻量上下文 ──
+// 不把整份风险对象塞进 storage：进入 ContractDetail 后由它自己重新请求 /audit-result
+// 取得完整风险数据（避免数据过期、避免重复存储）。
+const REVISE_SOURCE_KEY = 'a24_revise_source'
+function goRevise(row) {
+  try {
+    sessionStorage.setItem(REVISE_SOURCE_KEY, JSON.stringify({ source: 'risk', risk_id: row.id }))
+  } catch { /* 隐私模式等写入失败时仍跳转，用户可在修改合同里手动选条款 */ }
+  router.push(`/contracts/${contractId.value}`)
+}
 
 async function fetchContractName(id) {
   try {

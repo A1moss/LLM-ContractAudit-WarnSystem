@@ -20,3 +20,7 @@ export const FILE_TIMEOUT = 120_000
 // POST /contracts/{id}/locate-clause：纯文本匹配（无 LLM、无写库），
 // 后端只做几次子串查找，正常耗时 < 1s；给 20s 足以覆盖超长合同。
 export const LOCATE_TIMEOUT = 20_000
+
+// POST /contracts/{id}/overview/plan：单次 LLM，但 prompt 含整份合同正文（最长约 24000 字）
+// + 全部专项会话结果，输入远大于 /revise；给 180s 覆盖长合同与限流重试。
+export const OVERVIEW_PLAN_TIMEOUT = 180_000

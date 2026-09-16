@@ -8,6 +8,7 @@ from sqlalchemy import text
 from config import CORS_ORIGINS
 from api.auth import router as auth_router
 from api.contracts import router as contracts_router
+from api.overview import router as overview_router
 from api.feedback import router as feedback_router
 from api.templates import router as templates_router
 from api.stats import router as stats_router
@@ -120,6 +121,30 @@ def _ensure_columns():
                 db.commit()
         except Exception as e:
             logger.debug("clause_revisions 表尚不存在，跳过迁移: %s", e)
+        # revision_proposals 表：总体修改会话的「综合修改方案」（方案≠合同修改，不参与 DOCX 导出）。
+        # 新表由 Base.metadata.create_all 建立；这里只对「旧库 + 极端情况下 create_all 未生效」做幂等兜底。
+        try:
+            existing_rp = {row[1] for row in db.execute("PRAGMA table_info(revision_proposals)")}
+            if not existing_rp:
+                db.execute(
+                    "CREATE TABLE IF NOT EXISTS revision_proposals ("
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    "contract_id INTEGER NOT NULL,"
+                    "user_id INTEGER,"
+                    "instruction TEXT NOT NULL DEFAULT '',"
+                    "status VARCHAR(20) NOT NULL DEFAULT 'draft',"
+                    "summary TEXT,"
+                    "items JSON NOT NULL DEFAULT '[]',"
+                    "confirmed_ids JSON NOT NULL DEFAULT '[]',"
+                    "created_at DATETIME)"
+                )
+                db.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_revision_proposals_contract_id "
+                    "ON revision_proposals (contract_id)"
+                )
+                db.commit()
+        except Exception as e:
+            logger.debug("revision_proposals 表兜底创建失败（非致命）: %s", e)
         # feedback_logs 扩列（反馈池 → 学习层；只在旧表缺列时补齐，不动已有数据）
         try:
             existing_fb = {row[1] for row in db.execute("PRAGMA table_info(feedback_logs)")}
@@ -258,6 +283,7 @@ def contract_types():
     return taxonomy_dict()
 app.include_router(auth_router, prefix="/api")
 app.include_router(contracts_router, prefix="/api")
+app.include_router(overview_router, prefix="/api")
 app.include_router(feedback_router, prefix="/api")
 app.include_router(templates_router, prefix="/api")
 app.include_router(stats_router, prefix="/api")
