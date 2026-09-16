@@ -60,7 +60,7 @@
         <el-button type="warning" size="small" :icon="Edit" @click="openCorrect(item)">
           修正
         </el-button>
-        <el-button type="danger" size="small" :icon="Close" @click="handleFalsePositive(item)">
+        <el-button type="danger" size="small" :icon="Close" @click="openFalsePositive(item)">
           误报
         </el-button>
         <el-button type="primary" size="small" :icon="Plus" @click="openSupplement(item)">
@@ -74,6 +74,10 @@
           <el-tag :type="statusTagType(feedbackStates[item.id])" size="small">
             {{ statusLabel(feedbackStates[item.id]) }}
           </el-tag>
+          <el-tag
+            v-if="feedbackReasons[item.id]"
+            size="small" effect="plain" type="info"
+          >归因：{{ reasonLabel(feedbackReasons[item.id]) }}</el-tag>
           <el-button type="warning" size="small" text :icon="RefreshLeft" @click="undoFeedback(item)">
             撤销
           </el-button>
@@ -89,8 +93,40 @@
           <span class="corrected-label">修正等级：</span>
           <RiskBadge :level="feedbackCorrected[item.id].risk_level" size="small" />
         </div>
+        <div class="feedback-review-hint">
+          该反馈已进入反馈池；需经审核 + 管理员批准后才可能用于持续优化（不会立即生效）。
+        </div>
       </div>
     </div>
+
+    <!-- 误报对话框（含归因，反馈归因是学习经验的关键输入） -->
+    <el-dialog v-model="falsePositiveDialog.visible" title="标记误报" width="560px" :close-on-click-modal="false">
+      <el-form label-position="top">
+        <el-form-item label="误报原因（归因）">
+          <el-select v-model="falsePositiveDialog.reason" style="width: 100%">
+            <el-option v-for="r in reasonsForFalsePositive" :key="r.value" :label="r.label" :value="r.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="补充说明">
+          <el-input
+            v-model="falsePositiveDialog.comment"
+            type="textarea"
+            :rows="3"
+            placeholder="例如：第四条第（2）款已经约定验收标准"
+            maxlength="500"
+            show-word-limit
+          />
+        </el-form-item>
+        <el-alert
+          type="info" :closable="false" show-icon
+          title="提交后进入反馈池，需经审核与管理员批准；批准前不会用于任何自动优化。"
+        />
+      </el-form>
+      <template #footer>
+        <el-button @click="falsePositiveDialog.visible = false">取消</el-button>
+        <el-button type="danger" @click="submitFalsePositive">确定标记误报</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 修正对话框 -->
     <el-dialog v-model="correctDialog.visible" title="修正风险标注" width="520px" :close-on-click-modal="false">
@@ -102,7 +138,12 @@
             <el-option label="低风险" value="low" />
           </el-select>
         </el-form-item>
-        <el-form-item label="修正理由">
+        <el-form-item label="修正理由（归因）">
+          <el-select v-model="correctDialog.reason" style="width: 100%">
+            <el-option v-for="r in REASON_OPTIONS" :key="r.value" :label="r.label" :value="r.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="修正说明">
           <el-input
             v-model="correctDialog.comment"
             type="textarea"
@@ -132,6 +173,11 @@
             show-word-limit
           />
         </el-form-item>
+        <el-form-item label="归因">
+          <el-select v-model="supplementDialog.reason" style="width: 100%">
+            <el-option v-for="r in REASON_OPTIONS" :key="r.value" :label="r.label" :value="r.value" />
+          </el-select>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="supplementDialog.visible = false">取消</el-button>
@@ -143,7 +189,7 @@
 
 <script setup>
 import { ref, reactive, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { Check, Edit, Close, Plus, ChatLineSquare, RefreshLeft } from '@element-plus/icons-vue'
 import RiskBadge from './RiskBadge.vue'
 
@@ -163,6 +209,24 @@ const items = ref([])
 const feedbackStates = reactive({})
 const feedbackComments = reactive({})
 const feedbackCorrected = reactive({})
+const feedbackReasons = reactive({})
+
+// ── 反馈归因（与后端 services/feedback_experience.FEEDBACK_REASONS 一致）
+// 说明：归因只是"为什么这么判"的说明，**不是**规则改动，也不会自动影响任何判定。
+const REASON_OPTIONS = [
+  { value: 'clause_exists', label: '条款实际存在（模型漏看）' },
+  { value: 'evidence_gap', label: '证据提取错误' },
+  { value: 'semantic_error', label: '语义理解错误' },
+  { value: 'contract_type_error', label: '合同类型判断错误' },
+  { value: 'adjudicator_rule_suspect', label: '怀疑裁决规则本身有误（仅进规则反馈池）' },
+  { value: 'other', label: '其他' },
+]
+// 误报场景下"怀疑规则"不在首位引导；规则反馈池仅用于人工排查
+const reasonsForFalsePositive = REASON_OPTIONS
+
+function reasonLabel(v) {
+  return REASON_OPTIONS.find(r => r.value === v)?.label || v
+}
 
 watch(() => props.riskItems, (val) => { items.value = val || [] }, { immediate: true, deep: true })
 
@@ -175,6 +239,7 @@ watch(() => props.loadedFeedbacks, (list) => {
       feedbackStates[rid] = fb.action_type
       if (fb.comment) feedbackComments[rid] = fb.comment
       if (fb.corrected_risk) feedbackCorrected[rid] = fb.corrected_risk
+      if (fb.feedback_reason) feedbackReasons[rid] = fb.feedback_reason
     }
   }
 }, { immediate: true, deep: true })
@@ -207,12 +272,15 @@ function apply(item, actionType, extra = {}) {
   feedbackStates[id] = actionType
   if (extra.comment) feedbackComments[id] = extra.comment
   if (extra.corrected_risk) feedbackCorrected[id] = extra.corrected_risk
+  feedbackReasons[id] = extra.feedback_reason || 'other'
   ElMessage.success(statusLabel(actionType) + '成功')
   emit('feedback-change', {
     record_id: id,
     action_type: actionType,
     corrected_risk: extra.corrected_risk || null,
     comment: extra.comment || null,
+    // 归因：后端据此生成学习经验（并区分"规则反馈池"）
+    feedback_reason: extra.feedback_reason || 'other',
     contract_id: props.contractId,
   })
 }
@@ -227,6 +295,7 @@ function undoFeedback(item) {
   delete feedbackStates[id]
   delete feedbackComments[id]
   delete feedbackCorrected[id]
+  delete feedbackReasons[id]
   ElMessage.info('已撤销' + statusLabel(prevAction))
   emit('feedback-undo', {
     record_id: id,
@@ -237,25 +306,32 @@ function undoFeedback(item) {
 }
 
 // ── 确认 ──
-function handleConfirm(item) { apply(item, 'confirmed') }
+function handleConfirm(item) { apply(item, 'confirmed', { feedback_reason: 'other' }) }
 
-// ── 误报 ──
-async function handleFalsePositive(item) {
-  try {
-    await ElMessageBox.confirm(
-      '确定将此项标记为误报吗？标记后该风险将不计入报告统计。',
-      '确认误报',
-      { confirmButtonText: '确定标记', cancelButtonText: '取消', type: 'warning' }
-    )
-    apply(item, 'false_positive')
-  } catch { /* 取消 */ }
+// ── 误报（含归因。误报是学习闭环里最有价值的负样本）──
+const falsePositiveDialog = reactive({ visible: false, recordId: null, reason: 'clause_exists', comment: '' })
+function openFalsePositive(item) {
+  falsePositiveDialog.recordId = item.id
+  falsePositiveDialog.reason = 'clause_exists'
+  falsePositiveDialog.comment = ''
+  falsePositiveDialog.visible = true
+}
+function submitFalsePositive() {
+  const item = items.value.find(i => i.id === falsePositiveDialog.recordId)
+  if (!item) return
+  apply(item, 'false_positive', {
+    feedback_reason: falsePositiveDialog.reason,
+    comment: falsePositiveDialog.comment || undefined,
+  })
+  falsePositiveDialog.visible = false
 }
 
 // ── 修正 ──
-const correctDialog = reactive({ visible: false, recordId: null, level: 'medium', comment: '' })
+const correctDialog = reactive({ visible: false, recordId: null, level: 'medium', reason: 'other', comment: '' })
 function openCorrect(item) {
   correctDialog.recordId = item.id
   correctDialog.level = item.risk_level || reverseLevelMap[item.level] || 'medium'
+  correctDialog.reason = 'other'
   correctDialog.comment = ''
   correctDialog.visible = true
 }
@@ -264,22 +340,27 @@ function submitCorrect() {
   if (!item) return
   apply(item, 'corrected', {
     corrected_risk: { risk_level: correctDialog.level },
+    feedback_reason: correctDialog.reason,
     comment: correctDialog.comment || undefined,
   })
   correctDialog.visible = false
 }
 
 // ── 补充 ──
-const supplementDialog = reactive({ visible: false, recordId: null, comment: '' })
+const supplementDialog = reactive({ visible: false, recordId: null, reason: 'evidence_gap', comment: '' })
 function openSupplement(item) {
   supplementDialog.recordId = item.id
+  supplementDialog.reason = 'evidence_gap'
   supplementDialog.comment = ''
   supplementDialog.visible = true
 }
 function submitSupplement() {
   const item = items.value.find(i => i.id === supplementDialog.recordId)
   if (!item) return
-  apply(item, 'supplemented', { comment: supplementDialog.comment || undefined })
+  apply(item, 'supplemented', {
+    comment: supplementDialog.comment || undefined,
+    feedback_reason: supplementDialog.reason,
+  })
   supplementDialog.visible = false
 }
 
@@ -287,6 +368,7 @@ function clearStates() {
   Object.keys(feedbackStates).forEach(k => delete feedbackStates[k])
   Object.keys(feedbackComments).forEach(k => delete feedbackComments[k])
   Object.keys(feedbackCorrected).forEach(k => delete feedbackCorrected[k])
+  Object.keys(feedbackReasons).forEach(k => delete feedbackReasons[k])
 }
 
 defineExpose({
@@ -393,4 +475,5 @@ defineExpose({
   font-size: 13px;
 }
 .corrected-label { color: #909399; }
+.feedback-review-hint { margin-top: 6px; font-size: 11.5px; color: #9AA4B8; line-height: 1.7; }
 </style>

@@ -65,8 +65,62 @@ def _split_supplement(full_text: str):
     return full_text[:idx], full_text[idx:]
 
 
-def _extract_chunk(chunk: str):
+# ── Feedback RAG 注入（人工反馈驱动的持续优化）──────────────────────────
+# 边界（不可违反）：
+# 1. 默认关闭：`feedback_context=None` 时下方 prompt **逐字节不变**，
+#    因此官方评测路径（evaluate/run_evidence.py → extract_evidence）不受任何影响；
+# 2. 只影响"抽哪些事实"，不影响"判什么风险"——风险裁决始终由
+#    ai.auditor.evidence_adjudicator.adjudicate_risks（纯 Python）负责，本模块不参与；
+# 3. 注入内容只描述"应重点核查什么"，历史标签绝不能替代当前合同事实。
+_FEEDBACK_HEADER = (
+    "\n\n【人工历史参考】以下为**已由人工审核并批准**的历史参考，"
+    "仅用于提示你在抽取事实时应重点核查哪些位置/字段。\n"
+    "严格约束：\n"
+    "1) 你仍然只抽取客观事实，**不得输出任何风险判定字段**（本任务不下结论）；\n"
+    "2) 不得用历史结论替代当前合同事实——当前合同没有的东西一律照实填 false / 空；\n"
+    "3) 历史参考与当前合同原文冲突时，一律以**当前合同原文**为准。\n"
+)
+
+
+def _feedback_block(block) -> str:
+    """把经验文本包装成带约束的 prompt 片段；空内容返回空串（保证默认 prompt 不变）。"""
+    if not block:
+        return ""
+    text = str(block).strip()
+    if not text:
+        return ""
+    return _FEEDBACK_HEADER + text + "\n"
+
+
+def _resolve_feedback_block(feedback_context, chunk: str) -> str:
+    """解析本次该块的经验参考片段。
+
+    `feedback_context` 支持：
+    - None            → ""（**默认，prompt 与历史版本完全一致**）
+    - str             → 所有块共用同一段参考
+    - Callable[[str], str] → 按块检索（生产链路用，块级相关性更好）
+
+    任何异常都降级为"本块不用参考"，绝不打断审核。
+    """
+    if feedback_context is None:
+        return ""
+    try:
+        block = feedback_context if isinstance(feedback_context, str) else feedback_context(chunk)
+    except Exception as e:
+        logger.warning("Feedback RAG 参考块生成失败（该块不使用历史经验）: %s", e)
+        return ""
+    try:
+        return _feedback_block(block)
+    except Exception as e:
+        logger.warning("Feedback RAG 参考块包装失败（该块不使用历史经验）: %s", e)
+        return ""
+
+
+def _extract_chunk(chunk: str, feedback_context=None):
     """对单个文本块抽取证据。
+
+    `feedback_context` 为可选的历史人工经验（默认 None）：
+    为 None 时 prompt 与历史版本**逐字节一致**（官方评测冻结的前提）。
 
     返回语义（BUG-008 收口：失败与「成功但无风险事实」不再混用 {}）：
     - 成功：返回 dict（含空 dict {} = 成功但该块无任何风险事实）
@@ -76,10 +130,13 @@ def _extract_chunk(chunk: str):
     失败块会被当成正常空结果静默吞掉。现改为 None 表达失败，由 _extract_one 统计。
     """
     try:
-        resp = llm_client.chat(
-            prompt=SYSTEM_PROMPT_EVIDENCE + "\n\n请抽取以下合同的事实：\n" + chunk,
-            temperature=0.0,
+        prompt = (
+            SYSTEM_PROMPT_EVIDENCE
+            + _resolve_feedback_block(feedback_context, chunk)
+            + "\n\n请抽取以下合同的事实：\n"
+            + chunk
         )
+        resp = llm_client.chat(prompt=prompt, temperature=0.0)
         ev = extract_json(resp)
         if isinstance(ev, dict):
             return ev
@@ -90,8 +147,23 @@ def _extract_chunk(chunk: str):
         return None
 
 
-def _extract_one(text: str) -> dict:
+def _call_extract_chunk(chunk: str, feedback_context=None):
+    """调用单块抽取，并在**未注入历史经验时保持与历史完全一致的调用形态（单参数）**。
+
+    这样做的两个理由：
+    1. `feedback_context=None` 时，不仅 prompt 逐字节不变，连调用形态也和历史一致，
+       因此任何对 `_extract_chunk` 的替换/打桩（既有测试、未来的评测替身）都不受影响；
+    2. 语义更明确：没有历史经验时，"注入"这条分支在代码路径上完全不参与。
+    """
+    if feedback_context is None:
+        return _extract_chunk(chunk)
+    return _extract_chunk(chunk, feedback_context)
+
+
+def _extract_one(text: str, feedback_context=None) -> dict:
     """对一段文本抽取证据（超长分块并行合并）。
+
+    `feedback_context` 透传给单块抽取（默认 None ⇒ 不注入任何历史经验）。
 
     返回 {"evidence", "failed_chunks", "total_chunks"}（BUG-008 收口）：
     - 失败块（_extract_chunk 返回 None）不计入 evidence，但计入 failed_chunks，失败可统计、可识别；
@@ -103,7 +175,7 @@ def _extract_one(text: str) -> dict:
     if not chunks:
         return {"evidence": {}, "failed_chunks": 0, "total_chunks": 0}
     if len(chunks) == 1:
-        ev = _extract_chunk(chunks[0])
+        ev = _call_extract_chunk(chunks[0], feedback_context)
         if ev is None:
             logger.warning("证据抽取：单块失败（可能超时/限流/JSON 解析失败），该块风险要素丢失")
             return {"evidence": {}, "failed_chunks": 1, "total_chunks": 1}
@@ -112,7 +184,7 @@ def _extract_one(text: str) -> dict:
     fail = 0
     with ThreadPoolExecutor(max_workers=min(len(chunks), 6)) as ex:
         # 复制上下文后提交：保证工作线程能读到用户个人 DeepSeek Key（见 ai/llm_context.py）
-        futs = [submit_with_context(ex, _extract_chunk, c) for c in chunks]
+        futs = [submit_with_context(ex, _call_extract_chunk, c, feedback_context) for c in chunks]
         for ev in (f.result() for f in futs):
             if ev is None:
                 fail += 1
@@ -184,8 +256,15 @@ def _status_for(failed: int, total: int) -> str:
     return "partial"
 
 
-def extract_evidence_detailed(full_text: str) -> dict:
+def extract_evidence_detailed(full_text: str, *, feedback_context=None) -> dict:
     """抽取证据并返回状态信封（BUG-003/BUG-008 收口）。
+
+    **新增 keyword-only 可选参数 `feedback_context`（默认 None）**：
+    - None：完全等价于历史行为（prompt 逐字节不变）——官方评测路径即走这条；
+    - str / Callable[[str], str]：注入"已人工批准的历史经验"参考块，
+      只影响事实抽取的提示，不影响裁决（裁决由 `adjudicate_risks` 独立负责）。
+    **本函数自身不检查任何开关**：是否启用 Feedback RAG 由调用方（生产审核链路）决定，
+    从而保证评测脚本无论如何都拿不到注入。
 
     返回 {"evidence", "status", "failed_chunks", "total_chunks"}：
     - status == "success"：全部块抽取成功（evidence 可能为空 dict = 无风险证据，属正常 0 风险）
@@ -199,15 +278,15 @@ def extract_evidence_detailed(full_text: str) -> dict:
         # 正文与补全条款并行抽取（各自动分块），缩短审核等待
         with ThreadPoolExecutor(max_workers=2) as ex:
             # 复制上下文后提交：保证工作线程能读到用户个人 DeepSeek Key（见 ai/llm_context.py）
-            body_fut = submit_with_context(ex, _extract_one, body)
-            supp_fut = submit_with_context(ex, _extract_one, supplement)
+            body_fut = submit_with_context(ex, _extract_one, body, feedback_context)
+            supp_fut = submit_with_context(ex, _extract_one, supplement, feedback_context)
             body_r = body_fut.result()
             supp_r = supp_fut.result()
         evidence = _merge_override(body_r["evidence"], supp_r["evidence"])
         total = body_r["total_chunks"] + supp_r["total_chunks"]
         failed = body_r["failed_chunks"] + supp_r["failed_chunks"]
     else:
-        r = _extract_one(body)
+        r = _extract_one(body, feedback_context)
         evidence = r["evidence"]
         total = r["total_chunks"]
         failed = r["failed_chunks"]
@@ -220,5 +299,8 @@ def extract_evidence_detailed(full_text: str) -> dict:
 
 
 def extract_evidence(full_text: str) -> dict:
-    """兼容旧调用（评测脚本 run_evidence / ab_normalize 等）：仅返回合并后的 evidence dict。"""
+    """兼容旧调用（评测脚本 run_evidence / ab_normalize 等）：仅返回合并后的 evidence dict。
+
+    **签名与行为保持冻结**（不暴露 feedback_context），确保官方评测路径无法被注入。
+    """
     return extract_evidence_detailed(full_text)["evidence"]

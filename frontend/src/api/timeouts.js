@@ -16,3 +16,7 @@ export const COMPARE_TIMEOUT = 300_000
 
 // GET /contracts/{id}/file：.docx → PDF（LibreOffice 自身 timeout=60s）。60s + 60s 余量。
 export const FILE_TIMEOUT = 120_000
+
+// POST /contracts/{id}/locate-clause：纯文本匹配（无 LLM、无写库），
+// 后端只做几次子串查找，正常耗时 < 1s；给 20s 足以覆盖超长合同。
+export const LOCATE_TIMEOUT = 20_000

@@ -1,5 +1,5 @@
 import request from '../utils/request.js'
-import { REVISE_TIMEOUT, COMPARE_TIMEOUT, FILE_TIMEOUT } from './timeouts.js'
+import { REVISE_TIMEOUT, COMPARE_TIMEOUT, FILE_TIMEOUT, LOCATE_TIMEOUT } from './timeouts.js'
 
 /**
  * 上传合同文件
@@ -106,6 +106,19 @@ export function reviseClause(id, data) {
  */
 export function getRevisions(id) {
   return request.get(`/contracts/${id}/revisions`)
+}
+
+/**
+ * 只读定位：根据用户提供的原文片段 / 定位描述 / 条款编号，返回候选定位结果。
+ * 后端侧不调用 LLM、不写库、不建立任何 revision —— 只是定位工具。
+ * 返回的 found 不等于「后端已建立 anchor」；anchor 仍由 POST /revise 建立。
+ * @param {number|string} id — 合同 ID
+ * @param {Object} data — { text?, clause_anchor? }
+ *   text          用户在原文中选中的逐字原文，或自然语言定位描述
+ *   clause_anchor 条款编号锚点（中文或阿拉伯数字，如 "五" / "5"）
+ */
+export function locateClause(id, data) {
+  return request.post(`/contracts/${id}/locate-clause`, data, { timeout: LOCATE_TIMEOUT })
 }
 
 /**

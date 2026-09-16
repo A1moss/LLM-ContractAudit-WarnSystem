@@ -1,1325 +1,159 @@
 <template>
-  <div class="page-container">
-    <div v-if="loading" class="loading-state"><el-skeleton :rows="8" animated /></div>
-    <div v-else-if="error" class="error-state">
-      <el-result icon="error" title="加载失败" :sub-title="error">
+  <div class="cd2">
+    <!-- 加载 / 错误 -->
+    <div v-if="ws.loading" class="cd2-state"><el-skeleton :rows="8" animated /></div>
+    <div v-else-if="ws.detailError" class="cd2-state">
+      <el-result icon="error" title="加载失败" :sub-title="ws.detailError">
         <template #extra>
-          <el-button type="primary" @click="fetchDetail">重新加载</el-button>
+          <el-button type="primary" @click="ws.loadAll()">重新加载</el-button>
           <el-button @click="$router.push('/contracts')">返回列表</el-button>
         </template>
       </el-result>
     </div>
 
-    <template v-else-if="contract">
-      <!-- 页头 -->
-      <div class="a24-page-header">
-        <div>
-          <div class="crumb">首页 / 合同管理 / <b>合同详情</b></div>
-          <div class="title-row">
-            <span class="icon"><el-icon><Document /></el-icon></span>
-            <h3>{{ contract.file_name }}</h3>
+    <template v-else-if="ws.contract">
+      <!-- 合同信息条（压缩为一行；不展示页数——后端不持久化页数，主格式 docx 也不提供页数） -->
+      <div class="cd2-header">
+        <div class="cd2-header-l">
+          <span class="icon"><el-icon><Document /></el-icon></span>
+          <div class="cd2-header-text">
+            <div class="cd2-title-row">
+              <h3>{{ ws.contract.file_name }}</h3>
+              <el-tag :type="statusTag" size="small">{{ statusLabel }}</el-tag>
+              <el-tag v-if="ws.contract.is_outsourcing" type="warning" size="small" effect="plain">服务外包</el-tag>
+            </div>
+            <div class="cd2-sub">
+              <span>#{{ ws.contract.id }}</span>
+              <span>{{ typeLabel(ws.contract.contract_type) }}</span>
+              <span>上传于 {{ formatTime(ws.contract.created_at) }}</span>
+              <span>{{ ws.contract.audit_mode === 'precise' ? '精细审核' : ws.contract.audit_mode === 'fast' ? '快速初筛' : '—' }}</span>
+            </div>
           </div>
-          <div class="desc">上传于 {{ formatTime(contract.created_at) }} · {{ totalPages }} 页 · {{ typeLabel(contract.contract_type) }}</div>
         </div>
-        <div class="actions">
-          <el-tag :type="statusTag(contract.status)" size="large">{{ statusLabel(contract.status) }}</el-tag>
-        </div>
-      </div>
-
-      <!-- 元信息卡片条 -->
-      <div class="a24-meta-strip">
-        <div class="a24-meta-cell">
-          <div class="k">合同类型</div>
-          <div class="v">{{ typeLabel(contract.contract_type) }}<el-tag v-if="contract.is_outsourcing" type="warning" size="small" style="margin-left:4px">服务外包</el-tag></div>
-        </div>
-        <div class="a24-meta-cell">
-          <div class="k">上传时间</div>
-          <div class="v" style="font-size:13px">{{ formatTime(contract.created_at) }}</div>
-        </div>
-        <div class="a24-meta-cell">
-          <div class="k">页数</div>
-          <div class="v">{{ totalPages }} 页</div>
-        </div>
-        <div class="a24-meta-cell">
-          <div class="k">审核模式</div>
-          <div class="v">{{ contract.audit_mode === 'precise' ? '精细审核' : contract.audit_mode === 'fast' ? '快速初筛' : '—' }}</div>
-        </div>
-        <div class="a24-meta-cell">
-          <div class="k">审核状态</div>
-          <div class="v"><el-tag :type="statusTag(contract.status)" size="small">{{ statusLabel(contract.status) }}</el-tag></div>
+        <div class="cd2-header-r">
+          <template v-if="ws.contract.status === 'completed' && ws.canReview">
+            <span class="cd2-hint">审核人复核：</span>
+            <el-button type="success" size="small" :loading="ws.reviewing" @click="ws.doReview('approve')">复核通过</el-button>
+            <el-button type="danger" size="small" :loading="ws.reviewing" @click="ws.doReview('reject')">驳回重审</el-button>
+          </template>
+          <template v-if="ws.contract.status === 'reviewed' && ws.canApprove">
+            <span class="cd2-hint">验收人验收：</span>
+            <el-button type="success" size="small" :loading="ws.reviewing" @click="ws.doApprove()">验收通过</el-button>
+          </template>
         </div>
       </div>
 
-      <!-- 复核 / 验收 操作栏（按角色显示） -->
-      <div v-if="(contract.status === 'completed' && canReview) || (contract.status === 'reviewed' && canApprove)" class="review-bar">
-        <template v-if="contract.status === 'completed' && canReview">
-          <span class="review-hint">审核人复核：</span>
-          <el-button type="success" size="small" :loading="reviewing" @click="handleReview('approve')">复核通过</el-button>
-          <el-button type="danger" size="small" :loading="reviewing" @click="handleReview('reject')">驳回重审</el-button>
-        </template>
-        <template v-if="contract.status === 'reviewed' && canApprove">
-          <span class="review-hint">验收人验收：</span>
-          <el-button type="success" size="small" :loading="reviewing" @click="handleApprove">验收通过</el-button>
-        </template>
-      </div>
+      <!-- 一级 Tab（与设计一致：原文 / 风险 / 比对 / 修改合同 / 审核报告） -->
+      <el-tabs v-model="ws.activeTab" type="border-card" class="cd2-tabs">
+        <el-tab-pane label="原始文本" name="text">
+          <div class="cd2-pane cd2-pane-scroll">
+            <OriginalTextPanel :ws="ws" @go-risk="onGoRisk" />
+          </div>
+        </el-tab-pane>
 
-      <el-row :gutter="20" class="detail-row">
-        <el-col :xs="24" :md="14">
-          <el-tabs v-model="activeTab" type="border-card">
-            <el-tab-pane label="原始文本" name="text">
-              <div class="tab-content">
-                <div v-if="contract.parsed_text" v-html="renderedText"></div>
-                <el-empty v-else description="暂无解析文本" />
-              </div>
-            </el-tab-pane>
-            <el-tab-pane label="风险详情" name="audit">
-              <div class="tab-content">
-                <div v-if="contract.status === 'parsed' && riskItems.length === 0" class="audit-placeholder">
-                  <el-empty description="尚未审核此合同">
-                    <el-button type="primary" :loading="auditing" @click="handleTriggerAudit">开始审核</el-button>
-                  </el-empty>
-                </div>
+        <el-tab-pane label="风险详情" name="audit">
+          <div class="cd2-pane cd2-pane-scroll">
+            <RiskPanel :ws="ws" />
+          </div>
+        </el-tab-pane>
 
-                <div v-else-if="contract.status === 'auditing'" class="audit-placeholder">
-                  <el-result icon="info" title="审核中" sub-title="AI 正在分析合同条款，请稍候...">
-                    <template #extra><el-button :loading="true" type="primary">审核进行中</el-button></template>
-                  </el-result>
-                </div>
+        <el-tab-pane label="条款比对" name="compare">
+          <div class="cd2-pane cd2-pane-scroll">
+            <ComparisonPanel :ws="ws" />
+          </div>
+        </el-tab-pane>
 
-                <template v-else-if="riskItems.length > 0">
-                  <el-alert v-if="!hasCurrentResult" title="⚠ 上次审核已被驳回，请重新审核（以下为已驳回历史结果）" type="error" show-icon :closable="false" class="audit-alert" />
-                  <el-alert :title="`共检测到 ${riskSummary.total} 条风险，高风险 ${riskSummary.high}、中风险 ${riskSummary.mid}、低风险 ${riskSummary.low}`" type="warning" show-icon :closable="false" class="audit-alert" />
-                  <el-table :data="riskItems" stripe size="small" max-height="400">
-                    <el-table-column v-if="!hasCurrentResult" label="结果状态" width="110" align="center"><template #default><el-tag type="danger" size="small">已驳回审核结果</el-tag></template></el-table-column>
-                    <el-table-column prop="level" label="等级" width="80" align="center"><template #default="{row}"><el-tag :type="levelTag(row.level)" size="small">{{ row.level }}</el-tag></template></el-table-column>
-                    <el-table-column prop="category" label="类别" width="80" align="center" />
-                    <el-table-column label="定位" width="90" align="center">
-                      <template #default="{row}">
-                        <span v-if="row.clause_no" style="color:#409EFF">第{{ cnNo(row.clause_no) }}条</span>
-                        <span v-else style="color:#c0c4cc">—</span>
-                      </template>
-                    </el-table-column>
-                    <el-table-column prop="clause" label="涉及条款" min-width="160" show-overflow-tooltip />
-                    <el-table-column prop="suggestion" label="建议" min-width="160" show-overflow-tooltip />
-                    <el-table-column prop="confidence" label="置信度" width="90" align="center"><template #default="{row}"><el-progress :percentage="Math.round((row.confidence||0)*100)" :color="row.confidence>=0.7?'#67C23A':row.confidence>=0.5?'#E6A23C':'#F56C6C'" :stroke-width="6" /></template></el-table-column>
-                    <el-table-column label="操作" width="100" align="center">
-                      <template #default="{row}">
-                        <el-button v-if="isAddClauseRisk(row)" type="success" size="small" @click="openAddClause(row)">新增条款</el-button>
-                      </template>
-                    </el-table-column>
-                  </el-table>
-                  <div class="audit-actions">
-                    <el-button type="primary" size="small" @click="goToAuditResult">全屏查看结果</el-button>
-                    <el-button type="warning" size="small" @click="openReviseOverview">改条款</el-button>
-                  </div>
+        <el-tab-pane label="修改合同" name="revise">
+          <div class="cd2-pane cd2-pane-flush">
+            <RevisionWorkbench :ws="ws" />
+          </div>
+        </el-tab-pane>
 
-                  <FeedbackPanel
-                    ref="feedbackRef"
-                    :risk-items="riskItems"
-                    :contract-id="contract?.id"
-                    :loaded-feedbacks="loadedFeedbacks"
-                    @feedback-change="onFeedback"
-                    @feedback-undo="onFeedbackUndo"
-                  />
-
-                  <!-- 改条款总览抽屉（聊天式，多条款） -->
-                  <el-drawer v-model="revisePanel.visible" title="改条款" size="85%" :close-on-click-modal="false">
-                    <div class="revise-layout">
-                      <!-- 左侧：会话列表 -->
-                      <div class="revise-list">
-                        <!-- 总览会话（整个合同，统领） -->
-                        <div class="revise-item revise-item-overview" :class="{ 'is-active': isOverviewActive }" @click="revisePanel.activeId = '__overview__'">
-                          <div class="revise-item-top">
-                            <span class="revise-overview-icon">📄</span>
-                            <span class="revise-overview-title">总览（整个合同）</span>
-                            <el-badge v-if="revisePanel.overviewMessages.length" :value="Math.ceil(revisePanel.overviewMessages.length / 2)" type="warning" />
-                          </div>
-                          <div class="revise-item-clause">对整个合同提出统一修改要求</div>
-                        </div>
-                        <!-- 各条款会话 -->
-                        <div v-for="c in revisePanel.clauses" :key="c.id" class="revise-item" :class="{ 'is-active': c.id === revisePanel.activeId }" @click="revisePanel.activeId = c.id">
-                          <div class="revise-item-top">
-                            <el-tag :type="levelTag(c.level)" size="small">{{ c.level }}</el-tag>
-                            <span class="revise-item-cat">{{ c.category }}</span>
-                            <span v-if="c.clause_no" class="revise-item-no">第{{ cnNo(c.clause_no) }}条</span>
-                            <el-badge v-if="c.messages.length" :value="Math.ceil(c.messages.length / 2)" type="primary" />
-                          </div>
-                          <div class="revise-item-clause">{{ c.clause }}</div>
-                        </div>
-                      </div>
-                      <!-- 右侧：聊天 -->
-                      <div class="revise-chat">
-                        <!-- 标题 -->
-                        <div v-if="isOverviewActive" class="revise-chat-title">
-                          <span class="revise-chat-title-label">📄 总览会话 · 整个合同</span>
-                        </div>
-                        <div v-else-if="activeClause" class="revise-chat-title">
-                          <span class="revise-chat-title-label">正在修订条款：</span>
-                          <el-tag :type="levelTag(activeClause.level)" size="small">{{ activeClause.level }}</el-tag>
-                          <span class="revise-chat-title-cat">{{ activeClause.category }}</span>
-                          <span v-if="activeClause.clause_no" class="revise-chat-title-no">第{{ cnNo(activeClause.clause_no) }}条</span>
-                        </div>
-                        <div v-if="!isOverviewActive && activeClause" class="revise-chat-sub">{{ activeClause.clause }}</div>
-                        <!-- 消息区 -->
-                        <div class="revise-chat-body">
-                          <div v-if="!currentMessages.length" class="revise-empty">{{ reviseEmptyHint }}</div>
-                          <div v-for="(m, i) in currentMessages" :key="i" class="revise-msg" :class="'revise-msg-' + m.role">
-                            <div class="revise-msg-head">{{ m.role === 'user' ? '你' : 'AI 修订' }}</div>
-                            <div class="revise-msg-text">{{ m.text }}</div>
-                            <div v-if="m.clause" class="revise-msg-clause">{{ m.clause }}</div>
-                            <div v-if="m.meta" class="revise-msg-meta">{{ m.meta }}</div>
-                          </div>
-                        </div>
-                        <!-- 输入区 -->
-                        <div v-if="isOverviewActive && refiningAddClause" class="refine-tip">
-                          <el-alert title="正在继续修改新增条款：下方输入即针对刚生成的新增条款，确认后点「完成新增」" type="info" :closable="false" show-icon />
-                          <el-button size="small" type="success" @click="finishAddClause">完成新增</el-button>
-                        </div>
-                        <div class="revise-chat-foot">
-                          <el-input v-model="revisePanel.input" type="textarea" :rows="2" :placeholder="revisePlaceholder" @keydown.enter.prevent="handleRevise" />
-                          <el-button type="primary" :loading="revisePanel.loading" @click="handleRevise">发送</el-button>
-                          <el-button v-if="isOverviewActive" size="small" @click="openAddClause(null)">新增缺失条款</el-button>
-                          <el-button @click="downloadRevised">下载修订版 DOCX</el-button>
-                        </div>
-                      </div>
-                    </div>
-                  </el-drawer>
-
-                  <!-- 新增缺失条款对话框（R09 等） -->
-                  <el-dialog v-model="addPanel.visible" title="新增缺失条款" width="760px" :close-on-click-modal="false" append-to-body>
-                    <div class="add-clause-body">
-                      <el-alert :title="`缺失风险：${addPanel.riskType === 'R09' ? '不可抗力条款缺失' : addPanel.riskType}`" type="warning" show-icon :closable="false" />
-                      <!-- 同类范本（RAG 建议） -->
-                      <div v-if="addPanel.templates.length" class="add-clause-sec">
-                        <div class="add-clause-sec-title">同类范本参考</div>
-                        <div v-for="(t, i) in addPanel.templates" :key="i" class="add-clause-tpl">{{ t.text }}</div>
-                      </div>
-                      <!-- 法律依据（RAG 建议） -->
-                      <div v-if="addPanel.legalBasis.length" class="add-clause-sec">
-                        <div class="add-clause-sec-title">法律依据</div>
-                        <el-tag v-for="(l, i) in addPanel.legalBasis" :key="i" size="small" type="info" style="margin:2px">{{ l.law }}{{ l.article }} {{ l.title }}</el-tag>
-                      </div>
-                      <!-- 插入位置（仅建议，用户自主决定） -->
-                      <div class="add-clause-sec">
-                        <div class="add-clause-sec-title">插入位置（请确认）</div>
-                        <el-radio-group v-model="addPanel.positionMode" @change="onPositionModeChange">
-                          <el-radio value="suggest" :disabled="!addPanel.suggestedPosition">采纳建议</el-radio>
-                          <el-radio value="custom">指定位置</el-radio>
-                          <el-radio value="append">追加到末尾</el-radio>
-                        </el-radio-group>
-                        <div v-if="addPanel.suggestedPosition" class="add-clause-pos-hint">建议：{{ addPanel.suggestedPosition.hint || '（建议位置）' }}</div>
-                        <el-select v-if="addPanel.positionMode === 'custom'" v-model="addPanel.customAnchor" placeholder="选择插入到哪一条之后" style="width:100%;margin-top:8px">
-                          <el-option v-for="h in addPanel.headings" :key="h.num" :value="h.cn" :label="`第${h.cn}条${h.title ? '（' + h.title + '）' : ''}`" />
-                        </el-select>
-                      </div>
-                      <!-- 指令 -->
-                      <div class="add-clause-sec">
-                        <div class="add-clause-sec-title">新增条款要求</div>
-                        <el-input v-model="addPanel.instruction" type="textarea" :rows="3" placeholder="例如：新增不可抗力条款，明确不可抗力的定义、通知义务与免责安排" />
-                      </div>
-                    </div>
-                    <template #footer>
-                      <el-button @click="addPanel.visible = false">暂不添加</el-button>
-                      <el-button type="primary" :loading="addPanel.loading" @click="confirmAddClause">生成新增条款</el-button>
-                    </template>
-                  </el-dialog>
-                </template>
-
-                <el-empty v-else description="审核完成，未检测到风险" />
-              </div>
-            </el-tab-pane>
-            <el-tab-pane label="条款比对" name="compare">
-              <div class="tab-content">
-                <el-empty v-if="!clauseComparison" description="暂无条款比对结果" />
-                <template v-else>
-                  <el-alert :title="`条款覆盖率 ${Math.round(clauseComparison.summary.coverage_rate * 100)}%，缺失 ${clauseComparison.summary.missing} 条关键条款`" :type="clauseComparison.summary.missing > 0 ? 'warning' : 'success'" show-icon :closable="false" class="audit-alert" />
-                  <el-tag v-for="c in clauseComparison.missing_critical" :key="c" type="danger" size="small" style="margin:4px">缺失: {{ c }}</el-tag>
-
-                  <!-- 跨条款关联风险（图分析） -->
-                  <div v-if="clauseComparison.cross_clause_risks && clauseComparison.cross_clause_risks.length" class="cross-clause-box">
-                    <el-alert title="跨条款关联风险" type="error" show-icon :closable="false" />
-                    <div v-for="(r, i) in clauseComparison.cross_clause_risks" :key="i" class="cross-risk-item">
-                      <el-tag size="small" :type="r.type === '前置依赖缺失' ? 'danger' : 'warning'">{{ r.type }}</el-tag>
-                      <span class="cross-risk-text">{{ r.risk }}</span>
-                    </div>
-                  </div>
-
-                  <el-table :data="clauseComparison.clauses" stripe size="small" max-height="400" style="margin-top:12px">
-                    <el-table-column prop="title" label="条款名称" width="140" />
-                    <el-table-column label="状态" width="100">
-                      <template #default="{row}">
-                        <el-tag :type="row.status === 'covered' ? 'success' : row.status === 'partial' ? 'warning' : 'danger'" size="small">
-                          {{ row.status === 'covered' ? '已覆盖' : row.status === 'partial' ? '部分偏离' : '缺失' }}
-                        </el-tag>
-                      </template>
-                    </el-table-column>
-                    <el-table-column prop="matched_text" label="匹配条款" min-width="180" show-overflow-tooltip />
-                    <el-table-column prop="deviation" label="偏离说明" min-width="160" show-overflow-tooltip />
-                    <el-table-column prop="completion" label="补全建议" min-width="160" show-overflow-tooltip />
-                    <el-table-column prop="risk" label="风险说明" width="120" show-overflow-tooltip />
-                  </el-table>
-                </template>
-              </div>
-            </el-tab-pane>
-            <el-tab-pane label="审核报告" name="report">
-              <div class="tab-content">
-                <el-empty v-if="!hasCurrentResult && riskItems.length > 0" description="⚠ 上次审核已被驳回，当前无有效审核报告">
-                  <el-button type="primary" :loading="auditing" @click="handleTriggerAudit">重新审核</el-button>
-                </el-empty>
-                <el-empty v-else-if="contract.status !== 'completed'" description="审核完成后将自动生成报告">
-                  <el-button v-if="contract.status === 'parsed'" type="primary" :loading="auditing" @click="handleTriggerAudit">开始审核</el-button>
-                </el-empty>
-                <template v-else-if="riskItems.length > 0">
-                  <el-descriptions :column="2" border size="small" class="report-desc">
-                    <el-descriptions-item label="风险总数">{{ riskSummary.total }} 条</el-descriptions-item>
-                    <el-descriptions-item label="高风险">{{ riskSummary.high }} 条</el-descriptions-item>
-                    <el-descriptions-item label="中风险">{{ riskSummary.mid }} 条</el-descriptions-item>
-                    <el-descriptions-item label="低风险">{{ riskSummary.low }} 条</el-descriptions-item>
-                  </el-descriptions>
-                  <el-button type="primary" class="report-btn" @click="goToAuditReport">查看完整审核报告</el-button>
-                </template>
-                <el-empty v-else description="审核完成，未检测到风险" />
-              </div>
-            </el-tab-pane>
-          </el-tabs>
-        </el-col>
-
-        <!-- 右侧预览面板 -->
-        <el-col :xs="24" :md="10" class="detail-right">
-          <el-card shadow="hover">
-            <template #header>
-              <div class="pdf-header">
-                <span>合同原文</span>
-                <div class="pdf-toolbar">
-                  <template v-if="pdfReady">
-                    <el-button size="small" @click="zoomReset">重新适配</el-button>
-                    <el-tag size="small">第 {{ currentPage }} / {{ totalPages }} 页</el-tag>
-                  </template>
-                  <el-tag v-else-if="convertingDocx" size="small" type="warning">转换中...</el-tag>
-                </div>
-              </div>
-            </template>
-
-            <!-- PDF 转换中 -->
-            <div v-if="convertingDocx" class="converting-state">
-              <el-icon class="is-loading" :size="24"><Loading /></el-icon>
-              <p>正在加载预览</p>
-              <p class="converting-hint">首次加载需要 5-10 秒</p>
-            </div>
-
-            <!-- 图片模式 -->
-            <div v-else-if="imgReady" class="img-viewer">
-              <img :src="imgSrc" class="img-preview" alt="合同图片预览" />
-            </div>
-
-            <!-- PDF 模式 -->
-            <template v-else-if="pdfReady">
-              <div class="pdf-viewer">
-                <div class="pdf-scroll-container" ref="pdfScrollRef">
-                  <canvas ref="pdfCanvasRef" class="pdf-canvas"></canvas>
-                </div>
-              </div>
-
-              <!-- 页码导航（省略号风格） -->
-              <div class="page-nav">
-                <el-button size="small" :disabled="currentPage <= 1" @click="goToPage(1)">首页</el-button>
-                <el-button size="small" :disabled="currentPage <= 1" @click="goToPage(currentPage - 1)">
-                  <el-icon><ArrowLeft /></el-icon>
-                </el-button>
-
-                <template v-for="p in pageEllipsisRange" :key="p">
-                  <span v-if="p === '...'" class="page-ellipsis">...</span>
-                  <el-button
-                    v-else
-                    size="small"
-                    :type="p === currentPage ? 'primary' : 'default'"
-                    @click="goToPage(p)"
-                  >
-                    {{ p }}
-                  </el-button>
-                </template>
-
-                <el-button size="small" :disabled="currentPage >= totalPages" @click="goToPage(currentPage + 1)">
-                  <el-icon><ArrowRight /></el-icon>
-                </el-button>
-                <el-button size="small" :disabled="currentPage >= totalPages" @click="goToPage(totalPages)">末页</el-button>
-
-                <span class="page-jump">
-                  <span class="jump-label">跳至</span>
-                  <el-input
-                    v-model="jumpPage"
-                    size="small"
-                    class="jump-input"
-                    @keyup.enter="handleJump"
-                  />
-                  <span class="jump-label">页</span>
-                  <el-button size="small" @click="handleJump">GO</el-button>
-                </span>
-              </div>
-
-              <!-- 侧栏条款摘要 -->
-              <div class="text-sidebar">
-                <el-divider class="sidebar-divider" />
-                <span class="sidebar-label">当前页条款摘要</span>
-                <p class="sidebar-text">{{ pageSummary }}</p>
-              </div>
-            </template>
-
-            <!-- 加载失败 -->
-            <div v-else class="pdf-error">
-              <el-icon :size="32"><Warning /></el-icon>
-              <p>{{ pdfError || '无法加载合同内容' }}</p>
-            </div>
-          </el-card>
-        </el-col>
-      </el-row>
+        <el-tab-pane label="审核报告" name="report">
+          <div class="cd2-pane cd2-pane-scroll">
+            <ReportPanel :ws="ws" />
+          </div>
+        </el-tab-pane>
+      </el-tabs>
     </template>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { Warning, ArrowLeft, ArrowRight, Loading, Document } from '@element-plus/icons-vue'
-import FeedbackPanel from '../components/FeedbackPanel.vue'
-import { ElMessage } from 'element-plus'
-import { getContractDetail, getAuditResult, triggerAudit, getClauseComparison, submitFeedback, getFeedback, deleteFeedback, reviewContract, approveContract, reviseClause, getRevisions, downloadRevisedDocx, getContractFile, getAddClauseSuggestion } from '../api/contract.js'
+import { computed } from 'vue'
+import { Document } from '@element-plus/icons-vue'
+import OriginalTextPanel from './contract-detail/OriginalTextPanel.vue'
+import RiskPanel from './contract-detail/RiskPanel.vue'
+import ComparisonPanel from './contract-detail/ComparisonPanel.vue'
+import RevisionWorkbench from './contract-detail/RevisionWorkbench.vue'
+import ReportPanel from './contract-detail/ReportPanel.vue'
+import { useContractWorkspace } from '../composables/useContractWorkspace.js'
 import { formatTime } from '../utils/format.js'
 import { typeLabel } from '../constants/contractTypes.js'
-import * as pdfjsLib from 'pdfjs-dist'
-import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
-const route = useRoute()
-const router = useRouter()
+/**
+ * 合同详情 V2 工作台（页面壳）
+ *
+ * - 路由不变（/contracts/:id）、API 不变、审核链路不变。
+ * - 全部状态与逻辑集中在 useContractWorkspace（含 watch(contractId) 彻底重置），
+ *   子组件只消费 `ws`，不各自持有会串合同的副本。
+ * - 不依赖 PDF 渲染：原文一律用后端 parsed_text 渲染；页数不再展示。
+ */
+const ws = useContractWorkspace()
 
-const feedbackRef = ref(null)
-
-// ── 数据状态 ──
-const loading = ref(true)
-const error = ref('')
-const contract = ref(null)
-const contractId = computed(() => route.params.id)
-
-// ── 状态映射 ──
-function statusLabel(status) {
-  const map = {
-    uploaded: '已上传', parsed: '已解析', auditing: '审核中',
-    completed: '审核完成', reviewed: '待验收', approved: '已验收',
-  }
-  return map[status] || status || '未知'
+const STATUS_LABELS = {
+  uploaded: '已上传', parsed: '已解析', auditing: '审核中',
+  completed: '审核完成', reviewed: '待验收', approved: '已验收',
 }
-function statusTag(status) {
-  if (status === 'completed' || status === 'approved') return 'success'
-  if (status === 'auditing' || status === 'parsing') return 'warning'
-  if (status === 'reviewed') return 'primary'
+const statusLabel = computed(() => STATUS_LABELS[ws.contract?.status] || ws.contract?.status || '未知')
+const statusTag = computed(() => {
+  const s = ws.contract?.status
+  if (s === 'completed' || s === 'approved') return 'success'
+  if (s === 'auditing' || s === 'parsing') return 'warning'
+  if (s === 'reviewed') return 'primary'
   return 'info'
-}
-
-// ── HTML 转义 ──
-function escapeHtml(text) {
-  const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
-  return text.replace(/[&<>"']/g, ch => map[ch])
-}
-
-// ── 渲染文本 ──
-const renderedText = computed(() => {
-  const text = contract.value?.parsed_text || ''
-  return text.split('\n').map(p => (p.trim() ? `<p>${escapeHtml(p)}</p>` : '<p><br></p>')).join('')
 })
 
-// ── 获取合同详情 ──
-async function fetchDetail(options = {}) {
-  loading.value = true
-  error.value = ''
-  try {
-    const res = await getContractDetail(route.params.id)
-    contract.value = res.data
-    fetchFeedback()
-    if (options.loadPdf !== false) loadPdf()  // 轮询查状态时传 {loadPdf:false}，避免重复下载 PDF（BUG-032）
-  } catch (e) {
-    error.value = '无法加载合同详情，请确认合同 ID 有效且后端已启动'
-    console.warn('合同详情加载失败:', e)
-  } finally {
-    loading.value = false
-  }
+/** 原文中点击风险标注 → 切到风险详情并定位该风险卡片 */
+function onGoRisk(riskId) {
+  ws.focusRiskId = riskId
+  ws.setTab('audit')
 }
-
-// ── Tab 状态 ──
-const activeTab = ref('text')
-
-// ── PDF 状态 ──
-const currentPage = ref(1)
-const totalPages = ref(0)
-const pdfReady = ref(false)
-const pdfError = ref('')
-const pdfCanvasRef = ref(null)
-const pdfScrollRef = ref(null)
-const zoomLevel = ref(1.0)
-const zoomFit = ref(1.0)
-const jumpPage = ref('')
-const convertingDocx = ref(false)
-const imgReady = ref(false)
-const imgSrc = ref('')
-const loadedFeedbacks = ref([])
-
-let pdfDoc = null
-let pdfLoadingTask = null
-
-// ── loadPdf：自动转换 + 自动适配 ──
-async function loadPdf() {
-  // 先销毁上一个 PDF 任务，避免轮询期间反复下载/解析导致资源泄漏（BUG-032）
-  if (pdfLoadingTask) {
-    try { pdfLoadingTask.destroy() } catch {}
-    pdfLoadingTask = null
-  }
-  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
-  const cid = route.params.id
-
-  let fileData = null
-  if (cid) {
-    try {
-      convertingDocx.value = true
-      fileData = await getContractFile(cid)
-    } catch {
-      console.warn('合同文件 API 加载失败')
-    }
-  }
-
-  if (!fileData) {
-    convertingDocx.value = false
-    pdfError.value = '后端服务未启动，无法加载文件'
-    return
-  }
-
-  // 图片合同：用 <img> 渲染（pdfjs 无法渲染图片）
-  const fname = (contract.value?.file_name || '').toLowerCase()
-  if (/\.(jpg|jpeg|png|tiff|tif|bmp)$/.test(fname)) {
-    try {
-      const ext = fname.split('.').pop()
-      const mimeMap = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', tiff: 'image/tiff', tif: 'image/tiff', bmp: 'image/bmp' }
-      const blob = new Blob([fileData], { type: mimeMap[ext] || 'image/jpeg' })
-      imgSrc.value = URL.createObjectURL(blob)
-      convertingDocx.value = false
-      imgReady.value = true
-    } catch (e) {
-      convertingDocx.value = false
-      pdfError.value = '图片加载失败'
-    }
-    return
-  }
-
-  try {
-    pdfLoadingTask = pdfjsLib.getDocument({ data: new Uint8Array(fileData) })
-    pdfDoc = await pdfLoadingTask.promise
-    totalPages.value = pdfDoc.numPages
-    const firstPage = await pdfDoc.getPage(1)
-    const vp = firstPage.getViewport({ scale: 1.0 })
-    zoomFit.value = +(380 / vp.width).toFixed(2)
-    zoomLevel.value = zoomFit.value
-    // 必须先关掉 convertingDocx，否则模板 v-if="convertingDocx" 会挡住 canvas
-    convertingDocx.value = false
-    pdfReady.value = true
-    await nextTick()
-    renderPage(currentPage.value)
-  } catch (e) {
-    convertingDocx.value = false
-    pdfError.value = 'PDF 加载失败，请确认文件格式正确'
-    console.warn('PDF 渲染失败:', e.message)
-  }
-}
-
-async function renderPage(num) {
-  if (!pdfDoc || !pdfCanvasRef.value) return
-  try {
-    const page = await pdfDoc.getPage(num)
-    const vp = page.getViewport({ scale: zoomLevel.value })
-    const canvas = pdfCanvasRef.value
-    canvas.width = vp.width
-    canvas.height = vp.height
-    const ctx = canvas.getContext('2d')
-    await page.render({ canvasContext: ctx, viewport: vp }).promise
-    currentPage.value = num
-  } catch (e) {
-    console.warn('页面渲染失败:', e.message)
-  }
-}
-
-function goToPage(num) {
-  if (num >= 1 && num <= totalPages.value) {
-    renderPage(num)
-    pdfScrollRef.value?.scrollTo({ top: 0, behavior: 'smooth' })
-  }
-}
-
-function handleJump() {
-  const n = parseInt(jumpPage.value, 10)
-  if (isNaN(n) || n < 1 || n > totalPages.value) {
-    ElMessage.warning(`请输入 1-${totalPages.value} 之间的页码`)
-    return
-  }
-  goToPage(n)
-  jumpPage.value = ''
-}
-
-function zoomReset() {
-  zoomLevel.value = zoomFit.value
-  renderPage(currentPage.value)
-  pdfScrollRef.value?.scrollTo({ top: 0, behavior: 'smooth' })
-}
-
-// ── 页码省略号范围 ──
-const pageEllipsisRange = computed(() => {
-  const total = totalPages.value
-  const cur = currentPage.value
-  if (total <= 7) {
-    return Array.from({ length: total }, (_, i) => i + 1)
-  }
-  const range = []
-  // Always show first page
-  range.push(1)
-  // Ellipsis if gap > 1
-  if (cur > 3) range.push('...')
-  // Pages around current
-  const start = Math.max(2, cur - 1)
-  const end = Math.min(total - 1, cur + 1)
-  for (let i = start; i <= end; i++) {
-    if (i !== 1 && i !== total) range.push(i)
-  }
-  // Ellipsis if gap > 1
-  if (cur < total - 2) range.push('...')
-  // Always show last page
-  range.push(total)
-  return [...new Set(range)]
-})
-
-// ── 页码摘要 ──（BUG-019：移除硬编码的保密协议样例，改为诚实提示，避免展示虚构内容）
-const pageSummary = ref('本页为合同原文，摘要功能待接入')
-
-// ── 风险详情 ──
-const riskItems = ref([])
-// 是否存在当前有效审核结果（来自 get_audit_result.has_current_result，BUG-028）
-const hasCurrentResult = ref(true)
-const levelMap = { high: '高风险', medium: '中风险', low: '低风险' }
-
-async function fetchAuditResult() {
-  const id = route.params.id
-  if (!id) return
-  try {
-    const res = await getAuditResult(id)
-    hasCurrentResult.value = res.data?.has_current_result ?? true
-    riskItems.value = (res.data?.items || []).map(r => ({
-      id: r.id, risk_level: r.risk_level, risk_type: r.risk_type, clause_text: r.clause_text,
-      level: levelMap[r.risk_level] || r.risk_level, category: r.risk_type, clause: r.clause_text,
-      clause_no: r.clause_position?.clause_no || null,
-      clause_title: r.clause_position?.clause_title || null,
-      suggestion: r.suggestion, reason: r.reason, confidence: r.confidence, detection_method: r.detection_method,
-      // v6.5 建议层结构化字段（BUG-021）
-      risk_description: r.recommendation?.risk_description || '',
-      example: r.recommendation?.example || '',
-      legal_basis: r.recommendation?.legal_basis || '',
-      grounding_warning: r.recommendation?.grounding?.passed === false,
-    }))
-  } catch { riskItems.value = [] }
-}
-
-const riskSummary = computed(() => {
-  const h=riskItems.value.filter(r=>r.level==='高风险').length
-  const m=riskItems.value.filter(r=>r.level==='中风险').length
-  const l=riskItems.value.filter(r=>r.level==='低风险').length
-  return {total:riskItems.value.length,high:h,mid:m,low:l}
-})
-
-function levelTag(level) {
-  if (level === '高风险') return 'danger'
-  if (level === '中风险') return 'warning'
-  return 'success'
-}
-
-const clauseComparison = ref(null)
-const comparing = ref(false)
-async function fetchClauseComparison() {
-  comparing.value = true
-  try {
-    const res = await getClauseComparison(route.params.id)
-    clauseComparison.value = res.data || null
-  } catch { clauseComparison.value = null }
-  finally { comparing.value = false }
-}
-
-const auditing = ref(false)
-const reviewing = ref(false)
-
-// ── 多用户角色（从 localStorage 读取）──
-const role = localStorage.getItem('role') || ''
-const canReview = computed(() => role === 'reviewer' || role === 'admin')
-const canApprove = computed(() => role === 'approver' || role === 'admin')
-
-async function handleReview(action) {
-  reviewing.value = true
-  try {
-    await reviewContract(contractId.value, action)
-    ElMessage.success(action === 'approve' ? '复核通过，待验收' : '已驳回，需重新审核')
-    await fetchDetail()
-    await fetchAuditResult()
-  } catch {
-    // 错误已在拦截器处理
-  } finally {
-    reviewing.value = false
-  }
-}
-
-async function handleApprove() {
-  reviewing.value = true
-  try {
-    await approveContract(contractId.value)
-    ElMessage.success('验收通过')
-    await fetchDetail()
-  } catch {
-    // 错误已在拦截器处理
-  } finally {
-    reviewing.value = false
-  }
-}
-
-// ── 多轮对话式改条款（总览会话 + 各条款会话，聊天式）──
-const revisePanel = reactive({
-  visible: false,
-  clauses: [],   // [{id, level, category, clause, clause_no, messages: []}]
-  activeId: '',  // 条款 id 或 '__overview__'
-  overviewMessages: [],  // 总览会话（整个合同）的消息
-  input: '',
-  loading: false,
-  initialized: false,  // 是否已初始化（从风险列表重建条款列表 + 拉取历史）
-})
-const isOverviewActive = computed(() => revisePanel.activeId === '__overview__')
-const activeClause = computed(() => revisePanel.clauses.find(c => c.id === revisePanel.activeId))
-const currentMessages = computed(() => isOverviewActive.value ? revisePanel.overviewMessages : (activeClause.value ? activeClause.value.messages : []))
-
-// ── 新增缺失条款（R09 等 add_clause）──
-const addPanel = reactive({
-  visible: false,
-  loading: false,
-  riskType: 'R09',
-  instruction: '',
-  templates: [],
-  legalBasis: [],
-  suggestedPosition: null,  // {anchor, hint} | {append:true, hint} | null
-  headings: [],             // [{num, cn, title}]
-  positionMode: 'suggest',  // 'suggest' | 'custom' | 'append'
-  customAnchor: '',
-})
-// 「继续修改新增条款」模式：true 时 overview 输入框的指令针对刚生成的新增条款（同位置重生成）
-const refiningAddClause = ref(false)
-const addClausePosition = ref(null)
-
-// 阿拉伯数字 → 中文数字（如 5 → 五）
-function cnNo(n) {
-  const d = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九']
-  if (!n || n <= 0) return ''
-  if (n < 10) return d[n]
-  if (n < 20) return '十' + (n % 10 === 0 ? '' : d[n % 10])
-  if (n < 100) return d[Math.floor(n / 10)] + '十' + (n % 10 === 0 ? '' : d[n % 10])
-  return String(n)
-}
-
-const reviseEmptyHint = computed(() => {
-  if (isOverviewActive.value) return '对整个合同提出统一修改要求，例如：把所有违约金条款统一改为不超过20%'
-  if (!activeClause.value) return ''
-  if (activeClause.value.clause_no) return '输入修改指令，开始修订「第' + cnNo(activeClause.value.clause_no) + '条」条款'
-  return '输入修改指令，开始修订缺失条款'
-})
-
-const revisePlaceholder = computed(() => {
-  if (isOverviewActive.value && refiningAddClause.value) return '继续修改新增条款，例如：把通知义务改为「15日内书面通知」…'
-  if (isOverviewActive.value) return '对整个合同的修改要求…（也可输入「新增/增加/补充…」自然表达新增条款）'
-  return '输入修改指令，例如：把违约金上限从30%改为20%'
-})
-
-// R09 等「缺失条款」风险 → 走新增条款流程
-function isAddClauseRisk(row) {
-  return row && (row.risk_type === 'R09' || row.category === 'R09')
-}
-
-// 从风险行/自然语言触发新增条款对话框（展示 RAG 建议 + 位置选择）
-async function openAddClause(row, prefillInstruction = '') {
-  addPanel.riskType = row?.risk_type || 'R09'
-  addPanel.instruction = prefillInstruction || (row?.risk_type === 'R09'
-    ? '新增不可抗力条款，明确不可抗力的定义、通知义务与免责安排'
-    : '新增缺失条款')
-  addPanel.templates = []
-  addPanel.legalBasis = []
-  addPanel.suggestedPosition = null
-  addPanel.headings = []
-  addPanel.positionMode = 'suggest'
-  addPanel.customAnchor = ''
-  addPanel.loading = false
-  addPanel.visible = true
-  try {
-    const res = await getAddClauseSuggestion(contractId.value, {
-      risk_type: addPanel.riskType,
-      instruction: addPanel.instruction,
-    })
-    const d = res.data || {}
-    addPanel.templates = d.templates || []
-    addPanel.legalBasis = d.legal_basis || []
-    addPanel.suggestedPosition = d.suggested_position || null
-    addPanel.headings = d.headings || []
-    if (!addPanel.suggestedPosition) addPanel.positionMode = 'custom'
-  } catch { /* 检索失败仍可手动指定位置 */ }
-}
-
-function onPositionModeChange() {
-  if (addPanel.positionMode === 'custom' && !addPanel.customAnchor && addPanel.headings.length) {
-    addPanel.customAnchor = addPanel.headings[0]?.cn || ''
-  }
-}
-
-function resolveAddPosition() {
-  if (addPanel.positionMode === 'append') return { append: true, hint: '追加到合同末尾' }
-  if (addPanel.positionMode === 'custom') {
-    const cn = addPanel.customAnchor
-    if (!cn) return null
-    const h = addPanel.headings.find(x => x.cn === cn)
-    return { anchor: cn, hint: h ? `第${h.cn}条（${h.title || '该条款'}）之后` : `第${cn}条之后` }
-  }
-  return addPanel.suggestedPosition
-}
-
-async function confirmAddClause() {
-  const position = resolveAddPosition()
-  if (!position) { ElMessage.warning('请选择插入位置（无法可靠识别位置，请明确）'); return }
-  if (!addPanel.instruction.trim()) { ElMessage.warning('请输入新增条款要求'); return }
-  addPanel.loading = true
-  try {
-    // 进入现有 overview 总会话（未初始化则先重建条款列表 + 拉取历史）
-    if (!revisePanel.initialized) {
-      await openRevisePanel('__overview__')
-    } else {
-      revisePanel.activeId = '__overview__'
-    }
-    revisePanel.visible = true
-    await doAddClause(addPanel.instruction.trim(), position)
-    addPanel.visible = false
-  } finally {
-    addPanel.loading = false
-  }
-}
-
-function finishAddClause() {
-  refiningAddClause.value = false
-  addClausePosition.value = null
-  ElMessage.success('新增条款已确认（下载修订版 DOCX 时写入）')
-}
-
-// 在 overview 会话中生成/继续修改新增条款（operation=add_clause，同位置覆盖）
-async function doAddClause(instruction, position) {
-  const messages = revisePanel.overviewMessages
-  messages.push({ role: 'user', text: instruction })
-  revisePanel.loading = true
-  try {
-    const res = await reviseClause(contractId.value, {
-      clause_text: '',
-      instruction,
-      history: [],
-      scope: 'overview',
-      clause_key: '__overview__',
-      clause_no: '',
-      operation: 'add_clause',
-      position,
-    })
-    const data = res.data || {}
-    const meta = []
-    if (data.legal_basis?.length) meta.push('法律依据：' + data.legal_basis.join('；'))
-    const posHint = position.hint || (position.append ? '追加到合同末尾' : (position.anchor ? `第${position.anchor}条之后` : ''))
-    meta.push('插入位置：' + (posHint || '待定'))
-    messages.push({
-      role: 'assistant',
-      text: data.explanation || '（已生成新增条款）',
-      clause: data.revised_clause || data.clause_text || '',
-      meta: meta.join('\n'),
-    })
-    refiningAddClause.value = true
-    addClausePosition.value = position
-  } catch {
-    messages.pop()
-  } finally {
-    revisePanel.loading = false
-  }
-}
-
-function openRevise(row) {
-  openRevisePanel(row.id)
-}
-
-function openReviseOverview() {
-  openRevisePanel(null)
-}
-
-function openRevisePanel(focusId) {
-  // 从当前 riskItems 重建条款列表（空历史，随后从后端持久化会话填充）
-  revisePanel.clauses = riskItems.value
-    .filter(r => r.clause)
-    .map(r => ({ id: r.id, level: r.level, category: r.category, clause: r.clause, clause_no: r.clause_no || null, messages: [] }))
-  revisePanel.overviewMessages = []
-  revisePanel.activeId = focusId || (revisePanel.clauses[0]?.id || '__overview__')
-  revisePanel.input = ''
-  revisePanel.visible = true
-  revisePanel.initialized = true
-
-  // 拉取持久化会话并重建（刷新/重进合同后历史仍在，可继续对话）
-  return getRevisions(contractId.value).then(res => {
-    const revs = res.data || []
-    const byKey = {}
-    for (const r of revs) { (byKey[r.clause_key] = byKey[r.clause_key] || []).push(r) }
-    if (byKey['__overview__']) revisePanel.overviewMessages = revsToMessages(byKey['__overview__'])
-    for (const c of revisePanel.clauses) {
-      const key = String(c.id)
-      if (byKey[key]) c.messages = revsToMessages(byKey[key])
-    }
-  }).catch(() => { /* 拉取失败仅无历史，不影响打开抽屉 */ })
-}
-
-// 把持久化修订记录还原为聊天消息（user/assistant 交替）
-function revsToMessages(revs) {
-  const msgs = []
-  for (const r of revs) {
-    msgs.push({ role: 'user', text: r.instruction })
-    const meta = []
-    if (r.operation === 'add_clause' && r.position) {
-      const p = r.position
-      meta.push('插入位置：' + (p.hint || (p.append ? '追加到合同末尾' : (p.anchor ? `第${p.anchor}条之后` : '待定'))))
-    }
-    if (r.constraints?.length) meta.push('约束：' + r.constraints.join('；'))
-    if (r.legal_basis?.length) meta.push('法律依据：' + r.legal_basis.join('；'))
-    if (r.remaining_risks?.length) meta.push('⚠ 剩余风险：' + r.remaining_risks.join('；'))
-    msgs.push({ role: 'assistant', text: r.explanation || '（修订完成）', clause: r.revised_clause || '', meta: meta.join('\n') })
-  }
-  return msgs
-}
-
-// 下载修订版 DOCX
-async function downloadRevised() {
-  try {
-    const blob = await downloadRevisedDocx(contractId.value)
-    const base = (contract.value?.file_name || '合同').replace(/\.[^.]+$/, '')
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${base}_修订版.docx`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-  } catch (e) {
-    // 400（如「还没有任何条款修改」）时，responseType=blob 下 error.response.data 是 Blob，手动解析具体提示
-    const data = e?.response?.data
-    if (data && typeof data.text === 'function') {
-      try {
-        const j = JSON.parse(await data.text())
-        ElMessage.warning(j.detail || '下载修订版失败')
-      } catch { /* 非 JSON，忽略（拦截器已弹通用 message） */ }
-    }
-  }
-}
-
-async function handleRevise() {
-  const instruction = revisePanel.input.trim()
-  if (!instruction) { ElMessage.warning('请输入修改指令'); return }
-
-  const isOverview = isOverviewActive.value
-  const messages = isOverview ? revisePanel.overviewMessages : (activeClause.value ? activeClause.value.messages : null)
-  if (!messages) { ElMessage.warning('请先选择会话'); return }
-
-  // 总览会话：自然表达「新增/增加/补充/添加…条款」且未在 refine 模式 → 进入新增条款对话框（位置需用户明确）
-  if (isOverview && !refiningAddClause.value && /(新增|增加|补充|添加).{0,12}?条款/.test(instruction)) {
-    revisePanel.input = ''
-    openAddClause(null, instruction)
-    return
-  }
-  // refine 模式：继续修改刚生成的新增条款（operation=add_clause，同位置覆盖）
-  if (isOverview && refiningAddClause.value && addClausePosition.value) {
-    revisePanel.input = ''
-    await doAddClause(instruction, addClausePosition.value)
-    return
-  }
-
-  // 总览会话改整个合同；条款会话改单条
-  const clauseText = isOverview ? (contract.value?.parsed_text || '') : activeClause.value.clause
-
-  // 从消息历史提取 history（多轮上下文）
-  const history = []
-  for (let i = 0; i < messages.length; i += 2) {
-    if (messages[i]?.role === 'user' && messages[i + 1]?.role === 'assistant') {
-      history.push({ instruction: messages[i].text, revised_clause: messages[i + 1].clause || '' })
-    }
-  }
-
-  messages.push({ role: 'user', text: instruction })
-  revisePanel.input = ''
-  revisePanel.loading = true
-  try {
-    const res = await reviseClause(contractId.value, {
-      clause_text: clauseText,
-      instruction,
-      history,
-      scope: isOverview ? 'overview' : 'clause',
-      clause_key: isOverview ? '__overview__' : String(activeClause.value?.id ?? ''),
-      clause_no: isOverview ? '' : (activeClause.value?.clause_no || ''),
-    })
-    const data = res.data || {}
-    const meta = []
-    if (data.constraints?.length) meta.push('约束：' + data.constraints.join('；'))
-    if (data.legal_basis?.length) meta.push('法律依据：' + data.legal_basis.join('；'))
-    if (data.remaining_risks?.length) meta.push('⚠ 剩余风险：' + data.remaining_risks.join('；'))
-    messages.push({
-      role: 'assistant',
-      text: data.explanation || '（修订完成）',
-      clause: data.revised_clause || '',
-      meta: meta.join('\n'),
-    })
-    // 条款会话更新当前条款；总览会话不更新单条
-    if (data.revised_clause && !isOverview && activeClause.value) activeClause.value.clause = data.revised_clause
-  } catch {
-    // 失败时移除悬空的 user 消息
-    messages.pop()
-  } finally {
-    revisePanel.loading = false
-  }
-}
-
-async function handleTriggerAudit() {
-  auditing.value = true
-  try {
-    await triggerAudit(route.params.id)
-    contract.value.status = 'auditing'
-    ElMessage.info('审核已提交，后台处理中…')
-    // 轮询直到审核完成（后端已改为异步 BackgroundTasks）
-    const deadline = Date.now() + 180000  // 最多 3 分钟
-    while (Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 2000))
-      await fetchDetail({ loadPdf: false })  // 轮询只查状态，不重复下载/解析 PDF（BUG-032）
-      const st = contract.value.status
-      if (st === 'completed') {
-        await fetchAuditResult()
-        await fetchClauseComparison()
-        ElMessage.success('审核完成')
-        return
-      }
-      if (st === 'parsed') {
-        ElMessage.error('审核失败，合同已重置为已解析状态')
-        return
-      }
-    }
-    ElMessage.warning('审核超时，请稍后在列表页查看结果')
-  } catch (e) {
-    ElMessage.error('审核触发失败')
-  } finally { auditing.value = false }
-}
-
-async function fetchFeedback() {
-  const cid = contract.value?.id
-  if (!cid) return
-  try {
-    const res = await getFeedback(cid)
-    loadedFeedbacks.value = res.data?.items || []
-  } catch { loadedFeedbacks.value = [] }
-}
-
-async function onFeedback(payload) {
-  try {
-    await submitFeedback(payload)
-    ElMessage.success('反馈已保存')
-    fetchFeedback()
-  } catch (e) {
-    ElMessage.error('反馈提交失败：' + (e.response?.data?.detail || e.message))
-  }
-}
-
-async function onFeedbackUndo(payload) {
-  try {
-    if (payload.feedback_id) {
-      await deleteFeedback(payload.feedback_id)
-      fetchFeedback()
-    }
-    ElMessage.info('已撤销')
-  } catch (e) {
-    ElMessage.error('撤销失败：' + (e.response?.data?.detail || e.message))
-  }
-}
-
-// ── 跳转 ──
-function goToAuditResult() { router.push(`/audit/result/${route.params.id}`) }
-function goToAuditReport() { router.push(`/audit/report/${route.params.id}`) }
-
-// ── 生命周期 ──
-onMounted(() => {
-  fetchDetail()
-  fetchAuditResult()
-  fetchClauseComparison()
-})
-
-// 组件卸载时释放 PDF document / 图片 objectURL，避免资源泄漏（BUG-032）
-onUnmounted(() => {
-  if (pdfLoadingTask) {
-    try { pdfLoadingTask.destroy() } catch {}
-    pdfLoadingTask = null
-  }
-  if (imgSrc.value) {
-    URL.revokeObjectURL(imgSrc.value)
-    imgSrc.value = ''
-  }
-})
 </script>
 
 <style scoped>
-.page-container {
-  padding: 24px;
-  max-width: 1200px;
-  margin: 0 auto;
+.cd2 { padding: 20px 24px 32px; max-width: 1440px; margin: 0 auto; }
+.cd2-state { padding: 40px 0; }
+
+/* 信息条：压缩为一行 */
+.cd2-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+  background: #fff; border: 1px solid var(--a24-border); border-radius: 12px;
+  padding: 12px 16px; margin-bottom: 14px;
 }
-
-.loading-state { padding: 40px 0; }
-.error-state { padding: 60px 0; }
-
-.review-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: -8px 0 16px 0;
-  padding: 10px 12px;
-  background: #f0f9eb;
-  border: 1px solid #b7eb8f;
-  border-radius: 6px;
+.cd2-header-l { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.cd2-header-l .icon {
+  width: 38px; height: 38px; border-radius: 10px; color: #fff; font-size: 19px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #1935C3, #1B70F0);
 }
-.review-hint { font-size: 13px; color: #606266; }
+.cd2-header-text { min-width: 0; }
+.cd2-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cd2-title-row h3 { font-size: 17px; font-weight: 700; color: var(--a24-heading); margin: 0; }
+.cd2-sub { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--a24-muted); margin-top: 3px; }
+.cd2-header-r { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.cd2-hint { font-size: 12.5px; color: #606266; }
 
-.detail-row {
-  --row-height: calc(100vh - 200px);
-  height: var(--row-height);
-  min-height: 600px;
-  overflow: hidden;
-}
+.cd2-tabs { background: transparent; }
+.cd2-tabs :deep(.el-tabs__content) { padding: 12px; background: #fff; }
 
-@media (max-width: 992px) {
-  .detail-row {
-    height: auto;
-    min-height: 0;
-    overflow: visible;
-  }
-}
+/* Tab 内容区独立滚动；视口过小时由 min-height 撑开，页面整体滚动 */
+.cd2-pane { height: calc(100vh - 300px); min-height: 540px; }
+.cd2-pane-scroll { overflow-y: auto; padding-right: 4px; }
+.cd2-pane-flush { overflow: hidden; }
 
-.detail-right {
-  height: 100%;
-  overflow-y: auto;
-}
-
-.audit-alert { margin-bottom: 16px; }
-
-.cross-clause-box {
-  margin: 12px 0;
-  padding: 10px 12px;
-  background: #fef0f0;
-  border: 1px solid #fbc4c4;
-  border-radius: 6px;
-}
-.cross-risk-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-top: 8px;
-}
-.cross-risk-text { font-size: 13px; color: #303133; line-height: 1.6; }
-
-.audit-actions { display: flex; gap: 8px; margin-top: 12px; }
-
-/* 改条款总览抽屉 */
-.revise-layout { display: flex; height: calc(100vh - 110px); gap: 12px; }
-.revise-list { width: 280px; flex-shrink: 0; overflow-y: auto; padding-right: 8px; border-right: 1px solid #ebeef5; }
-.revise-item { padding: 10px; margin-bottom: 8px; border: 1px solid #e4e7ed; border-radius: 6px; cursor: pointer; transition: all .2s; }
-.revise-item:hover { border-color: #409EFF; }
-.revise-item.is-active { border-color: #409EFF; background: #ecf5ff; }
-.revise-item-top { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
-.revise-item-cat { font-size: 12px; color: #909399; }
-.revise-item-no { font-size: 12px; color: #409EFF; }
-.revise-item-overview { border-style: dashed; background: #fdf6ec; }
-.revise-overview-icon { font-size: 14px; }
-.revise-overview-title { font-weight: 600; color: #e6a23c; }
-.revise-chat-title-no { font-size: 13px; color: #409EFF; font-weight: 600; }
-.revise-item-clause { font-size: 13px; color: #303133; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.revise-chat { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.revise-chat-title { display: flex; align-items: center; gap: 6px; padding: 8px 10px; background: #f5f7fa; border-radius: 6px; margin-bottom: 6px; }
-.revise-chat-title-label { font-weight: 600; color: #303133; }
-.revise-chat-title-cat { font-weight: 600; color: #409EFF; }
-.revise-chat-sub { padding: 4px 10px 8px; font-size: 13px; color: #606266; border-bottom: 1px solid #ebeef5; margin-bottom: 8px; line-height: 1.6; }
-.revise-chat-body { flex: 1; overflow-y: auto; padding: 4px 8px; }
-.revise-empty { color: #909399; text-align: center; padding: 40px 0; }
-.revise-msg { margin-bottom: 12px; max-width: 92%; }
-.revise-msg-user { margin-left: auto; }
-.revise-msg-assistant { margin-right: auto; }
-.revise-msg-head { font-size: 12px; color: #909399; margin-bottom: 4px; text-align: left; }
-.revise-msg-user .revise-msg-head { text-align: right; }
-.revise-msg-text { display: inline-block; padding: 8px 12px; border-radius: 8px; font-size: 13px; line-height: 1.6; text-align: left; }
-.revise-msg-user .revise-msg-text { background: #409EFF; color: #fff; }
-.revise-msg-assistant .revise-msg-text { background: #f5f7fa; color: #303133; }
-.revise-msg-clause { margin-top: 6px; padding: 8px 10px; background: #fff; border: 1px solid #e4e7ed; border-radius: 6px; font-size: 13px; white-space: pre-wrap; line-height: 1.6; color: #303133; }
-.revise-msg-meta { margin-top: 6px; font-size: 12px; color: #909399; white-space: pre-line; }
-.revise-chat-foot { display: flex; gap: 8px; align-items: flex-end; margin-top: 8px; }
-.revise-chat-foot .el-input { flex: 1; }
-.refine-tip { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-.refine-tip .el-alert { flex: 1; }
-.add-clause-body { max-height: 60vh; overflow-y: auto; }
-.add-clause-sec { margin-top: 14px; }
-.add-clause-sec-title { font-weight: 600; color: #303133; margin-bottom: 6px; }
-.add-clause-tpl { padding: 8px 10px; background: #f5f7fa; border-radius: 6px; font-size: 13px; line-height: 1.6; color: #606266; margin-bottom: 6px; white-space: pre-wrap; }
-.add-clause-pos-hint { margin-top: 6px; font-size: 13px; color: #e6a23c; }
-.audit-placeholder { padding: 60px 0; }
-.audit-full-link { margin-top: 12px; }
-.report-desc { margin-bottom: 16px; }
-.report-btn { margin-top: 8px; }
-
-.tab-content {
-  height: calc(var(--row-height) - 55px);
-  min-height: 540px;
-  overflow-y: auto;
-  padding: 8px 0;
-  line-height: 1.8;
-  color: #303133;
-}
-
-.tab-content h4 { margin: 0 0 12px 0; }
-.tab-content h5 { margin: 16px 0 8px 0; }
-
-.pdf-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-height: 36px;
-}
-
-.pdf-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.pdf-viewer { text-align: center; }
-
-/* 图片模式 */
-.img-viewer {
-  min-height: 520px;
-  background: #f5f7fa;
-  border-radius: 4px;
-  padding: 12px;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  overflow: auto;
-}
-
-.img-preview {
-  max-width: 100%;
-  border: 1px solid #e4e7ed;
-  border-radius: 4px;
-  background: #fff;
-}
-
-.pdf-scroll-container {
-  height: 520px;
-  overflow: auto;
-  background: #f5f7fa;
-  border-radius: 4px;
-  padding: 4px;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-}
-
-.pdf-canvas { border: 1px solid #e4e7ed; }
-
-/* 转换中 */
-.converting-state {
-  padding: 60px 20px;
-  text-align: center;
-  color: #606266;
-  min-height: 520px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  background: #fafafa;
-  border-radius: 4px;
-  border: 1px solid #ebeef5;
-}
-
-.converting-state .is-loading {
-  animation: rotating 2s linear infinite;
-}
-
-.converting-hint {
-  font-size: 12px;
-  color: #909399;
-}
-
-@keyframes rotating {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.pdf-error {
-  padding: 40px;
-  text-align: center;
-  color: #999;
-}
-
-.pdf-error p { margin-top: 8px; }
-
-/* 页码导航 */
-.page-nav {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  margin-top: 12px;
-  flex-wrap: wrap;
-}
-
-.page-ellipsis {
-  color: #909399;
-  padding: 0 4px;
-  user-select: none;
-}
-
-.page-jump {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: 4px;
-}
-
-.jump-label {
-  font-size: 13px;
-  color: #909399;
-  white-space: nowrap;
-}
-
-.jump-input { width: 56px; }
-
-.text-sidebar { padding: 0 4px; }
-.sidebar-divider { margin: 12px 0; }
-
-.sidebar-label {
-  font-size: 13px;
-  color: #909399;
-}
-
-.sidebar-text {
-  margin-top: 8px;
-  font-size: 13px;
-  line-height: 1.8;
-  color: #606266;
+@media (max-width: 1200px) {
+  .cd2-pane { height: auto; min-height: 0; }
+  .cd2-pane-flush { overflow: visible; }
 }
 </style>
