@@ -204,7 +204,11 @@
       </section>
 
       <!-- ══════════ 04 条款完整性检查 ══════════ -->
-      <section class="rp-sec">
+      <!-- id="clauses"：供「审核报告 Tab → 条款完整性问题 Tag」降级定位使用。
+           消费方 = views/contract-detail/ReportPanel.vue（openClause → hash `#clauses`）。
+           本页目前**没有**条款卡片级 anchor（唯一锚点是风险卡的 #risk-<id>），
+           因此按约定只提供章节级锚点，不做下标猜测。 -->
+      <section id="clauses" class="rp-sec">
         <h2 class="rp-h2"><span class="rp-h2-no">{{ secNo('clauses') }}</span>条款完整性检查</h2>
 
         <template v-if="comparison">
@@ -1082,12 +1086,27 @@ onUnmounted(() => {
   pdfLoadingTask?.destroy()
 })
 
-/** 支持 /audit/report/:id#risk-<风险记录id> 深链（锚点由本页每条风险真实渲染） */
+/**
+ * 支持 `/audit/report/:id#risk-<风险记录id>` 深链（风险锚点由本页每条风险真实渲染）。
+ *
+ * 另加一条**章节锚点兜底**：本页没有条款卡片级 anchor，而「审核报告 Tab」的条款完整性问题
+ * Tag 需要落到「条款完整性检查」章节（`<section id="clauses">`），故当 hash 不是风险锚点时，
+ * 按 DOM id 直接定位。风险锚点分支逻辑与行为完全不变。
+ */
 function scrollToHash() {
   const riskId = riskIdFromHash(route.hash)
-  if (!riskId) return
-  // block:'start' + .rp-risk 的 scroll-margin-top:80px → 卡片顶部（等级/编号/名称）落在视口可读区
-  scrollToRiskCard(riskId, false)
+  if (riskId) {
+    // block:'start' + .rp-risk 的 scroll-margin-top:80px → 卡片顶部（等级/编号/名称）落在视口可读区
+    scrollToRiskCard(riskId, false)
+    return
+  }
+  const el = document.getElementById(String(route.hash || '').replace(/^#/, ''))
+  if (!el) return
+  try {
+    el.scrollIntoView({ block: 'start', behavior: 'auto' })
+  } catch {
+    el.scrollIntoView(true)
+  }
 }
 
 /**
@@ -1160,6 +1179,8 @@ function backToAuditTab() {
 
 /* ── 章节 ── */
 .rp-sec { margin-bottom: 30px; }
+/* 章节锚点被跳转时（#clauses），留出与风险卡一致的顶部导航高度 */
+#clauses { scroll-margin-top: 80px; }
 .rp-h2 {
   display: flex; align-items: baseline; gap: 10px;
   margin: 0 0 14px; padding-bottom: 8px;
