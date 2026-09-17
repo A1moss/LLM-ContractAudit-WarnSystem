@@ -70,7 +70,10 @@
         </el-tab-pane>
 
         <el-tab-pane label="审核报告" name="report">
-          <div class="cd2-pane cd2-pane-scroll">
+          <!-- 审核报告是纵向长摘要（真实内容高度 900+px）：
+               用 .cd2-pane-flow 让它随页面自然滚动，而不是被压进
+               calc(100vh - 300px) 的第二层固定高度滚动区里（底部按钮会被裁掉看不见）。 -->
+          <div class="cd2-pane cd2-pane-flow">
             <ReportPanel :ws="ws" />
           </div>
         </el-tab-pane>
@@ -80,7 +83,8 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, nextTick, watch } from 'vue'
+import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import { Document } from '@element-plus/icons-vue'
 import OriginalTextPanel from './contract-detail/OriginalTextPanel.vue'
 import RiskPanel from './contract-detail/RiskPanel.vue'
@@ -90,6 +94,10 @@ import ReportPanel from './contract-detail/ReportPanel.vue'
 import { useContractWorkspace } from '../composables/useContractWorkspace.js'
 import { formatTime } from '../utils/format.js'
 import { typeLabel } from '../constants/contractTypes.js'
+import {
+  PANE, RETURN_SNAPSHOT_TAB,
+  paneFromQueryTab, saveReturnSnapshot, takeReturnSnapshot,
+} from '../constants/navigation.js'
 
 /**
  * 合同详情 V2 工作台（页面壳）
@@ -100,6 +108,7 @@ import { typeLabel } from '../constants/contractTypes.js'
  * - 不依赖 PDF 渲染：原文一律用后端 parsed_text 渲染；页数不再展示。
  */
 const ws = useContractWorkspace()
+const route = useRoute()
 
 const STATUS_LABELS = {
   uploaded: '已上传', parsed: '已解析', auditing: '审核中',
@@ -118,6 +127,70 @@ const statusTag = computed(() => {
 function onGoRisk(riskId) {
   ws.focusRiskId = riskId
   ws.setTab('audit')
+}
+
+/**
+ * 深链 Tab：`/contracts/:id?tab=audit` → 「审核报告」Tab。
+ *
+ * 只做**导航状态**：调用 workspace 既有的 `setTab()`，不读接口、不改数据加载、
+ * 不碰风险定位数据（切到审核报告后按需加载报告，仍是 workspace 的既有行为）。
+ *
+ * - 无 `tab` 参数、或参数无法识别 → **保持原有默认行为**（默认停在「原始文本」）；
+ * - 刷新带 `?tab=audit` 的地址仍停在审核报告（immediate + watch query，参数不被清除）；
+ * - 合同切换时 workspace 的 `watch(contractId)` 会先 resetAll()（回默认 Tab），
+ *   本 watcher 在其之后创建、按创建顺序后执行，因此仍能按 query 落位。
+ */
+function applyTabFromQuery() {
+  const pane = paneFromQueryTab(route.query.tab)
+  if (pane) ws.setTab(pane)
+  // 位置恢复是 Tab 落位之后的**附加行为**：只有「从完整报告返回」这一条路径会命中快照
+  if (pane === PANE.report) restoreReportScroll()
+}
+watch([() => route.params.id, () => route.query.tab], applyTabFromQuery, { immediate: true })
+
+/**
+ * 位置记忆 · 采集：**离开合同详情时**，若正停在「审核报告」Tab，记下该 Tab 的滚动位置。
+ *
+ * 为什么在"离开"而不是"完整报告的返回按钮"上采集：
+ *   两页滚动坐标不属于同一页面（完整报告页可滚数千像素，审核报告 Tab 只有几百像素），
+ *   用完整报告的 scrollY 恢复会被截断成"贴底"；采集点取本页 → 恢复值与离开前一致。
+ *
+ * 用组件级路由守卫（不改 router/index.js、不改全局路由行为，也不阻断任何跳转）。
+ */
+onBeforeRouteLeave((_to, from) => {
+  if (ws.activeTab !== PANE.report) return
+  saveReturnSnapshot(from?.params?.id, RETURN_SNAPSHOT_TAB, window.scrollY)
+})
+
+/**
+ * 位置记忆 · 恢复（**一次性**）。
+ *
+ * 触发条件严格限定为「完整报告 → 返回审核报告 → /contracts/:id?tab=audit」：
+ *   - 先确认 query 已落到审核报告 Tab（pane === report），否则直接返回；
+ *   - 快照读取即**消费**（takeReturnSnapshot）：普通进入 /contracts/:id、普通刷新
+ *     都不会跳到旧位置，也不会反复命中同一份快照。
+ *
+ * 审核报告内容是异步加载的：文档还没长到目标高度时 scrollTo 会被浏览器截断，
+ * 因此用有上限的 rAF 轮询，等"能滚到目标"或"高度稳定"后再滚一次（behavior: 'auto'，不产生动画）。
+ */
+async function restoreReportScroll() {
+  const snap = takeReturnSnapshot(route.params.id)
+  if (!snap || snap.tab !== RETURN_SNAPSHOT_TAB || !snap.scrollY) return
+  const target = snap.scrollY
+  const deadline = Date.now() + 1500
+  let lastHeight = -1
+  let stableFrames = 0
+  for (;;) {
+    await nextTick()
+    await new Promise((resolve) => requestAnimationFrame(() => resolve()))
+    const height = document.documentElement.scrollHeight
+    if (height - window.innerHeight >= target) break   // 已经能滚到目标位置
+    stableFrames = height === lastHeight ? stableFrames + 1 : 0
+    lastHeight = height
+    if (stableFrames >= 10 || Date.now() > deadline) break  // 内容已稳定 / 超时 → 按当前高度取最接近位置
+  }
+  const maxY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight)
+  window.scrollTo({ top: Math.min(target, maxY), behavior: 'auto' })
 }
 </script>
 
@@ -151,6 +224,15 @@ function onGoRisk(riskId) {
 .cd2-pane { height: calc(100vh - 300px); min-height: 540px; }
 .cd2-pane-scroll { overflow-y: auto; padding-right: 4px; }
 .cd2-pane-flush { overflow: hidden; }
+
+/* 审核报告 Tab：内容是纵向长摘要，高度不固定。
+   若沿用 .cd2-pane 的 calc(100vh - 300px)（1366×768 下约 468px、1080p 下约 780px），
+   内容会被压进一个第二层固定高度滚动区，底部「条款完整性 / 查看完整审核报告 / 去修改合同」
+   在首屏之外，验收时表现为"被裁掉"。
+   这里改为高度自适应 + 不产生内部滚动，由页面（窗口）统一纵向滚动：
+   - 桌面端 1366 / 1440 / 1920 均可继续向下浏览完整内容；
+   - 不裁切、不压缩、不删除任何内容，也不产生第二层滚动条。 */
+.cd2-pane-flow { height: auto; min-height: 0; overflow: visible; }
 
 @media (max-width: 1200px) {
   .cd2-pane { height: auto; min-height: 0; }
