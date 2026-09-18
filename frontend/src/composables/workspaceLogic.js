@@ -282,22 +282,48 @@ export function isExportableRevision(rev) {
 }
 
 /**
+ * 支持导出修订版的原始格式（与后端 `download_revised_docx` 的真实能力对齐）。
+ *
+ * - `docx`：直接打开原 DOCX 应用修订（既有链路）；
+ * - `pdf` ：由已落库的 `parsed_text` 生成**规范化中间 DOCX** 后再应用修订，
+ *           最终统一输出 DOCX（本轮新增）。
+ *
+ * **图片（jpg/png/tiff/bmp）本轮明确仍不支持**：其解析依赖 PaddleOCR，
+ * 且 OCR 的阅读顺序/锚点可靠性尚未验证，属于后续独立阶段。
+ */
+export const EXPORTABLE_SOURCE_EXTS = ['docx', 'pdf']
+
+/** 从真实上传路径取小写扩展名（不含点）；取不到返回空串 */
+export function sourceExt(storedPath, fileName = '') {
+  // 优先 stored_path；仅当它缺失（历史脏数据）才退回显示名，避免回归出"永远不能下载"
+  const path = String(storedPath || '').trim() || String(fileName || '').trim()
+  const m = /\.([a-z0-9]+)$/i.exec(path)
+  return m ? m[1].toLowerCase() : ''
+}
+
+/**
  * 导出状态机（文案集中在此，避免组件与状态层口径不一致）。
  *
- * **判断是否 DOCX 只看真实上传文件路径 `stored_path`**，绝不看 `file_name`：
+ * **判断源格式只看真实上传文件路径 `stored_path`**，绝不看 `file_name`：
  * `file_name` 是用户可编辑的「合同显示名称」（上传时默认取文件名去后缀），
  * 真实数据里大量 file_name 根本没有扩展名（如 '测试合同文件'、'111'），
  * 拿它判断格式会把真 DOCX 误判成非 Word，导致下载按钮被永久禁用。
- * 后端 `download_revised_docx` 用的正是 `stored_path.endswith(".docx")`，此处与之对齐。
+ * 后端 `download_revised_docx` 也是按 `stored_path` 判断，此处与之对齐。
+ *
+ * 本轮变更：PDF 由「不可导出」改为「可导出」——修订版统一输出 Word（DOCX）。
  */
 export function docxStateFor({ storedPath = '', fileName = '', exportableCount = 0, blockerCount = 0 }) {
-  // 优先 stored_path；仅当它缺失（历史脏数据）才退回显示名，避免回归出"永远不能下载"
-  const path = String(storedPath || '').trim() || String(fileName || '').trim()
-  if (!/\.docx$/i.test(path)) {
+  const ext = sourceExt(storedPath, fileName)
+  const isDocx = ext === 'docx'
+  const isPdf = ext === 'pdf'
+
+  if (!isDocx && !isPdf) {
     return {
       key: 'not_docx',
-      text: '仅 DOCX 原始合同支持导出修订版',
-      detail: '当前上传的不是 Word 文档，后端无法生成修订版 DOCX。',
+      text: '当前合同的修订版暂不支持导出',
+      detail: ext
+        ? `当前源文件格式（.${ext}）暂不支持导出修订版；已支持 .docx 与 .pdf。`
+        : '无法识别当前合同的原始文件格式，暂不支持导出修订版。',
     }
   }
   if (!exportableCount) {

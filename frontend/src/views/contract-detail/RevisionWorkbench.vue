@@ -543,10 +543,11 @@
           </el-alert>
 
           <div v-if="ws.docxState.key === 'not_docx'" class="wb-dl-detail">
-            当前上传的不是 Word 文档，暂不支持生成修改后的合同。请上传 .docx 格式的合同。
+            当前源文件格式暂不支持导出修订版；已支持 .docx 与 .pdf。
           </div>
           <div v-else class="wb-dl-note">
-            下载的是<b>整份合同</b>：包含所有已确认的修改，不只是当前这一条。
+            下载的是<b>整份合同</b>：包含所有已确认的修改，不只是当前这一条。<br>
+            修订版<b>统一导出为 Word（DOCX）</b>；PDF 合同会按解析出的合同正文重建为可编辑文档后再应用修改。
             最终是否可生成以下载时的完整校验为准；若未通过，会原样显示具体原因。
           </div>
         </div>
@@ -825,7 +826,7 @@ const unlocatedPoints = computed(() => {
  */
 const downloadHeadline = computed(() => {
   if (!s.value || isOverview.value) return props.ws.docxState.text
-  if (props.ws.docxState.key === 'not_docx') return '当前合同不是 Word 文档，不能生成修改后的合同'
+  if (props.ws.docxState.key === 'not_docx') return '当前源文件格式暂不支持导出修订版（已支持 .docx / .pdf）'
   if (isHistory.value) return '历史修改记录（只读）'
   if (props.ws.docxState.key === 'none') return '当前合同还没有任何条款修改'
   if (props.ws.isSessionExportable(s.value.key)) return '这条修改已确认，可生成修改后的合同'

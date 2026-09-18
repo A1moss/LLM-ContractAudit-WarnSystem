@@ -2,10 +2,12 @@ import json
 import logging
 import os
 import re
+import tempfile
 import time
 import uuid
 import mimetypes
 import html
+from contextlib import contextmanager
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, status, BackgroundTasks
@@ -37,6 +39,9 @@ from models.audit_record import AuditRecord
 from models.template import Template
 from services.docx_converter import docx_to_pdf
 from services import report_pdf
+from services import intermediate_docx
+from services.pdf_anchor import build_anchor
+from services.pdf_anchor_backfill import backfill_pdf_anchors, is_pdf_like
 from models.audit_report import AuditReport
 from models.clause_revision import ClauseRevision
 from services.docx_reviser import build_revised_docx
@@ -829,6 +834,17 @@ def _run_audit(contract_id: int):
         c.status = "completed"
         db.commit()
 
+        # 非 DOCX（本轮：PDF）合同的**后置锚点回填**：独立、幂等、非致命。
+        # 审核结果已在上方 commit，此处失败绝不影响审核本身（只记录日志）。
+        # 只读 parsed_text/clause_text、只写 clause_position，不触碰任何风险判定。
+        if is_pdf_like(c):
+            try:
+                stats = backfill_pdf_anchors(db, c, audit_batch=audit_batch)
+                logger.info("PDF 锚点回填 contract=%s %s", contract_id, stats)
+            except Exception as e:
+                db.rollback()
+                logger.warning("PDF 锚点回填失败（不影响审核结果）contract=%s: %s", contract_id, e)
+
         return {
             "code": 0,
             "message": "ok",
@@ -1513,14 +1529,40 @@ def download_revised_docx(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """生成并下载修订版 DOCX（原文件名_修订版.docx）。仅 DOCX 原始合同支持。"""
+    """生成并下载修订版 DOCX（原文件名_修订版.docx）。
+
+    支持范围（本轮）：
+      - **DOCX** 原始合同：直接打开原文件应用修订（既有链路，行为不变）；
+      - **PDF** 原始合同：由已落库的 `contracts.parsed_text` 生成**规范化中间 DOCX**
+        （`services/intermediate_docx`），再复用**同一个** `build_revised_docx`。
+        「中间 DOCX」只是修订引擎的内部载体，用户拿到的始终是修订版 DOCX。
+
+    只消费已存在的数据（Contract / AuditRecord / ClauseRevision / parsed_text）：
+    本端点**不重新审核**、不重跑分类/要素/风险/LLM/RAG，也不新建任何业务记录。
+
+    PDF 路径的锚点策略（本轮核心）：
+      DOCX 的锚点来自审核阶段的 `clause_position.original_text`；PDF 上该锚点因
+      LLM 证据文本与正文的换行/改写差异大量缺失，因此这里用
+      `services.pdf_anchor.build_anchor`（折叠空白 + 唯一命中，无任何模糊兜底）
+      **实时重算**锚点，并**优先使用本次重算结果**。任何一条修订无法可靠定位，
+      就返回明确的 400，**绝不**返回一份"看起来成功、实际漏改"的合同。
+    """
     c = db.query(Contract).filter(Contract.id == contract_id).first()
     if not c or not _can_view_contract(current_user, c):
         raise HTTPException(status_code=404, detail="contract not found")
-    if not c.stored_path or not c.stored_path.lower().endswith(".docx"):
-        raise HTTPException(status_code=400, detail="仅 DOCX 原始合同支持导出修订版")
-    if not os.path.isfile(c.stored_path):
+    if not c.stored_path:
         raise HTTPException(status_code=404, detail="原始合同文件不存在")
+
+    is_docx = c.stored_path.lower().endswith(".docx")
+    if not is_docx and not c.stored_path.lower().endswith(".pdf"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="当前源文件格式暂不支持导出修订版（已支持 .docx 与 .pdf）",
+        )
+    # 原始文件是否还在磁盘上。缺失时**不再直接失败**：只要还有 parsed_text，
+    # 就用中间 DOCX 兜底继续（见下方 source_docx 的选择），这样"原件被清理掉但解析文本还在"
+    # 的历史合同仍然可以导出，行为不弱于改动前。
+    source_file_exists = os.path.isfile(c.stored_path)
 
     revs = (
         db.query(ClauseRevision)
@@ -1540,33 +1582,95 @@ def download_revised_docx(
     base = os.path.splitext(c.file_name or "合同")[0]
     out_name = f"{base}_修订版.docx"
     out_path = os.path.join(UPLOAD_DIR, f"revised_{uuid.uuid4().hex}.docx")
+
+    # PDF → 中间 DOCX 必须在**临时目录**里生成：不污染 backend/data，异常也一定清理
+    tmp_dir_ctx = None
+    scope_ctx = None
     try:
-        applied, skipped = build_revised_docx(c.stored_path, revs, out_path)
-    except ValueError as e:
-        _unlink_quiet(out_path)
-        logger.warning("新增条款插入失败: %s", e)
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        _unlink_quiet(out_path)
-        logger.warning("生成修订版 DOCX 失败: %s", e)
-        raise HTTPException(status_code=500, detail="生成修订版 DOCX 失败，原合同文件可能已损坏")
-    # _final_clause_map 对「无原文锚点」的条款修订会在返回前直接丢弃（连 skipped 都不计），
-    # 因此这里按同一规则在端点侧显式统计，避免交付一份「看起来完整、实际漏改」的修订版。
-    anchorless = sum(
-        1 for r in revs
-        if (r.scope or "clause") == "clause" and r.clause_text and r.revised_clause
-        and not (r.original_clause_text or "").strip()
-    )
-    if anchorless or skipped:
-        _unlink_quiet(out_path)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"有 {anchorless + skipped} 条修订无法在合同原文中定位，未写入修订版；"
-                   f"请对该条款重新发起一次修改（保存时会重新定位原文锚点）后再下载",
+        use_original = is_docx and source_file_exists
+        if use_original:
+            source_docx = c.stored_path
+            overrides = {}
+        else:
+            # PDF（本轮新增）；或 DOCX 但原件已不在磁盘 → 统一由 parsed_text 重建中间 DOCX
+            parsed_text = c.parsed_text or ""
+            if not parsed_text.strip():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="原始合同文件不存在，且该合同没有可用的解析正文，无法生成修订版 DOCX",
+                )
+            overrides, unreliable = _resolve_pdf_anchors(revs, parsed_text)
+            if unreliable:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"当前合同有 {len(unreliable)} 条修改无法在原文中可靠定位，"
+                           f"因此无法生成完整修订版 DOCX（未生成任何文件）。"
+                           f"请在「修改合同」中重新确认这些条款的位置后再试。",
+                )
+            tmp_dir_ctx = tempfile.TemporaryDirectory(prefix="contract_revised_")
+            source_docx = os.path.join(tmp_dir_ctx.name, "intermediate.docx")
+            intermediate_docx.build_from_parsed_text(parsed_text, source_docx)
+            # 锚点覆盖只在受控作用域内生效，build 一结束（含异常）立即还原。
+            # 否则被覆盖的 ORM 对象会一直处于 dirty 状态，同一 session 上任何后续
+            # commit() 都会把「仅供本次排版的临时锚点」写回数据库 —— 导出必须是只读的。
+            scope_ctx = _anchor_override_scope(revs, overrides)
+            scope_ctx.__enter__()
+
+        try:
+            applied, skipped = build_revised_docx(source_docx, revs, out_path)
+        except ValueError as e:
+            _unlink_quiet(out_path)
+            logger.warning("新增条款插入失败: %s", e)
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            _unlink_quiet(out_path)
+            logger.warning("生成修订版 DOCX 失败: %s", e)
+            raise HTTPException(status_code=500, detail="生成修订版 DOCX 失败，原合同文件可能已损坏")
+        finally:
+            # build 一结束就还原锚点（含异常路径）：后续统计/自检只用 overrides 字典，
+            # 不再依赖被覆盖过的对象，因此还原不影响它们。
+            if scope_ctx is not None:
+                scope_ctx.__exit__(None, None, None)
+                scope_ctx = None
+
+        # _final_clause_map 对「无原文锚点」的条款修订会在返回前直接丢弃（连 skipped 都不计），
+        # 因此这里按同一规则在端点侧显式统计，避免交付一份「看起来完整、实际漏改」的修订版。
+        effective_anchors = _effective_anchors(revs, overrides)
+        anchorless = sum(
+            1 for r in revs
+            if (r.scope or "clause") == "clause" and r.clause_text and r.revised_clause
+            and not (effective_anchors.get(getattr(r, "id", None)) or "").strip()
         )
-    if applied == 0:
-        _unlink_quiet(out_path)
-        raise HTTPException(status_code=400, detail="修订条款未能定位到原文，无法生成修订版")
+        if anchorless or skipped:
+            _unlink_quiet(out_path)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"有 {anchorless + skipped} 条修订无法在合同原文中定位，未写入修订版；"
+                       f"请对该条款重新发起一次修改（保存时会重新定位原文锚点）后再下载",
+            )
+        if applied == 0:
+            _unlink_quiet(out_path)
+            raise HTTPException(status_code=400, detail="修订条款未能定位到原文，无法生成修订版")
+
+        # 落盘自检：确认每条修订的最终文本**真的**出现在输出里。
+        # 这一步专门拦「applied 计数看起来正常、文件里其实没改」。
+        # **只在"由 parsed_text 重建的中间 DOCX"路径上做**：该路径的锚点由本端点实时重算、
+        # 与源文档文本同源，因此"改了就必须出现"是硬不变量。
+        # 原始 DOCX 路径不做此自检 —— 那条路径的锚点是外部传入的，`docx_reviser` 本就允许
+        # 锚点经过多段兜底匹配，用"修订文本必须出现"去卡它反而会误伤既有合法行为。
+        if not use_original:
+            missing = _verify_revised_docx(out_path, revs, overrides)
+            if missing:
+                _unlink_quiet(out_path)
+                logger.warning("修订版自检未通过 contract=%s 缺失=%s", contract_id, missing)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"修订版生成自检未通过（{len(missing)} 条修改未出现在结果文件中），"
+                           f"已取消本次导出，未生成任何文件。请重新确认这些条款后再试。",
+                )
+    finally:
+        if tmp_dir_ctx is not None:
+            tmp_dir_ctx.cleanup()
 
     background_tasks.add_task(_unlink_quiet, out_path)
     return FileResponse(
@@ -1574,6 +1678,121 @@ def download_revised_docx(
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename=out_name,
     )
+
+
+def _apply_anchor_overrides(revs, overrides: dict) -> None:
+    """把重算出的可靠锚点写进**当前 session 内的修订对象**（仅内存视图）。
+
+    为什么这样做而不是改 `services/docx_reviser.py`：
+    该文件已冻结。`build_revised_docx` → `_final_clause_map` 的锚点优先级是
+    `original_clause_text` 优先、`clause_text` 兜底，所以只要在调用前把
+    `original_clause_text` 换成「来自 parsed_text 的真实连续子串」即可，
+    **无需改动 `docx_reviser` 一行**。
+
+    注意：只覆盖 `original_clause_text`，**不动 `clause_text`** ——
+    `_final_clause_map` 的多轮链式归并依赖 `clause_text → revised_clause` 链条，
+    改它会把同一个会话的多轮修订归并错。
+
+    ⚠️ 调用方**必须**用 `_anchor_override_scope` 包住，否则被改动的 ORM 对象会变成
+    dirty 状态，同一 session 上任何后续 `commit()` 都会把它刷回数据库。
+    """
+    for r in revs:
+        rid = getattr(r, "id", None)
+        if rid in overrides and overrides[rid]:
+            r.original_clause_text = overrides[rid]
+
+
+@contextmanager
+def _anchor_override_scope(revs, overrides: dict):
+    """在**受控作用域**内临时覆盖锚点，退出时（含异常）逐个还原。
+
+    为什么必须还原：给 SQLAlchemy 实例属性赋值会把该实例标记为 dirty，
+    只要同一 session 后续发生 `commit()`，这些"仅供本次排版使用的临时值"就会被
+    刷回数据库。导出是**只读**操作，绝不能有任何持久化副作用。
+
+    还原用 `set_committed_value`（而不是普通赋值）：它把属性直接放进"已提交"状态，
+    **不会**把实例标成 dirty。这样作用域结束后 session 里连"值没变的脏对象"都不存在，
+    后续任何 commit/flush 都不可能碰到本次导出的临时锚点。
+    """
+    from sqlalchemy.orm.attributes import set_committed_value
+
+    saved = [(r, r.original_clause_text) for r in revs]
+    _apply_anchor_overrides(revs, overrides)
+    try:
+        yield
+    finally:
+        for r, original in saved:
+            set_committed_value(r, "original_clause_text", original)
+
+
+def _resolve_pdf_anchors(revs, parsed_text: str):
+    """为 PDF 路径实时重算每条替换修订的可靠锚点。
+
+    :returns: ``(overrides, unreliable)``
+        overrides   ``{revision_id: original_text}``（来自 parsed_text 的真实连续子串）
+        unreliable  无法可靠定位的修订列表（供端点直接报 400）
+
+    只处理 replace（`add_clause` 没有原文锚点，由位置机制负责）；
+    比对类修订（clause_key 形如 ``__cmp__...``，没有 AuditRecord 锚点）同样适用，
+    因为它也是拿 clause_text 在正文里定位。
+    """
+    from services.pdf_anchor import build_anchor
+
+    overrides: dict = {}
+    unreliable: list = []
+    for r in revs:
+        if getattr(r, "operation", "replace") == "add_clause":
+            continue
+        if not (r.clause_text or "").strip() or not (r.revised_clause or "").strip():
+            continue
+        built = build_anchor(parsed_text, r.clause_text)
+        if built is None:
+            unreliable.append(getattr(r, "id", None))
+        else:
+            overrides[getattr(r, "id", None)] = built[0]
+    return overrides, unreliable
+
+
+def _effective_anchors(revs, overrides: dict) -> dict:
+    """端点侧统计用：本次真正会用于定位的锚点（PDF 重算优先，否则用库里存的）。"""
+    out = {}
+    for r in revs:
+        rid = getattr(r, "id", None)
+        if rid in overrides:
+            out[rid] = overrides[rid]
+        else:
+            out[rid] = (r.original_clause_text or "")
+    return out
+
+
+def _verify_revised_docx(out_path: str, revs, overrides: dict) -> list:
+    """打开刚生成的 DOCX，确认每条修订的最终文本确实写入。
+
+    :returns: 未通过自检的修订 id 列表（空列表 = 全部通过）。
+    """
+    from docx import Document
+    from services.docx_reviser import _norm
+
+    doc = Document(out_path)
+    doc_text = _norm("\n".join(p.text for p in doc.paragraphs))
+    expected = []
+    for r in revs:
+        if getattr(r, "operation", "replace") == "add_clause":
+            if (r.revised_clause or "").strip():
+                expected.append((getattr(r, "id", None), _norm(r.revised_clause)))
+        else:
+            anchor = overrides.get(getattr(r, "id", None)) or (r.original_clause_text or "")
+            if not (anchor or "").strip():
+                continue          # 无锚点修订已在上方 anchorless 拦截
+            if not (r.revised_clause or "").strip():
+                continue
+            expected.append((getattr(r, "id", None), _norm(r.revised_clause)))
+
+    missing = []
+    for rid, text in expected:
+        if not text or text not in doc_text:
+            missing.append(rid)
+    return missing
 
 
 @router.get("/{contract_id}/audit-result")
