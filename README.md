@@ -100,8 +100,7 @@
 ```
 backend/    FastAPI 后端 + AI 引擎（api/ services/ models/ ai/ evaluate/ tests/）
 frontend/   Vue 3 前端（views/ views/contract-detail/ composables/ constants/）
-docs/       项目文档
-02_项目文档/总体会话-后端API契约.md   总体修改会话的字段级接口契约
+docs/       项目文档（含 总体会话-后端API契约.md）
 backend/data/        上传合同存储（运行时生成，git 忽略）
 backend/chroma_data/ 向量库持久化目录（运行时生成）
 ```
@@ -182,7 +181,7 @@ cd frontend && node --test src/
 | [docs/部署与复现.md](docs/部署与复现.md) | 环境、依赖、`.env`、启动、静启动、测试、评测复现、FAQ |
 | [docs/参考论文与技术依据.md](docs/参考论文与技术依据.md) | 可核验的公开文献与技术点映射 |
 | [docs/变更记录.md](docs/变更记录.md) | 变更台账 + 文档影响速查 + 待办 |
-| [02_项目文档/总体会话-后端API契约.md](02_项目文档/总体会话-后端API契约.md) | 总体修改会话的字段级接口契约（前端对接用） |
+| [docs/总体会话-后端API契约.md](docs/总体会话-后端API契约.md) | 总体修改会话的字段级接口契约（前端对接用） |
 | `A24-详细设计文档-v4.0.md` | 详细设计文档（申报交付物） |
 
 ---
