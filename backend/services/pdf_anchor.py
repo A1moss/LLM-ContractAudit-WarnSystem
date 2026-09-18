@@ -129,6 +129,69 @@ def _span_from_norm(cmap: list[int], pos: int, norm_len: int) -> tuple[int, int]
     return cmap[pos], cmap[pos + norm_len - 1] + 1
 
 
+def _norm_digit_space(text: str) -> str:
+    """去掉**数字之间**的空白（用于判断"仅数字内部空白不同"这一等价情形）。"""
+    return re.sub(r"(?<=\d)\s+(?=\d)", "", text or "")
+
+
+def _digit_space_variants(norm_text: str, cmap: list[int]):
+    """生成「数字内部空白差异」的容错变体，返回 ``[(variant_text, index_map), ...]``。
+
+    背景（真实 OCR 产物）：扫描件识别常把数字与符号拆开，例如原文 ``30%`` 被识别成
+    ``30 %``（OCR 在数字与 % 之间插了空格），而 LLM 写的证据文本往往不带这个空格。
+    两者在"忽略数字间空白"的口径下本是同一段文字，但逐字子串匹配会失败，
+    导致本该可定位的条款建不起锚点。
+
+    只放宽**数字之间／数字与相邻字符之间**的空白（最常见、最无歧义的一类），
+    **不引入任何相似度评分**：命中仍要求唯一，且两侧"忽略数字空白后"必须完全一致。
+    ``index_map[i]`` = 变体第 i 个字符对应的 ``norm_text`` 下标。
+    """
+    # 变体 A：删除数字之间的空白（"30 %" → "30%"）
+    a_chars: list[str] = []
+    a_map: list[int] = []
+    for i, ch in enumerate(norm_text):
+        if (ch == " " and a_chars and a_chars[-1].isdigit()
+                and i + 1 < len(norm_text) and norm_text[i + 1].isdigit()):
+            continue                      # 丢弃数字之间的空格
+        a_chars.append(ch)
+        a_map.append(i)
+
+    # 变体 B：在相邻数字之间插入一个空格（"30%" → "3 0%"，覆盖相反情形）
+    b_chars: list[str] = []
+    b_map: list[int] = []
+    for i, ch in enumerate(norm_text):
+        if b_chars and ch.isdigit() and b_chars[-1].isdigit():
+            b_chars.append(" ")
+            b_map.append(i)
+        b_chars.append(ch)
+        b_map.append(i)
+
+    return [("".join(a_chars), a_map), ("".join(b_chars), b_map)]
+
+
+def _unique_span_relaxed(norm_text: str, cmap: list[int], probe: str):
+    """唯一命中（允许数字内部空白差异）。返回 ``(start, end)`` 原文区间或 None。"""
+    hit = _unique_pos(norm_text, probe)
+    if hit >= 0:
+        return _span_from_norm(cmap, hit, len(probe))
+
+    target = _norm_digit_space(probe)
+    if len(target) < MIN_ANCHOR_LEN or not _norm_digit_space(norm_text):
+        return None
+    for variant, index_map in _digit_space_variants(norm_text, cmap):
+        if len(variant) < len(target):
+            continue
+        first = variant.find(target)
+        if first < 0:
+            continue
+        if variant.find(target, first + 1) >= 0:
+            return None                   # 多命中 → 拒绝（与严格路径同规则）
+        start = cmap[index_map[first]]
+        end = cmap[index_map[first + len(target) - 1]] + 1
+        return start, end
+    return None
+
+
 def _tier1_candidates(norm_text: str, cmap: list[int], norm_clause: str) -> list[tuple[int, int]]:
     """连续命中：枚举「丢开头 / 丢结尾」得到的连续子串，取**所有**唯一命中且长度为极大值的候选。
 
@@ -150,16 +213,15 @@ def _tier1_candidates(norm_text: str, cmap: list[int], norm_clause: str) -> list
     best_len = 0
     for exact, probe in candidates:
         probe = probe.strip()
-        pos = _unique_pos(norm_text, probe)
-        if pos < 0:
+        span = _unique_span_relaxed(norm_text, cmap, probe)
+        if span is None:
             continue
-        if len(probe) > best_len:
-            best_len = len(probe)
-            spans = [_span_from_norm(cmap, pos, len(probe))]
-        elif len(probe) == best_len:
-            span = _span_from_norm(cmap, pos, len(probe))
-            if span not in spans:
-                spans.append(span)
+        cand_len = span[1] - span[0]
+        if cand_len > best_len:
+            best_len = cand_len
+            spans = [span]
+        elif cand_len == best_len and span not in spans:
+            spans.append(span)
         if exact and spans:
             break          # 完整 clause_text 即唯一命中 → 已是最优，直接收敛
     return spans
@@ -172,18 +234,17 @@ def _tier2_candidates(norm_text: str, cmap: list[int], norm_clause: str) -> list
     for sent in sentences:
         if len(sent) < MIN_ANCHOR_LEN:
             continue
-        pos = _unique_pos(norm_text, sent)
-        used = sent
-        if pos < 0:
+        span = _unique_span_relaxed(norm_text, cmap, sent)
+        if span is None:
+            # 该句被改写 → 逐级丢弃开头 token 后重试（仍是精确/等效匹配）
             tokens = sent.split(" ")
             for drop in range(1, min(MAX_DROP_TOKENS, len(tokens))):
                 probe = " ".join(tokens[drop:]).strip()
-                pos = _unique_pos(norm_text, probe)
-                if pos >= 0:
-                    used = probe
+                span = _unique_span_relaxed(norm_text, cmap, probe)
+                if span is not None:
                     break
-        if pos >= 0:
-            hits.append(_span_from_norm(cmap, pos, len(used)))
+        if span is not None:
+            hits.append(span)
 
     if not hits:
         return []

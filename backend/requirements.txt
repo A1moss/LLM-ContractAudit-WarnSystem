@@ -1,3 +1,7 @@
+# -*- coding: utf-8 -*-
+# ↑ 本文件含中文注释，必须保留上面的 PEP 263 编码声明：否则 pip 会按系统 ANSI 代码页
+#   （简体中文 Windows = GBK）解码本文件并抛 UnicodeDecodeError，
+#   使 `pip install -r requirements.txt` 直接失败（与依赖版本无关）。
 pymysql>=1.1.0
 fastapi>=0.110.0
 uvicorn>=0.29.0
@@ -21,6 +25,8 @@ sentence-transformers>=2.2.0
 email-validator>=2.0.0
 pywin32>=306
 
-# 图片/扫描件合同 OCR 识别（PaddleOCR）
-paddleocr>=2.7.0
-paddlepaddle>=2.5.0
+# 图片/扫描件合同 OCR 识别（RapidOCR = PaddleOCR 模型 + ONNX Runtime）
+# 模型（PP-OCRv6 det/rec + cls）随 wheel 自带，无需联网下载；不需要 Docker /
+# poppler / ImageMagick / ghostscript（扫描 PDF 用已装的 pypdfium2 栅格化）。
+rapidocr==3.9.2
+onnxruntime==1.23.2

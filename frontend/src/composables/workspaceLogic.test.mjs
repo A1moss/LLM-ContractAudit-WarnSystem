@@ -209,14 +209,19 @@ test('DOCX 口径：scope=clause 全收；overview 只有 add_clause 收；overv
 })
 
 test('docxStateFor 状态机：不支持格式 → 无修改 → 暂不能导出 → 可以导出', () => {
-  // 阶段 1 起：PDF 与 DOCX 一样可导出（修订版统一输出 DOCX）
+  // 阶段 1/2 起：PDF 与**图片**（OCR 输入）都和 DOCX 一样可导出（修订版统一输出 DOCX）
   assert.equal(docxStateFor({ storedPath: '/data/x.pdf', exportableCount: 3, blockerCount: 0 }).key, 'ready')
-  // 图片本轮仍不支持
-  assert.equal(docxStateFor({ storedPath: '/data/x.png', exportableCount: 3, blockerCount: 0 }).key, 'not_docx')
+  assert.equal(docxStateFor({ storedPath: '/data/x.png', exportableCount: 3, blockerCount: 0 }).key, 'ready')
+  assert.equal(docxStateFor({ storedPath: '/data/x.jpg', exportableCount: 3, blockerCount: 0 }).key, 'ready')
+  assert.equal(docxStateFor({ storedPath: '/data/x.jpeg', exportableCount: 3, blockerCount: 0 }).key, 'ready')
+  assert.equal(docxStateFor({ storedPath: '/data/x.tiff', exportableCount: 3, blockerCount: 0 }).key, 'ready')
+  // 仍未支持的格式
+  assert.equal(docxStateFor({ storedPath: '/data/x.txt', exportableCount: 3, blockerCount: 0 }).key, 'not_docx')
   assert.equal(docxStateFor({ storedPath: '/data/x.docx', exportableCount: 0, blockerCount: 0 }).key, 'none')
   assert.equal(docxStateFor({ storedPath: '/data/x.docx', exportableCount: 2, blockerCount: 1 }).key, 'blocked')
   assert.equal(docxStateFor({ storedPath: '/data/x.DOCX', exportableCount: 2, blockerCount: 0 }).key, 'ready')
   assert.equal(docxStateFor({ storedPath: '/data/x.PDF', exportableCount: 2, blockerCount: 0 }).key, 'ready')
+  assert.equal(docxStateFor({ storedPath: '/data/x.PNG', exportableCount: 2, blockerCount: 0 }).key, 'ready')
   // blocked 文案必须带上条数，便于用户定位问题会话
   assert.match(docxStateFor({ storedPath: '/data/a.docx', exportableCount: 2, blockerCount: 3 }).text, /3 条/)
 })
@@ -232,14 +237,14 @@ test('BUG：file_name 是显示名（无后缀）不能决定格式，必须以�
   assert.notEqual(real.key, 'not_docx', '真 DOCX 不得被判成非 Word')
   assert.equal(real.key, 'ready')
 
-  // 反过来：file_name 恰好带 .docx，但真实文件是图片 → 必须以真实 stored_path 判定为不支持
+  // 反过来：file_name 带 .docx，但真实文件是**未支持格式** → 必须以真实 stored_path 判定
   assert.equal(
-    docxStateFor({ storedPath: '/data/x.png', fileName: '合同.docx', exportableCount: 2, blockerCount: 0 }).key,
+    docxStateFor({ storedPath: '/data/x.txt', fileName: '合同.docx', exportableCount: 2, blockerCount: 0 }).key,
     'not_docx',
   )
-  // file_name 带 .docx 但真实文件是 PDF → 以 stored_path 为准（PDF 可导出）
+  // file_name 带 .docx 但真实文件是图片 → 以 stored_path 为准（图片已可导出）
   assert.equal(
-    docxStateFor({ storedPath: '/data/x.pdf', fileName: '合同.docx', exportableCount: 2, blockerCount: 0 }).key,
+    docxStateFor({ storedPath: '/data/x.png', fileName: '合同.docx', exportableCount: 2, blockerCount: 0 }).key,
     'ready',
   )
 

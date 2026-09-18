@@ -2,7 +2,7 @@
 
 背景（为什么要"静启动"）
 ------------------------
-为修「后端启动慢」，torch / sentence_transformers / chromadb 和 PaddleOCR 都改成了
+为修「后端启动慢」，torch / sentence_transformers / chromadb 和 OCR 引擎（RapidOCR）都改成了
 **惰性加载**（首次使用时才 import/实例化）。启动确实快了，但代价被转移到了**第一次
 上传合同**上：那一次请求要替整个进程付冷启动成本。分段实测：
 
@@ -25,7 +25,8 @@
 环境变量
 --------
     DISABLE_WARMUP=1   关闭静启动（单测/CI 用，避免无谓拖入 torch）
-    WARMUP_OCR=1       额外预热 PaddleOCR（首次会下载模型，较慢，默认关闭）
+    WARMUP_OCR=1       额外预热 OCR 引擎（RapidOCR 3.9.2 + ONNX Runtime 1.23.2；
+                       模型随 wheel 自带、不联网下载；仅首次实例化时加载 ONNX 会话，默认关闭）
     WARMUP_STRICT=1    预热异常时抛出（默认只告警）
 """
 import logging
@@ -76,12 +77,16 @@ def _warm_rag():
 
 
 def _warm_ocr():
-    """预热 PaddleOCR（仅图片/扫描件上传需要，首次会下载模型，故默认关闭）。"""
+    """预热 OCR 引擎（RapidOCR，仅图片/扫描件上传需要，故默认关闭）。
+
+    模型随 wheel 自带、无需联网下载，但首次实例化仍要加载 ONNX 会话；
+    保持既有语义：只有 `WARMUP_OCR=1` 时才在后台预热，不阻塞启动。
+    """
     t0 = time.perf_counter()
     STATE["ocr"] = "warming"
     try:
-        from ai.parser.ocr_parser import _ensure_ocr
-        if _ensure_ocr() is None:
+        from ai.parser.ocr_engine import _ensure_engine
+        if _ensure_engine() is None:
             STATE["ocr"] = "unavailable"
             return
     except Exception as e:

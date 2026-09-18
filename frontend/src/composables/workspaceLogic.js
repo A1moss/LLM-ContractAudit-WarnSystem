@@ -302,13 +302,13 @@ export function isExportableRevision(rev) {
  * 支持导出修订版的原始格式（与后端 `download_revised_docx` 的真实能力对齐）。
  *
  * - `docx`：直接打开原 DOCX 应用修订（既有链路）；
- * - `pdf` ：由已落库的 `parsed_text` 生成**规范化中间 DOCX** 后再应用修订，
- *           最终统一输出 DOCX（本轮新增）。
+ * - `pdf` ：普通 PDF 直接解析；**扫描型 PDF** 逐页栅格化后走 OCR，
+ *           再由已落库的 `parsed_text` 生成中间 DOCX 后应用修订；
+ * - 图片（jpg/jpeg/png/tiff/tif/bmp）：OCR → `parsed_text` → 中间 DOCX。
  *
- * **图片（jpg/png/tiff/bmp）本轮明确仍不支持**：其解析依赖 PaddleOCR，
- * 且 OCR 的阅读顺序/锚点可靠性尚未验证，属于后续独立阶段。
+ * 三者最终**统一输出 Word（DOCX）**。
  */
-export const EXPORTABLE_SOURCE_EXTS = ['docx', 'pdf']
+export const EXPORTABLE_SOURCE_EXTS = ['docx', 'pdf', 'jpg', 'jpeg', 'png', 'tiff', 'tif', 'bmp']
 
 /** 从真实上传路径取小写扩展名（不含点）；取不到返回空串 */
 export function sourceExt(storedPath, fileName = '') {
@@ -327,19 +327,18 @@ export function sourceExt(storedPath, fileName = '') {
  * 拿它判断格式会把真 DOCX 误判成非 Word，导致下载按钮被永久禁用。
  * 后端 `download_revised_docx` 也是按 `stored_path` 判断，此处与之对齐。
  *
- * 本轮变更：PDF 由「不可导出」改为「可导出」——修订版统一输出 Word（DOCX）。
+ * 本轮变更：PDF 与**图片**（OCR 输入）由「不可导出」改为「可导出」——
+ * 所有非 DOCX 输入统一走「parsed_text → 中间 DOCX」，修订版统一输出 Word（DOCX）。
  */
 export function docxStateFor({ storedPath = '', fileName = '', exportableCount = 0, blockerCount = 0 }) {
   const ext = sourceExt(storedPath, fileName)
-  const isDocx = ext === 'docx'
-  const isPdf = ext === 'pdf'
 
-  if (!isDocx && !isPdf) {
+  if (!EXPORTABLE_SOURCE_EXTS.includes(ext)) {
     return {
       key: 'not_docx',
       text: '当前合同的修订版暂不支持导出',
       detail: ext
-        ? `当前源文件格式（.${ext}）暂不支持导出修订版；已支持 .docx 与 .pdf。`
+        ? `当前源文件格式（.${ext}）暂不支持导出修订版；已支持 .docx / .pdf / 图片。`
         : '无法识别当前合同的原始文件格式，暂不支持导出修订版。',
     }
   }

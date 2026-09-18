@@ -876,7 +876,11 @@ class TestFrontendExportGate(unittest.TestCase):
     def test_pdf_is_exportable_docx_and_image_are_handled(self):
         src = self._src()
         self.assertIn("EXPORTABLE_SOURCE_EXTS", src)
-        self.assertRegex(src, r"EXPORTABLE_SOURCE_EXTS\s*=\s*\[\s*'docx'\s*,\s*'pdf'\s*\]")
+        # 本轮起：docx / pdf / 图片(OCR 输入) 都可导出（统一输出 DOCX）
+        self.assertRegex(
+            src,
+            r"EXPORTABLE_SOURCE_EXTS\s*=\s*\[[^\]]*'docx'[^\]]*'pdf'[^\]]*'png'[^\]]*\]",
+        )
         # 旧文案必须消失
         self.assertNotIn("仅 DOCX 原始合同支持导出修订版", src)
         self.assertNotIn("当前上传的不是 Word 文档", src)
@@ -884,7 +888,7 @@ class TestFrontendExportGate(unittest.TestCase):
         self.assertIn("暂不支持导出修订版", src)
 
     def test_pdf_case_reaches_ready_state(self):
-        """用 node 跑真实函数，确认 pdf 不再是 not_docx、图片仍是 not_docx。"""
+        """用 node 跑真实函数：docx / pdf / 图片都是 ready，未支持格式才是 not_docx。"""
         import subprocess
         script = (
             "import('./workspaceLogic.js').then(m => {"
@@ -894,6 +898,8 @@ class TestFrontendExportGate(unittest.TestCase):
             "    docx: f({storedPath:'/d/a.docx', exportableCount:2, blockerCount:0}).key,"
             "    png: f({storedPath:'/d/a.png', exportableCount:2, blockerCount:0}).key,"
             "    jpg: f({storedPath:'/d/a.jpg', exportableCount:2, blockerCount:0}).key,"
+            "    tiff: f({storedPath:'/d/a.tiff', exportableCount:2, blockerCount:0}).key,"
+            "    txt: f({storedPath:'/d/a.txt', exportableCount:2, blockerCount:0}).key,"
             "    noext: f({storedPath:'/d/a', exportableCount:2, blockerCount:0}).key,"
             "    pdfNoRev: f({storedPath:'/d/a.pdf', exportableCount:0, blockerCount:0}).key,"
             "    docxBlocked: f({storedPath:'/d/a.docx', exportableCount:2, blockerCount:1}).key,"
@@ -910,8 +916,12 @@ class TestFrontendExportGate(unittest.TestCase):
         got = json.loads(proc.stdout.strip().splitlines()[-1])
         self.assertEqual(got["pdf"], "ready", "PDF 合同必须可导出")
         self.assertEqual(got["docx"], "ready")
-        self.assertEqual(got["png"], "not_docx", "图片本轮仍不支持")
-        self.assertEqual(got["jpg"], "not_docx", "图片本轮仍不支持")
+        # 本轮起：图片（OCR 输入）同样可导出
+        self.assertEqual(got["png"], "ready", "图片应可导出（OCR → 中间 DOCX）")
+        self.assertEqual(got["jpg"], "ready")
+        self.assertEqual(got["tiff"], "ready")
+        # 仍未支持的格式
+        self.assertEqual(got["txt"], "not_docx")
         self.assertEqual(got["noext"], "not_docx")
         self.assertEqual(got["pdfNoRev"], "none")
         self.assertEqual(got["docxBlocked"], "blocked")

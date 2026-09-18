@@ -447,18 +447,31 @@ def upload_contract(
             pass
         raise HTTPException(status_code=422, detail="parse failed: " + str(e))
 
-    # OCR（图片）识别失败/无文字时给出明确提示，避免静默产生空合同
-    if not full_text.strip():
-        # 删除已落盘的空文件，避免 orphan（BUG-050）
+    # OCR（图片 / 扫描件）识别失败、无文字、或**质量过低**时都要在**解析阶段**就明确拒绝，
+    # 避免把明显不可用的文本送进后续分类/要素/风险审核（也避免静默产生空合同）。
+    ocr_quality = (parsed.get("ocr_quality") or "").lower() if isinstance(parsed, dict) else ""
+    is_ocr_input = bool(ocr_quality)
+    if not full_text.strip() or (is_ocr_input and ocr_quality == "low"):
+        # 删除已落盘的文件，避免 orphan（BUG-050）
         try:
             os.remove(file_path)
         except Exception:
             pass
+        if is_ocr_input:
+            # OCR 输入统一给出**可操作**的提示：区分"质量过低"与"完全识别不到"，
+            # 但都明确指向"重新提供更清晰的图片/扫描件"，而不是暴露内部错误串。
+            reason = parsed.get("ocr_reason") or parsed.get("error") or "未识别到文字"
+            logger.warning("OCR 不可用，拒绝入库: ext=%s reason=%s conf=%s chars=%s",
+                           ext, reason, parsed.get("ocr_confidence"), parsed.get("ocr_valid_chars"))
+            raise HTTPException(
+                status_code=422,
+                detail=f"OCR 识别质量过低，请上传更清晰的合同图片/扫描件。（{reason}）",
+            )
         if parsed.get("error"):
             raise HTTPException(status_code=422, detail=f"文本提取失败：{parsed['error']}")
         if ext.lower() in (".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp"):
             raise HTTPException(status_code=422, detail="图片未识别到文字，请确认图片清晰或上传 PDF/DOCX 格式")
-        # PDF/DOCX 空文本：扫描版 PDF 无文字层（BUG-050）
+        # PDF 空文本且 OCR 也没拿到：扫描版 PDF 无文字层（BUG-050）
         raise HTTPException(status_code=422, detail="未能从文件中提取到文字（可能是扫描版 PDF 无文字层），请上传含文字层的 PDF/DOCX 或清晰的图片")
 
     # 分类与要素抽取并行（要素抽取对 contract_type 不敏感，用中性词占位，不必等分类结果）
@@ -1650,11 +1663,18 @@ def download_revised_docx(
     if not c.stored_path:
         raise HTTPException(status_code=404, detail="原始合同文件不存在")
 
-    is_docx = c.stored_path.lower().endswith(".docx")
-    if not is_docx and not c.stored_path.lower().endswith(".pdf"):
+    # 可导出的源格式：
+    #   .docx                → 直接打开原件应用修订
+    #   .pdf                 → 由 parsed_text 重建中间 DOCX
+    #   图片(jpg/png/tiff…)  → 同样由 parsed_text（OCR 产物）重建中间 DOCX
+    # 三者最终都输出 DOCX，因此**非 DOCX 一律走中间 DOCX 路径**。
+    _EXPORTABLE_EXTS = (".docx", ".pdf", ".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp")
+    _lower_path = c.stored_path.lower()
+    is_docx = _lower_path.endswith(".docx")
+    if not _lower_path.endswith(_EXPORTABLE_EXTS):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="当前源文件格式暂不支持导出修订版（已支持 .docx 与 .pdf）",
+            detail="当前源文件格式暂不支持导出修订版（已支持 .docx / .pdf / 图片）",
         )
     # 原始文件是否还在磁盘上。缺失时**不再直接失败**：只要还有 parsed_text，
     # 就用中间 DOCX 兜底继续（见下方 source_docx 的选择），这样"原件被清理掉但解析文本还在"
