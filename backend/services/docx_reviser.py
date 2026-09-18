@@ -197,11 +197,92 @@ def _renumber_text(text: str, greater_than: int) -> str:
 
 
 def _pos_key(position) -> str:
-    """位置归一化键（用于 add_clause 多轮修改「同位置只留最终版」）。"""
+    """位置归一化键（用于 add_clause 多轮修改「同位置只留最终版」）。
+
+    优先用**精确定位**（``target_text`` + ``paragraph_index``）：同一编号在合同里可能重复
+    出现多次（真实合同实测 55% 存在重复顶层编号），只按编号会把「同一编号的不同出现」
+    错误地并成一组，导致其中一处被丢弃、或两处互相覆盖。
+
+    键里必须带 ``paragraph_index``：三处标题文本可能**完全相同**，此时只有行号能区分。
+    没有精确定位信息时回退到编号 —— 与加入精确定位之前的行为完全一致。
+    """
     position = position or {}
     if position.get("append"):
         return "append"
+    target = _norm(position.get("target_text") or "")
+    if target:
+        idx = position.get("paragraph_index")
+        idx_part = idx if isinstance(idx, int) and not isinstance(idx, bool) else ""
+        return f"target:{target}#{idx_part}"
     return "anchor:" + str(position.get("anchor", ""))
+
+
+# ── 精确插入位置定位（R-1 修复核心）────────────────────────────────────────
+def _heading_text_matches(paragraph_text: str, target_text: str, anchor_num: int | None) -> bool:
+    """该段落是否为 ``target_text`` 指代的标题段。
+
+    判定 = 段落文本包含 target_text（空白折叠后）+ 该段落本身是**同一编号**的标题。
+    两者同时成立才认，避免把正文里偶然包含该字符串的段落当成标题。
+    """
+    target = _norm(target_text)
+    if not target:
+        return False
+    if target not in _norm(paragraph_text):
+        return False
+    if anchor_num is not None and _heading_num(paragraph_text) != anchor_num:
+        return False
+    return True
+
+
+def _resolve_insert_paragraph(doc, position):
+    """解析「新增条款插到哪一个段落之后」，返回 ``(段落下标, 失败原因)``。
+
+    选择顺序（**精确优先；有精确定位信息时绝不回退到"随便取第一个"**）：
+
+      ① ``position["target_text"]`` 精确定位 —— 用户在界面上实际选中的那一处标题文本。
+         唯一命中该标题段 → 用它；命中 0 处或多处 → **明确失败**，不猜测。
+         ``position["paragraph_index"]``（若给出且校验通过）用于在**重复标题文本**之间
+         精确区分：PDF 中间 DOCX 由 ``parsed_text`` 逐行生成，行号即 paragraph 下标；
+         DOCX 原件也满足"行序 = paragraph 序"（生成中间 DOCX 时部分与正文的顺序一致）。
+      ② 无 ``target_text`` 时，退回既有「按编号找**第一个**」行为。
+         这是加入精确定位之前的语义，为历史数据与既有 API 契约保持零回归。
+
+    返回 ``(idx, "")`` 表示成功；返回 ``(-1, reason)`` 表示无法可靠定位。
+    """
+    paragraphs = doc.paragraphs
+    if not paragraphs:
+        return -1, "文档中没有可用段落"
+
+    position = position or {}
+    anchor = position.get("anchor", "")
+    anchor_num = _cn_to_int(anchor)
+    target_text = _norm(position.get("target_text") or "")
+
+    if target_text:
+        raw_idx = position.get("paragraph_index")
+        hint = raw_idx if isinstance(raw_idx, int) and not isinstance(raw_idx, bool) else None
+        # ①-a 行号提示：必须同时通过「位置有效 + 该段确为同一编号标题 + 文本匹配」三重校验
+        if hint is not None and 0 <= hint < len(paragraphs):
+            if _heading_text_matches(paragraphs[hint].text, target_text, anchor_num):
+                return hint, ""
+        # ①-b 退化为全文扫描（标题文本通常在文档中唯一）
+        hits = [i for i, p in enumerate(paragraphs)
+                if _heading_text_matches(p.text, target_text, anchor_num)]
+        if len(hits) == 1:
+            return hits[0], ""
+        if not hits:
+            return -1, (f"未找到与所选位置匹配的条款标题「{target_text[:30]}」，"
+                        f"为避免插错位置已取消插入")
+        return -1, (f"所选位置「{target_text[:30]}」在文档中出现 {len(hits)} 次，"
+                    f"无法唯一定位，为避免插错位置已取消插入")
+
+    # 兼容路径：没有精确定位信息时，沿用既有「按编号找第一个」语义
+    if anchor_num is None:
+        return -1, f"插入位置「{anchor}」无法识别，请明确条款编号"
+    for i, p in enumerate(paragraphs):
+        if _heading_num(p.text) == anchor_num:
+            return i, ""
+    return -1, "未找到插入位置"
 
 
 def _final_add_clause_map(revisions) -> list:
@@ -244,7 +325,6 @@ def _has_paragraph_heading(doc, anchor_num: int) -> bool:
             return True
     return False
 
-
 def _append_clause(doc, clause_text: str) -> tuple[bool, str]:
     """追加新增条款到文档末尾；编号取文档中最大标题编号 + 1（无可识别标题则不编）。"""
     max_num = 0
@@ -268,16 +348,21 @@ def _append_clause(doc, clause_text: str) -> tuple[bool, str]:
     return True, "已追加到合同末尾"
 
 
-def _insert_paragraph_level(doc, clause_text: str, anchor_num: int) -> tuple[bool, str]:
-    """段落级结构：标题独立成段/段首。在 anchor 标题段之后、下一标题段之前插入，并顺延后续编号。"""
+def _insert_paragraph_level(doc, clause_text: str, position, anchor_num: int,
+                            anchor_idx: int | None = None) -> tuple[bool, str]:
+    """段落级结构：标题独立成段/段首。
+
+    在**用户实际选中的那个**标题段之后、下一标题段之前插入，并顺延后续编号。
+
+    `anchor_idx` 由 `_insert_one` 解析后传入（**必须在顺延编号之前解析**：
+    顺延会把后续标题的编号 +1，事后再解析就可能对不上原锚点了）。
+    未传时按 `position` 现场解析（保持该函数的独立可用性）。
+    """
     paras = doc.paragraphs
-    anchor_idx = -1
-    for i, p in enumerate(paras):
-        if _heading_num(p.text) == anchor_num:
-            anchor_idx = i
-            break
-    if anchor_idx < 0:
-        return False, "未找到插入位置"
+    if anchor_idx is None:
+        anchor_idx, why = _resolve_insert_paragraph(doc, position)
+        if anchor_idx < 0:
+            return False, why
 
     # 1) 顺延编号：所有编号 > anchor_num 的标题 +1
     for p in paras:
@@ -340,7 +425,12 @@ def _insert_inline(doc, clause_text: str, position, anchor_num: int) -> tuple[bo
 
 
 def _insert_one(doc, clause_text: str, position) -> tuple[bool, str]:
-    """按 position 插入一条新增条款，返回 (ok, msg)。"""
+    """按 position 插入一条新增条款，返回 (ok, msg)。
+
+    位置解析顺序（与 `_resolve_insert_paragraph` 一致）：
+      - 有 `target_text` 精确定位 → 必须唯一命中，否则**明确失败**（绝不插错位置）；
+      - 无精确定位信息 → 沿用既有「按编号找第一个」语义（历史数据零回归）。
+    """
     clause_text = (clause_text or "").strip()
     if not clause_text:
         return False, "新增条款内容为空"
@@ -348,15 +438,43 @@ def _insert_one(doc, clause_text: str, position) -> tuple[bool, str]:
     if position and position.get("append"):
         return _append_clause(doc, clause_text)
 
-    anchor = (position or {}).get("anchor", "")
-    if not anchor:
-        return False, "未指定插入位置"
-    anchor_num = _cn_to_int(anchor)
-    if anchor_num is None:
-        return False, f"插入位置「{anchor}」无法识别，请明确条款编号"
+    position = position or {}
+    anchor = position.get("anchor", "")
+    anchor_num = _cn_to_int(anchor) if anchor else None
+    has_target = bool(_norm(position.get("target_text") or ""))
 
+    if anchor_num is None and not has_target:
+        if not anchor:
+            return False, "未指定插入位置"
+        return False, f"插入位置「{anchor}」无法识别，请明确条款编号"
+    if anchor_num is None:
+        return False, "缺少可解析的条款编号，无法确定新增条款编号"
+
+    # ① 精确定位：只认「段落级标题」命中；命中数 ≠ 1 一律失败
+    if has_target:
+        idx, why = _resolve_insert_paragraph(doc, position)
+        if idx >= 0:
+            # 注意：把**解析好的下标**传下去。`_insert_paragraph_level` 会先顺延后续标题编号，
+            # 若让它事后再解析，就可能因为编号已被改动而对不上原锚点。
+            return _insert_paragraph_level(doc, clause_text, position, anchor_num, anchor_idx=idx)
+        # ①-b 唯一允许的宽松回退：`paragraph_index` **本身指向一个编号正确的标题段**，
+        #      只是该段文本与 target_text 的措辞有细微差异（空白/标点）。
+        #      这既确定（下标是用户选的那一处）又无歧义（编号自洽）。
+        #      除此之外一律不回退：
+        #        · target_text 命中多处（真歧义）→ 失败
+        #        · target_text 命中的段编号与 anchor 矛盾（位置信息自相矛盾）→ 失败
+        #        · 只有编号独一、但下标既缺失又不自洽 → 失败（避免"按编号猜一个"）
+        raw_idx = position.get("paragraph_index")
+        if isinstance(raw_idx, int) and not isinstance(raw_idx, bool) \
+                and 0 <= raw_idx < len(doc.paragraphs) \
+                and _heading_num(doc.paragraphs[raw_idx].text) == anchor_num:
+            return _insert_paragraph_level(doc, clause_text, position, anchor_num,
+                                           anchor_idx=raw_idx)
+        return False, why
+
+    # ② 兼容路径：沿用既有判据（有段落级标题 → 段落级；否则 → 段内联插入）
     if _has_paragraph_heading(doc, anchor_num):
-        return _insert_paragraph_level(doc, clause_text, anchor_num)
+        return _insert_paragraph_level(doc, clause_text, position, anchor_num)
     return _insert_inline(doc, clause_text, position, anchor_num)
 
 

@@ -745,20 +745,54 @@ const addCtx = computed(() => props.ws.addPositionCtx || { suggest: null, canUse
 const addW = computed(() => props.ws.addWizard)
 const addAfterNum = ref(null)
 const addBeforeNum = ref(null)
-const addBeforePrev = computed(() => (addBeforeNum.value == null ? null : props.ws.beforeAnchorOf(addBeforeNum.value)))
+// R-1：`addAfterNum` / `addBeforeNum` 现在保存的是「条款在清单里的**下标**」（用于区分同编号的
+// 不同出现），因此 before-prev 也要按下标取前一条，不能再按编号查。
+const addBeforePrev = computed(() => {
+  const idx = addBeforeNum.value
+  const list = addCtx.value.headings || []
+  if (typeof idx !== 'number' || idx <= 0 || idx > list.length) return null
+  return list[idx - 1].num
+})
 const addLocateCandidates = computed(() => {
   const r = addW.value?.locateResult
   if (!r) return []
   return r.candidates?.length ? r.candidates : r.found ? [r] : []
 })
 
+/**
+ * R-1：把「用户选中的那一处标题」的精确定位信息（整行原文 + 行号）一并交给状态层。
+ *
+ * 为什么需要：同一编号在合同里会重复出现（真实合同实测 55%）。
+ * 只传编号的话，后端只能"按编号取第一个"，用户选的第 2/3 处就会被插错位置。
+ * 选择器的值 = 该条款在 headingOccurrences 里的**下标**，
+ * 因此「用户选的那一项」与「保存进 position 的精确定位」严格一致。
+ */
+function headingAt(idx) {
+  const list = addCtx.value.headings || []
+  if (typeof idx !== 'number' || idx < 0 || idx >= list.length) return null
+  return list[idx]
+}
+
 function addApplyAfter() {
-  if (addAfterNum.value == null) return
-  props.ws.chooseAddPosition('after', { anchor: addAfterNum.value })
+  const h = headingAt(addAfterNum.value)
+  if (!h) return
+  props.ws.chooseAddPosition('after', {
+    anchor: h.num,
+    target_text: h.target_text || '',
+    paragraph_index: h.paragraph_index ?? null,
+  })
 }
 function addApplyBefore() {
-  if (addBeforeNum.value == null) return
-  props.ws.chooseAddPosition('before', { num: addBeforeNum.value, prevAnchor: props.ws.beforeAnchorOf(addBeforeNum.value) })
+  const h = headingAt(addBeforeNum.value)
+  if (!h) return
+  // 「第X条之前」= 插在第 X-1 条之后；这里用**选中项的前一条**（同编号多出现时取紧邻上一条）
+  const prev = headingAt(addBeforeNum.value - 1)
+  props.ws.chooseAddPosition('before', {
+    num: h.num,
+    prevAnchor: prev ? prev.num : null,
+    target_text: prev?.target_text || '',
+    paragraph_index: prev?.paragraph_index ?? null,
+  })
 }
 function addOnModeChange(mode) {
   if (mode === 'suggest') props.ws.chooseAddPosition('suggest')

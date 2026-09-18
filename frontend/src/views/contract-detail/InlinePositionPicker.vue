@@ -22,14 +22,21 @@
       「{{ suggest.hint || positionText(suggest) }}」只是系统建议，需要你点下面的「确认位置」才算选定。
     </div>
 
-    <!-- 在某一编号条款之后 -->
+    <!-- 在某一编号条款之后。R-1：同一编号可能重复出现，因此选项以「出现序号」为值
+         （而不是编号），并在标签里标出「第N处」，让用户明确选到的是哪一处。 -->
     <div v-if="w.posMode === 'after'" class="ipp-sec">
       <el-select
         :model-value="afterNum" size="small" filterable placeholder="选择条款" style="width:100%"
         @update:model-value="$emit('update:after-num', $event)" @change="$emit('apply-after')"
       >
-        <el-option v-for="h in headings" :key="h.num" :label="`第${h.cn}条 ${h.title || ''}`" :value="h.num" />
+        <el-option
+          v-for="(h, i) in headings" :key="`after-${i}`"
+          :label="headLabel(h, i)" :value="i"
+        />
       </el-select>
+      <div v-if="hasDuplicateNums" class="ipp-tip">
+        该合同存在<b>同编号重复</b>的条款；下拉已分别列出每一处，请选你要插入的那一处。
+      </div>
     </div>
 
     <!-- 在某一编号条款之前（换算成「第 X-1 条之后」） -->
@@ -38,11 +45,14 @@
         :model-value="beforeNum" size="small" filterable placeholder="选择条款" style="width:100%"
         @update:model-value="$emit('update:before-num', $event)" @change="$emit('apply-before')"
       >
-        <el-option v-for="h in headings" :key="h.num" :label="`第${h.cn}条 ${h.title || ''}`" :value="h.num" />
+        <el-option
+          v-for="(h, i) in headings" :key="`before-${i}`"
+          :label="headLabel(h, i)" :value="i"
+        />
       </el-select>
       <div class="ipp-tip">
         新增条款只会插在某个编号条款之后；选择「第X条之前」会换算成「第 X-1 条之后」。
-        <span v-if="beforeNum && beforePrev == null" class="ipp-warn-inline">
+        <span v-if="beforeNum != null && beforePrevIdx == null" class="ipp-warn-inline">
           该条款已是合同第一条，前面无法再插入，请改选其它位置。
         </span>
       </div>
@@ -99,6 +109,7 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { positionText } from '../../composables/useContractWorkspace.js'
 
 /**
@@ -136,6 +147,33 @@ defineEmits([
   'apply-after', 'apply-before', 'mode-change',
   'confirm-position', 'clear-position',
 ])
+
+/**
+ * R-1：同一编号在合同里可能重复出现。选项值改为**出现序号**（数组下标），
+ * 标签里标出「第N处」，用户选中的是「第几个选项」而不是「哪个编号」，
+ * 父组件据此把该处的 target_text / paragraph_index 一并保存进插入位置。
+ */
+const numOccurrence = computed(() => {
+  const counts = new Map()
+  for (const h of props.headings || []) counts.set(h.num, (counts.get(h.num) || 0) + 1)
+  return counts
+})
+const hasDuplicateNums = computed(() => {
+  for (const n of numOccurrence.value.values()) if (n > 1) return true
+  return false
+})
+/** 选项标签：重复编号时补上「（第N处）」 */
+function headLabel(h, i) {
+  const base = `第${h.cn}条 ${h.title || ''}`
+  if ((numOccurrence.value.get(h.num) || 0) <= 1) return base
+  const idx = (props.headings || []).filter((x) => x.num === h.num).indexOf(h) + 1
+  return `${base}（第${idx}处）`
+}
+/** 「第 X 条之前」换算：找到所选序号之前的**那一条**（同编号多出现时按序号取紧邻上一条） */
+const beforePrevIdx = computed(() => {
+  const i = props.beforeNum
+  return typeof i === 'number' && i > 0 ? i - 1 : null
+})
 </script>
 
 <style scoped>

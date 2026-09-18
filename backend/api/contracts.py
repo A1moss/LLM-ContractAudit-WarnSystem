@@ -204,6 +204,8 @@ def _parse_headings(text: str) -> list[dict]:
     """从合同正文解析顶层标题（第X条 / X、），返回 [{num, cn, title}]。
 
     只收「一~九十九」编号的标题；标题取标题之后到下一个换行/标点为止的短句。
+    **按编号去重，只保留第一个出现**（既有契约，供位置选择器与建议位置使用）。
+    若需要同编号的每一处出现，用 `_headings_with_occurrences`。
     """
     text = text or ""
     out = []
@@ -219,6 +221,68 @@ def _parse_headings(text: str) -> list[dict]:
             continue
         seen.add(n)
         out.append({"num": n, "cn": _int_to_cn(n), "title": title})
+    return out
+
+
+def _heading_line(text: str, start: int, end: int) -> str:
+    """取标题匹配区间 ``[start, end)`` 所在的**整行**（空白折叠）作为精确定位文本。
+
+    为什么用「整行」而不是只取 ``第X条`` 那一小段：插入位置必须精确定位到**具体那一处**
+    标题段（同一编号在合同里会重复出现），整行是最小且唯一性足够的原文单位；
+    再叠加编号校验即可排除正文里偶然包含该串的段落。
+    """
+    if not text:
+        return ""
+    line_start = text.rfind("\n", 0, start) + 1
+    line_end = text.find("\n", end)
+    if line_end < 0:
+        line_end = len(text)
+    return re.sub(r"\s+", " ", text[line_start:line_end]).strip()
+
+
+def _is_line_start_match(text: str, start: int) -> bool:
+    """该匹配是否位于**行首**（允许行首空白）。
+
+    插入用的段落级标题必须是「段首标题」——`docx_reviser._heading_num` 正是这个判据
+    （它用 ``match`` 而非 ``search``）。若只在行中间出现（例如正文里的
+    「…按本合同通用条款第 7 条的约定办理。」），它**不是**可插入的标题：
+    既不能被当成插入位置，也不该出现在位置选择器里（否则用户会选到一个必然失败的项）。
+    """
+    line_start = text.rfind("\n", 0, start) + 1
+    prefix = text[line_start:start]
+    return prefix.strip() == ""
+
+
+def _headings_with_occurrences(text: str) -> list[dict]:
+    """解析**每一处**顶层标题出现（不去重），返回
+    ``[{num, cn, title, target_text, start, paragraph_index}]``。
+
+    只收**行首**标题（与 `docx_reviser._heading_num` 的判据一致），因此正文里的
+    「…通用条款第 7 条…」这类行内引用不会被误当成插入位置。
+
+    `target_text` 是该标题所在的整行原文，`paragraph_index` 是该行的行号 ——
+    供前端把它带回插入位置，使后端能够唯一定位「用户选中的那一处」，
+    而不是按编号取第一个。行号可安全用作 DOCX 段落下标：中间 DOCX 由 `parsed_text`
+    逐行生成（行序 = paragraph 序），且后端校验不过时会自动退化为全文唯一匹配。
+    """
+    text = text or ""
+    out = []
+    for m in _HEADING_RE.finditer(text):
+        if not _is_line_start_match(text, m.start()):
+            continue
+        n = _cn_to_int(m.group(2))
+        if n is None:
+            continue
+        seg = text[m.end():m.end() + 20]
+        parts = [p for p in re.split(r'[\n　\s。；;：，,]', seg) if p.strip()]
+        out.append({
+            "num": n,
+            "cn": _int_to_cn(n),
+            "title": parts[0] if parts else "",
+            "target_text": _heading_line(text, m.start(), m.end()),
+            "start": m.start(),
+            "paragraph_index": text.count("\n", 0, m.start()),
+        })
     return out
 
 
@@ -1053,20 +1117,37 @@ def _locate_keyword_tokens(parsed_text: str, text: str) -> list[str]:
     return out
 
 
-def _locate_candidate(res: dict) -> dict:
-    """把 _locate_at 的结果裁剪成候选条目（字段集合固定）。"""
+def _locate_candidate(res: dict, parsed_text: str = "") -> dict:
+    """把 _locate_at 的结果裁剪成候选条目（字段集合固定）。
+
+    额外带上 `target_text` / `paragraph_index`（R-1）：用户在候选里点选的**具体那一处**
+    必须能被插入阶段精确定位，否则会退化成"按编号取第一个"。
+    `target_text` 取该候选命中位置所在的整行；拿不到（未传 parsed_text）时为空串。
+    """
+    start = res.get("start")
+    target_text = ""
+    paragraph_index = None
+    if parsed_text and isinstance(start, int) and 0 <= start <= len(parsed_text):
+        line_start = parsed_text.rfind("\n", 0, start) + 1
+        line_end = parsed_text.find("\n", start)
+        if line_end < 0:
+            line_end = len(parsed_text)
+        target_text = re.sub(r"\s+", " ", parsed_text[line_start:line_end]).strip()
+        paragraph_index = parsed_text.count("\n", 0, start)
     return {
         "start": res["start"],
         "end": res["end"],
         "original_text": res["original_text"],
         "clause_no": res["clause_no"],
         "clause_title": res["clause_title"],
+        "target_text": target_text,
+        "paragraph_index": paragraph_index,
     }
 
 
 def _locate_candidates_at(full_text: str, idxs: list[int]) -> list[dict]:
     """把若干命中下标转成候选列表：按 start 去重、按 start 升序、最多 8 条。"""
-    cands = [_locate_candidate(_locate_at(full_text, i)) for i in idxs]
+    cands = [_locate_candidate(_locate_at(full_text, i), full_text) for i in idxs]
     seen = set()
     out = []
     for c in sorted(cands, key=lambda x: x["start"]):
@@ -1172,7 +1253,7 @@ def locate_contract_clause(
                 break
         return _ok(_locate_payload(
             True, "clause_anchor", f"已按条款编号定位到第{anchor}条",
-            res, [_locate_candidate(res)],
+            res, [_locate_candidate(res, parsed_text)],
         ))
 
     # ---- (1)/(2) 原文片段模式 ------------------------------------------------
@@ -1182,7 +1263,7 @@ def locate_contract_clause(
         # 原文唯一命中：最可靠，直接返回
         res = _locate_at(parsed_text, idxs[0])
         return _ok(_locate_payload(
-            True, "exact", "原文唯一命中", res, [_locate_candidate(res)],
+            True, "exact", "原文唯一命中", res, [_locate_candidate(res, parsed_text)],
         ))
 
     if len(idxs) > 1:
@@ -1191,7 +1272,7 @@ def locate_contract_clause(
         if res:
             return _ok(_locate_payload(
                 True, "exact", "原文多处出现，已按（N）子项消歧定位",
-                res, [_locate_candidate(res)],
+                res, [_locate_candidate(res, parsed_text)],
             ))
         cands = _locate_candidates_at(parsed_text, idxs)
         return _ok(_locate_payload(
@@ -1205,7 +1286,7 @@ def locate_contract_clause(
     if res:
         return _ok(_locate_payload(
             True, "prefix", "按前缀逐级匹配定位（原文与输入不完全一致）",
-            res, [_locate_candidate(res)],
+            res, [_locate_candidate(res, parsed_text)],
         ))
 
     # ---- (3) 关键词模式（自然语言描述，纯确定性规则） -------------------------
@@ -1269,14 +1350,30 @@ def get_add_clause_suggestion(
     except Exception as e:
         logger.warning("法条检索失败: %s", e)
 
-    headings = _parse_headings(c.parsed_text or "")
-    suggested = _suggest_position(c.parsed_text or "")
+    # 位置选择器用的条款清单：额外返回**每一处**标题出现（不去重），并带上该标题所在整行
+    # `target_text`。用户选中哪一处，前端就把那一条的 target_text 带回插入位置，
+    # 从而避免「同一编号重复出现时只能按编号取第一个」的错插（R-1）。
+    # 既有去重后的 `headings` 保持不变，兼容老前端。
+    parsed_text = c.parsed_text or ""
+    heading_occurrences = _headings_with_occurrences(parsed_text)
+    headings = _parse_headings(parsed_text)
+    suggested = _suggest_position(parsed_text)
+    if isinstance(suggested, dict) and suggested.get("anchor") and not suggested.get("append"):
+        # 让「采用推荐位置」也带上精确定位文本（该编号的**第一处**出现，与 _suggest_position 口径一致）
+        want = _cn_to_int(str(suggested.get("anchor")))
+        for occ in heading_occurrences:
+            if occ["num"] == want:
+                suggested = dict(suggested)
+                suggested["target_text"] = occ["target_text"]
+                suggested["paragraph_index"] = occ["paragraph_index"]
+                break
     return {"code": 0, "message": "ok", "data": {
         "risk_type": body.risk_type,
         "templates": templates,
         "legal_basis": laws,
         "suggested_position": suggested,
         "headings": headings,
+        "heading_occurrences": heading_occurrences,
     }}
 
 

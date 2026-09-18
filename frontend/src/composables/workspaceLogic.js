@@ -72,6 +72,12 @@ export function cnToInt(s) {
 /**
  * 从合同正文解析顶层标题（第X条 / X、），与后端 _parse_headings 同规则。
  * 仅收 1~99 编号；标题取标题之后到下一个换行/标点为止的短句。
+ *
+ * 额外返回 `target_text` = 该标题所在的**整行原文**（原样，不做空白折叠）。
+ * 用途（R-1）：同一编号在合同里会重复出现多次（真实合同实测 55% 存在重复顶层编号），
+ * 只带编号会让后端只能"按编号取第一个"，与用户实际选中的那一处不一致。
+ * 把整行原文一并带回，后端就能唯一定位用户真正选择的那一处。
+ * 归一化交给后端统一处理，前端不预处理，避免两侧折叠口径不一致。
  */
 export function parseHeadings(text) {
   const out = []
@@ -87,7 +93,18 @@ export function parseHeadings(text) {
     const seg = text.slice(segStart, segStart + 20)
     const parts = seg.split(/[\n　\s。；;：，,]/).filter((p) => p.trim())
     seen.add(n)
-    out.push({ num: n, cn: cnNo(n), title: parts[0] || '', start: m.index })
+    // 标题所在整行（与后端 _heading_line 同口径：按换行取行，不折叠空白）
+    const lineStart = text.lastIndexOf('\n', m.index) + 1
+    let lineEnd = text.indexOf('\n', segStart)
+    if (lineEnd < 0) lineEnd = text.length
+    out.push({
+      num: n,
+      cn: cnNo(n),
+      title: parts[0] || '',
+      start: m.index,
+      target_text: text.slice(lineStart, lineEnd),
+      paragraph_index: (text.slice(0, m.index).match(/\n/g) || []).length,
+    })
   }
   return out.sort((a, b) => a.start - b.start)
 }

@@ -1245,6 +1245,10 @@ export function useContractWorkspace() {
       addWizard.templates = d.templates || []
       addWizard.legalBasis = d.legal_basis || []
       addWizard.suggestedPosition = d.suggested_position || null
+      // R-1：后端返回**每一处**标题出现（含所在整行 target_text 与行号）。
+      // 位置选择器优先用它，用户就能精确选到「同编号的第 2/3 处」，
+      // 而不是只能在去重后的清单里选一个编号、再由后端猜一个位置。
+      addWizard.headingOccurrences = Array.isArray(d.heading_occurrences) ? d.heading_occurrences : []
       addWizard.loaded = true
     } catch {
       // 检索失败不阻断：仍可手动指定位置并生成
@@ -1254,8 +1258,17 @@ export function useContractWorkspace() {
     }
   }
 
-  /** 位置候选：条款选择器（前端从 parsed_text 派生 headings，与后端 _parse_headings 同规则） */
-  const addAnchorHeadings = computed(() => headings.value)
+  /**
+   * 位置候选：条款选择器。
+   *
+   * R-1：优先用后端返回的 `heading_occurrences`（**每一处**标题出现，含整行原文与行号），
+   * 这样同一编号重复出现时用户能明确选到第几处。后端不可用/老响应时，
+   * 退回去重后的 `headings`（此时不带精确定位，后端按编号找第一个 —— 与旧行为一致）。
+   */
+  const addAnchorHeadings = computed(() => {
+    const occ = addWizard.headingOccurrences
+    return Array.isArray(occ) && occ.length ? occ : headings.value
+  })
 
   // ══════════════════════════════════════════════════════════════
   // 新增条款右栏工作区（消费上面同一份 addWizard 状态，不新建第二套系统）
@@ -1271,7 +1284,8 @@ export function useContractWorkspace() {
     suggest: addWizard.suggestedPosition || null,
     canUseSuggest: !!addWizard.suggestedPosition
       && !!(addWizard.suggestedPosition.append || addWizard.suggestedPosition.anchor),
-    headings: headings.value,
+    // R-1：用「每一处出现」的清单（含整行原文与行号），让用户能精确选到第几处
+    headings: addAnchorHeadings.value,
   }))
 
   /**
@@ -1355,6 +1369,15 @@ export function useContractWorkspace() {
 
   function chooseAddPosition(mode, payload) {
     addWizard.posMode = mode
+    // R-1：位置必须能唯一定位。带上**用户实际选中那一处**的整行原文（target_text）
+    // 与行号（paragraph_index）；后端据此精确定位，不再"按编号取第一个"。
+    const loc = { target_text: payload?.target_text || '', paragraph_index: payload?.paragraph_index ?? null }
+    const withLoc = (base) => {
+      const out = { ...base }
+      if (loc.target_text) out.target_text = loc.target_text
+      if (loc.paragraph_index != null) out.paragraph_index = loc.paragraph_index
+      return out
+    }
     if (mode === 'suggest') {
       const sp = addWizard.suggestedPosition || {}
       if (sp.append) {
@@ -1364,12 +1387,13 @@ export function useContractWorkspace() {
       } else if (sp.anchor) {
         addWizard.posAnchor = String(sp.anchor)
         addWizard.posHint = sp.hint || `第${sp.anchor}条之后`
-        addWizard.confirmedPosition = { anchor: String(sp.anchor), hint: addWizard.posHint }
+        // 推荐位置自己也带精确定位（后端 _suggest_position 已附带 target_text）
+        addWizard.confirmedPosition = withLoc({ anchor: String(sp.anchor), hint: addWizard.posHint })
       }
     } else if (mode === 'after') {
       addWizard.posAnchor = String(payload?.anchor || '')
       addWizard.posHint = `第${addWizard.posAnchor}条之后`
-      addWizard.confirmedPosition = { anchor: addWizard.posAnchor, hint: addWizard.posHint }
+      addWizard.confirmedPosition = withLoc({ anchor: addWizard.posAnchor, hint: addWizard.posHint })
     } else if (mode === 'before') {
       const prev = payload?.prevAnchor
       if (prev == null) {
@@ -1378,7 +1402,7 @@ export function useContractWorkspace() {
       }
       addWizard.posAnchor = String(prev)
       addWizard.posHint = `第${prev}条之后（即第${payload.num}条之前）`
-      addWizard.confirmedPosition = { anchor: String(prev), hint: addWizard.posHint }
+      addWizard.confirmedPosition = withLoc({ anchor: String(prev), hint: addWizard.posHint })
     } else if (mode === 'append') {
       addWizard.posAnchor = ''
       addWizard.posHint = '追加到合同末尾'
@@ -1414,7 +1438,12 @@ export function useContractWorkspace() {
     addWizard.posAnchor = String(c.clause_no)
     addWizard.posHint = `第${c.clause_no}条之后（按描述定位）`
     addWizard.posMode = 'locate'
-    addWizard.confirmedPosition = { anchor: String(c.clause_no), hint: addWizard.posHint }
+    // R-1：把候选自带的精确定位信息一并保留 —— 否则同编号的多个候选会退化成一个，
+    // 用户点的是第二处、后端却插到第一处。
+    const pos = { anchor: String(c.clause_no), hint: addWizard.posHint }
+    if (c.target_text) pos.target_text = c.target_text
+    if (c.paragraph_index != null) pos.paragraph_index = c.paragraph_index
+    addWizard.confirmedPosition = pos
   }
 
   async function submitAddClause() {
