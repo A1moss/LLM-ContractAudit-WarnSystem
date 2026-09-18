@@ -196,6 +196,29 @@ def _renumber_text(text: str, greater_than: int) -> str:
     return _HEADING_RE.sub(repl, text)
 
 
+# 比对用的编号占位符：只替换标题编号本身，编号之外的文字一字不动
+_NUM_TOKEN_PLACEHOLDER = "\u0000"
+
+
+def _normalize_heading_numbers(text: str) -> str:
+    """把文本中所有标题编号（``_HEADING_RE`` 命中的「第X条」/「X、」）替换为统一占位符。
+
+    只供**导出自检**（`api.contracts._verify_revised_docx`）比对使用，不参与任何写入逻辑。
+
+    存在的理由：新增条款（add_clause）插入时，`_insert_paragraph_level` / `_insert_inline`
+    会把编号 > anchor_num 的标题**顺延**（编号 +N）。若被替换条款位于插入点之后，
+    **修订文本自身的行首编号也会被系统合法改写**（实测：R09 在「第三条」插入，把已替换的
+    「第五条 保密…」顺延成「第六条 保密…」），此时逐字比对会把"已写入"误判成"未写入"。
+
+    这里抹掉的正是顺延逻辑唯一会改动的那类 token（同一个 ``_HEADING_RE``），
+    编号之外的正文逐字保留 —— 因此"修订正文没写进去"仍然会被自检抓到。
+    """
+    if not text:
+        return text
+    return _HEADING_RE.sub(
+        lambda m: (m.group(1) or "") + _NUM_TOKEN_PLACEHOLDER + m.group(3), text)
+
+
 def _pos_key(position) -> str:
     """位置归一化键（用于 add_clause 多轮修改「同位置只留最终版」）。
 

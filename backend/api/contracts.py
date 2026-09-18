@@ -1882,16 +1882,43 @@ def _effective_anchors(revs, overrides: dict) -> dict:
     return out
 
 
+# 自检比对的最小长度：短于该长度的文本即便命中也不算数（避免抹掉编号后只剩几个字
+# 被当成"已写入"）。自检宁可误报，不可漏报。
+_MIN_SELFCHECK_LEN = 8
+
+
 def _verify_revised_docx(out_path: str, revs, overrides: dict) -> list:
     """打开刚生成的 DOCX，确认每条修订的最终文本确实写入。
 
     :returns: 未通过自检的修订 id 列表（空列表 = 全部通过）。
+
+    ## 为什么允许「标题编号不同、正文逐字相同」
+
+    新增条款（add_clause）插入时会顺延后续标题编号（见 `_insert_paragraph_level` /
+    `_insert_inline`：编号 > anchor_num 的标题 +N）。被替换条款若位于插入点之后，
+    **修订文本自身的行首编号也会被系统合法改写** —— 实测：R09 在「第三条」插入，
+    把已替换的「第五条 保密…」顺延成「第六条 保密…」。此时逐字比对会把"已写入"
+    误判成"未写入"，导出被错误地拦成 400（S-1）。
+
+    因此：**仅当本次导出确实包含 add_clause 修订**（只有它才可能触发编号顺延）时，
+    再按"抹掉标题编号"的口径比对一次；纯替换导出仍走逐字比对，行为与改动前完全一致。
+    两个口径都要求修订**正文**逐字出现，抹掉的只是 `_HEADING_RE` 命中的编号本身
+    （与顺延逻辑改动的完全是同一批 token），所以"漏改"依然会被拦下。
     """
     from docx import Document
-    from services.docx_reviser import _norm
+    from services.docx_reviser import _norm, _normalize_heading_numbers
 
     doc = Document(out_path)
-    doc_text = _norm("\n".join(p.text for p in doc.paragraphs))
+    paragraphs = [p.text for p in doc.paragraphs]
+    doc_text = _norm("\n".join(paragraphs))
+    # 只有「会被真正插入」的 add_clause 才可能触发编号顺延（与 _final_add_clause_map 同口径）
+    has_add_clause = any(
+        getattr(r, "operation", "replace") == "add_clause" and (r.revised_clause or "").strip()
+        for r in revs
+    )
+    doc_text_no_num = (_norm(_normalize_heading_numbers("\n".join(paragraphs)))
+                       if has_add_clause else None)
+
     expected = []
     for r in revs:
         if getattr(r, "operation", "replace") == "add_clause":
@@ -1907,8 +1934,16 @@ def _verify_revised_docx(out_path: str, revs, overrides: dict) -> list:
 
     missing = []
     for rid, text in expected:
-        if not text or text not in doc_text:
-            missing.append(rid)
+        if not text:
+            missing.append(rid)   # 空文本无从核对 → 仍然失败（与改动前语义一致）
+            continue
+        if text in doc_text:
+            continue
+        # 编号顺延导致的合法改写：正文逐字相同、只有标题编号不同
+        if (doc_text_no_num is not None and len(text) >= _MIN_SELFCHECK_LEN
+                and _normalize_heading_numbers(text) in doc_text_no_num):
+            continue
+        missing.append(rid)
     return missing
 
 
