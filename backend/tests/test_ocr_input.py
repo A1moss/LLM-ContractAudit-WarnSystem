@@ -9,7 +9,7 @@
   E. 多页 PDF page 顺序              M. OCR 无文字拒绝
   F. OCR 坐标排序                    N. 原有 DOCX 回归
   G. 重复 OCR 顺序稳定               O. 普通 PDF 回归
-  H. OCR → parsed_text
+  H. OCR → parsed_text               P. 混合 PDF（文字页 + 扫描页）逐页解析
 
 **评测边界**：本文件只用自造合成样本，不引用任何 Gold / 测试集 / F1 / 分类评测数据。
 
@@ -118,6 +118,41 @@ def _make_scanned_pdf(path, pages_lines):
         for pg in pdf.pages:
             imgs.append(pg.to_image(resolution=150).original.convert("RGB"))
     imgs[0].save(str(path), "PDF", save_all=True, append_images=imgs[1:], resolution=150)
+    return str(path)
+
+
+def _make_mixed_pdf(path, pages):
+    """造一份**混合 PDF**：同一个文件里既有文字页、又有扫描页。
+
+    :param pages: ``[("text", [行...]), ("scan", [行...]), ...]``（按页序）。
+                  "text" 页写入真实文字层；"scan" 页只放一张栅格化位图（无文字层）。
+    """
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.pdfgen import canvas
+
+    name = "TestCJK"
+    if name not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont(name, _FONT_PATH))
+
+    c = canvas.Canvas(str(path), pagesize=A4)
+    for page_no, (kind, lines) in enumerate(pages, start=1):
+        if kind == "text":
+            c.setFont(name, 13)
+            y = 800
+            for ln in lines:
+                c.drawString(50, y, ln)
+                y -= 26
+        else:
+            # 先把该页渲染成图片（纯扫描页样本），再整页贴到 PDF 上 → 该页无文字层
+            src = _make_scanned_pdf(str(Path(path).with_suffix(f".scanpg{page_no}.pdf")), [lines])
+            with pdfplumber.open(src) as doc:
+                pil = doc.pages[0].to_image(resolution=150).original.convert("RGB")
+            c.drawImage(ImageReader(pil), 0, 0, width=A4[0], height=A4[1])
+        c.showPage()
+    c.save()
     return str(path)
 
 
@@ -484,6 +519,121 @@ class TestNORegression(OcrInputTestBase):
         Image.new("RGB", (800, 1100), "white").save(tif, "TIFF")
         parsed = detect_and_parse(tif)
         self.assertEqual(parsed.get("format"), "image")
+
+
+class TestPHybridPdf(OcrInputTestBase):
+    """P. 混合 PDF：同一文件里「文字页 + 扫描页」必须逐页解析，不静默丢页。
+
+    改造前 `detect_and_parse` 只要 PDF 有任意文字层就直接返回 `parse_pdf` 结果，
+    而 `parse_pdf` 对无文字层的页 `continue`——扫描页正文被**静默丢弃**。
+    本类锁定逐页混合解析，并锁定纯文本 / 纯扫描两条路径零回归。
+    """
+
+    TEXT_P1 = ["第一页 建设工程施工合同", "第一条 工程概况", "工程名称：海口项目"]
+    SCAN_P2 = ["第二页 合同价款", "第二条 合同价款", "总价 壹亿元整"]
+    TEXT_P3 = ["第三页 争议解决", "第四条 争议解决", "提交海口市龙华区人民法院裁决"]
+
+    def _hybrid(self, name, pages):
+        return _make_mixed_pdf(os.path.join(self.dir, name), pages)
+
+    # ── 1. 纯文本 PDF 不回归 ──
+    def test_P_pure_text_pdf_result_identical_to_parse_pdf(self):
+        """纯文本 PDF：`detect_and_parse` 必须与 `parse_pdf` 返回完全一致（逐字零改动）。"""
+        from ai.parser.pdf_parser import parse_pdf
+
+        pdf = _make_text_pdf(os.path.join(self.dir, "p_text.pdf"), [CONTRACT_LINES[:8]])
+        self.assertEqual(detect_and_parse(pdf), parse_pdf(pdf))
+        self.assertIsNone(detect_and_parse(pdf).get("ocr_quality"), "纯文本 PDF 不应带 OCR 字段")
+        self.assertNotIn("scanned_pages", detect_and_parse(pdf))
+
+    # ── 2. 纯扫描 PDF 不回归 ──
+    def test_P_pure_scanned_pdf_result_identical_to_scan_path(self):
+        """纯扫描 PDF：`detect_and_parse` 仍走原 `parse_scanned_pdf`，结果逐字一致。"""
+        from ai.parser.scan_pdf import parse_scanned_pdf
+
+        pdf = _make_scanned_pdf(os.path.join(self.dir, "p_scan.pdf"), [CONTRACT_LINES[:10]])
+        ref = parse_scanned_pdf(pdf)
+        parsed = detect_and_parse(pdf)
+        self.assertEqual(set(parsed), set(ref), "返回字段集合必须与改造前一致")
+        self.assertEqual(parsed["full_text"], ref["full_text"])
+        self.assertEqual(parsed["paragraphs"], ref["paragraphs"])
+        self.assertEqual(parsed["scanned_pages"], ref["scanned_pages"])
+        self.assertEqual(parsed["ocr_quality"], ref["ocr_quality"])
+        self.assertNotIn("hybrid_pdf", parsed, "纯扫描件不是混合件")
+
+    # ── 3. 混合 PDF：两类页面的正文都进入 parsed_text ──
+    def test_P_hybrid_pdf_merges_both_page_kinds(self):
+        pdf = self._hybrid("p_mix2.pdf", [("text", self.TEXT_P1), ("scan", self.SCAN_P2)])
+        parsed = detect_and_parse(pdf)
+        self.assertEqual(parsed.get("format"), "pdf")
+        self.assertTrue(parsed.get("hybrid_pdf"), "混合 PDF 应被标记 hybrid_pdf")
+        text = parsed["full_text"]
+        self.assertIn("第一条 工程概况", text, "文字页正文必须进入 parsed_text")
+        self.assertIn("第二页", text, "扫描页正文必须进入 parsed_text")
+        self.assertIn("合同价款", text, "扫描页正文必须进入 parsed_text")
+        # 只 OCR 无文字层的第 2 页；第 1 页已有文字层，不重复 OCR
+        self.assertEqual(parsed.get("scanned_pages"), [2])
+
+    def test_P_text_page_lines_come_from_text_layer_not_ocr(self):
+        """文字页必须逐字沿用文字层结果（证明没有被 OCR 覆盖）。"""
+        from ai.parser.pdf_parser import parse_pdf
+
+        pdf = self._hybrid("p_mix_verbatim.pdf", [("text", self.TEXT_P1), ("scan", self.SCAN_P2)])
+        parsed = detect_and_parse(pdf)
+        ref_p1 = [p["text"] for p in parse_pdf(pdf)["paragraphs"] if p["page"] == 1]
+        got_p1 = [p["text"] for p in parsed["paragraphs"] if p["page"] == 1]
+        self.assertEqual(got_p1, ref_p1, "文字页必须逐字来自文字层")
+        self.assertEqual(got_p1, ["第一页 建设工程施工合同", "第一条 工程概况", "工程名称：海口项目"])
+
+    # ── 4. 页面顺序保持 ──
+    def test_P_hybrid_pdf_keeps_page_order(self):
+        pdf = self._hybrid("p_mix3.pdf", [
+            ("text", self.TEXT_P1), ("scan", self.SCAN_P2), ("text", self.TEXT_P3),
+        ])
+        parsed = detect_and_parse(pdf)
+        self.assertEqual(parsed.get("page_count"), 3)
+        self.assertEqual(parsed.get("scanned_pages"), [2], "只有第 2 页是无文字层页")
+
+        pages = [p["page"] for p in parsed["paragraphs"]]
+        self.assertEqual(pages, sorted(pages), "页序必须单调递增")
+        self.assertEqual(sorted(set(pages)), [1, 2, 3])
+        # 文字页 / 扫描页必须按页码交错，不能「文字页全在前、扫描页全在后」
+        idx = {n: [i for i, p in enumerate(parsed["paragraphs"]) if p["page"] == n]
+               for n in (1, 2, 3)}
+        self.assertLess(max(idx[1]), min(idx[2]))
+        self.assertLess(max(idx[2]), min(idx[3]))
+
+    # ── 5. 混合 PDF 不再静默丢页 ──
+    def test_P_hybrid_pdf_no_longer_silently_drops_scanned_pages(self):
+        from ai.parser.pdf_parser import parse_pdf
+
+        pdf = self._hybrid("p_mix_drop.pdf", [("text", self.TEXT_P1), ("scan", self.SCAN_P2)])
+        # 复现改造前的行为：文字非空时 detect_and_parse 直接返回 parse_pdf 的结果
+        old = parse_pdf(pdf)
+        self.assertNotIn("第二页", old["full_text"], "旧路径下扫描页内容确实不在结果里")
+        self.assertEqual({p["page"] for p in old["paragraphs"]}, {1}, "旧路径只覆盖文字页")
+        # 改造后：扫描页正文必须出现
+        new = detect_and_parse(pdf)
+        self.assertIn("第二页", new["full_text"], "混合 PDF 不得再丢弃扫描页正文")
+        self.assertEqual({p["page"] for p in new["paragraphs"]}, {1, 2})
+
+    # ── 附加：混合结果接进既有中间 DOCX 链路仍然无损 ──
+    def test_P_hybrid_pdf_intermediate_docx_lossless(self):
+        pdf = self._hybrid("p_mix_docx.pdf", [("text", self.TEXT_P1), ("scan", self.SCAN_P2)])
+        parsed = detect_and_parse(pdf)
+        out = os.path.join(self.dir, "p_mix.docx")
+        build_from_parsed_text(parsed["full_text"], out)
+        self.assertEqual("\n".join(p.text for p in Document(out).paragraphs),
+                         parsed["full_text"])
+
+    # ── 附加：文字层可用时不被 upload 的 OCR 质量闸整份拒绝 ──
+    def test_P_hybrid_pdf_is_not_rejected_by_upload_quality_gate(self):
+        """upload 端判定为 `is_ocr_input = bool(parsed.get("ocr_quality"))`：
+        混合 PDF 的文字层内容本身可用，不应带 ocr_quality 而整份 422。"""
+        pdf = self._hybrid("p_mix_gate.pdf", [("text", self.TEXT_P1), ("scan", self.SCAN_P2)])
+        parsed = detect_and_parse(pdf)
+        self.assertIsNone(parsed.get("ocr_quality"))
+        self.assertTrue((parsed.get("full_text") or "").strip())
 
 
 class TestScanPdfHelpers(unittest.TestCase):
