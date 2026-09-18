@@ -47,7 +47,7 @@
 | AI 引擎 | DeepSeek `deepseek-chat`（唯一出口 `ai/llm_client.py`；分类/比对/改条款 temperature=0.1，要素/证据/建议 temperature=0.0） |
 | 向量库 | ChromaDB **嵌入式持久化**（`backend/chroma_data`）+ BM25 + RRF 融合（**不需要 Docker**） |
 | 嵌入模型 | `shibing624/text2vec-base-chinese` |
-| 文档解析 | `pdfplumber`（PDF）、`python-docx`（DOCX）、PaddleOCR（图片/扫描件，可选） |
+| 文档解析 | `pdfplumber`（PDF 文本层）、`python-docx`（DOCX）、**RapidOCR 3.9.2 + ONNX Runtime 1.23.2**（图片 / 扫描 PDF；**单引擎，模型随 wheel 自带、无需联网下载**） |
 | 前端 | Vue 3 + Element Plus + ECharts + Vite（端口 **5173**） |
 | 鉴权 | PyJWT（HS256，7 天）+ bcrypt；个人 API Key 用 Fernet 加密落库 |
 
@@ -188,9 +188,9 @@ cd frontend && node --test src/
 
 ## 九、当前系统的限制（如实列出）
 
-1. **DOCX 修订版导出只支持 `.docx` 原始合同**；PDF / 图片合同可审核、可建立修改会话，但不能导出修订版文件。
+1. **修订版统一导出 DOCX**：DOCX / 普通 PDF / 扫描 PDF / JPG / PNG / TIFF / BMP 都能「审核 → 修改 → 导出修订版 DOCX」（非 DOCX 输入由 `parsed_text` 重建**中间 DOCX** 后再应用修改，中间件不出现在用户侧）。系统**不提供** PDF→PDF 或图片→图片导出。
 2. **修订版不生成 Word 修订痕迹（Track Changes）**，也不做完整版本管理。
-3. **审核报告没有正式导出接口**（无 PDF / Word 报告导出 API），只支持浏览器打印；报告页也不显示审核人 / 报告编号 / 报告版本号 / 审批状态（这些字段后端不存在）。
+3. **审核报告可导出正式 PDF**（GET /api/contracts/{id}/audit-report/pdf，reportlab 纯 Python 排版；**没有 Word 报告导出**），报告页另支持浏览器打印；报告不显示审核人 / 报告编号 / 报告版本号 / 审批状态（这些字段后端不存在）。
 4. **R05 无 Gold、R13 不入 F1、R08/R09 Gold 覆盖有结构性限制**（见第一节）。
 5. **SQLite 单写者**并发限制（缓解而非根治）；高并发需切 MySQL（非默认）。
 6. **`risk_cases.json` 为空**（0 条），风险案例库仅预留。
