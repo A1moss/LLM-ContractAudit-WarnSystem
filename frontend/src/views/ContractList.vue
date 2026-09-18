@@ -60,7 +60,7 @@
             <el-option v-for="t in CONTRACT_TYPES" :key="t" :label="t" :value="t" />
           </el-select>
         </el-form-item>
-        <el-form-item label="审核状态">
+        <el-form-item label="合同状态">
           <el-select
             v-model="filters.status"
             placeholder="全部状态"
@@ -115,7 +115,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="status" label="审核状态" width="120">
+        <el-table-column prop="status" label="合同状态" width="120">
           <template #default="{ row }">
             <el-tag :type="statusTag(row.status)" size="small">
               {{ statusLabel(row.status) }}

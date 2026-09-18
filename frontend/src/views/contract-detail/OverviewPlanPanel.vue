@@ -57,7 +57,7 @@
               <el-tag size="small" effect="plain" :type="it.operation === 'add_clause' ? 'success' : 'primary'">
                 {{ ws.proposalItemKind(it) }}
               </el-tag>
-              <el-tag v-if="included(it)" size="small" type="warning" effect="light">已纳入方案</el-tag>
+              <el-tag v-if="included(it)" size="small" type="success" effect="light">已纳入方案（已写入修改记录）</el-tag>
               <el-tag v-else-if="!it.resolved" size="small" type="info" effect="plain">待确认位置</el-tag>
               <span class="opp-spacer" />
               <el-button size="small" text @click="toggle(it.id)">{{ openId === it.id ? '收起' : '查看详情' }}</el-button>
@@ -67,7 +67,7 @@
               <div v-if="!it.resolved" class="opp-need-locate">
                 <div class="opp-need-t">⚠ {{ ws.proposalBlockingText(it) }}</div>
                 <div class="opp-need-d">
-                  系统不能替你决定改哪里。请先用下方任一方式确认位置，再回到专项会话完成最终确认。
+                  系统不能替你决定改哪里。请先用下方任一方式确认位置，再回到这里纳入方案。
                 </div>
                 <el-button size="small" type="primary" plain @click="ws.gotoProposalItem(it)">
                   去指定位置
@@ -89,13 +89,10 @@
                   v-if="!included(it)"
                   size="small" type="warning"
                   :disabled="!ws.canIncludeProposalItem(it)"
+                  :loading="ws.confirmingItemId === String(it.id)"
                   @click="ws.toggleIncludeItem(it)"
                 >纳入方案</el-button>
-                <el-button
-                  v-else
-                  size="small" text type="info"
-                  @click="ws.toggleIncludeItem(it)"
-                >取消纳入</el-button>
+                <el-tag v-else size="small" type="success" effect="light">已纳入方案（已写入修改记录）</el-tag>
                 <el-button size="small" text @click="skip(it)">跳过</el-button>
                 <el-button size="small" type="primary" plain @click="ws.gotoProposalItem(it)">
                   去专项会话处理
@@ -108,11 +105,11 @@
 
         <div class="opp-foot">
           <div class="opp-foot-line">
-            ● {{ includedCount }} 项已纳入方案（待专项处理）<span v-if="skippedCount">　○ {{ skippedCount }} 项本轮跳过</span>
+            ● {{ includedCount }} 项已纳入方案（已写入合同修改记录）<span v-if="skippedCount">　○ {{ skippedCount }} 项本轮跳过</span>
           </div>
           <div class="opp-foot-note">
-            「已纳入方案」只表示你选中了这条综合方案、准备进入专项处理，<b>合同还没有被改动</b>。
-            真正写入修改后的合同，需要在专项会话里完成位置确认与最终确认。
+            「纳入方案」会把该修改项<b>正式写入本合同的修改记录</b>（可在后续继续调整，也可导出修订版合同）。
+            它<b>不是</b>直接覆盖原合同，也<b>不是</b>立即生成最终文件 —— 最终文件要另外点「下载修订版合同」生成。
           </div>
           <div class="opp-foot-note">
             跳过只表示本轮暂不采用，不会永久关闭或删除这条风险；下次重新生成方案时它仍可能被再次提出。
@@ -148,7 +145,7 @@ const includedCount = computed(() => (proposal.value?.items || []).filter((i) =>
 const skippedCount = computed(() => (proposal.value?.items || []).filter((i) => skipped.value.has(i.id)).length)
 
 function included(it) {
-  return props.ws.includedItemIds?.has?.(it.id) === true
+  return props.ws.isItemConfirmed?.(it) === true
 }
 
 /** 方案项在总控台里的展示状态（与修改点状态同一套语义） */
@@ -165,13 +162,22 @@ function toggle(id) {
   openId.value = openId.value === id ? null : id
 }
 
+/**
+ * 「跳过」= 仅本轮不纳入（纯前端会话态：不做任何持久化、不删风险、不撤销已落库的修改）。
+ *
+ * 注意：**不再"跳过时自动取消纳入"**。纳入方案现在会真实落库（POST /overview/confirm），
+ * 后端没有 un-confirm 端点，前端也没有取消落库的入口；若在这里静默调用 toggleIncludeItem，
+ * 只会给用户"已撤销"的错觉。已纳入的项跳过时明确告知仍需在专项会话调整。
+ */
 function skip(it) {
   const next = new Set(skipped.value)
-  if (next.has(it.id)) next.delete(it.id)
-  else {
+  if (next.has(it.id)) {
+    next.delete(it.id)
+  } else {
     next.add(it.id)
-    // 跳过同时取消纳入（两者互斥，避免同一项既"纳入"又"跳过"）
-    if (included(it)) props.ws.toggleIncludeItem(it)
+    if (included(it)) {
+      ElMessage.info('该修改项已纳入并写入合同修改记录；「跳过」只影响本轮汇总显示，不会撤销这次修改。')
+    }
   }
   skipped.value = next
 }

@@ -12,7 +12,14 @@
       </div>
       <div class="rp-toolbar-r">
         <el-button text size="small" @click="router.push(`/audit/result/${contractId}`)">查看审核历史</el-button>
-        <el-button type="primary" size="small" @click="printReport">
+        <el-button
+          type="primary" size="small"
+          :loading="exporting" :disabled="!canExport"
+          @click="exportPdf"
+        >
+          <el-icon><Download /></el-icon>导出 PDF 报告
+        </el-button>
+        <el-button size="small" @click="printReport">
           <el-icon><Printer /></el-icon>打印报告
         </el-button>
       </div>
@@ -416,7 +423,9 @@
  *   3. 风险原文、风险分析、修改建议、法律依据**完整展示**，不做 80 字截断、不放进 tooltip；
  *   4. 原文定位只做「逐字匹配」，三态如实呈现，**不伪造页码 / 坐标 / 高亮位置**；
  *   5. 合同金额、当事人、签订日期等一律取自 extracted_elements，字段缺失即隐藏；
- *   6. 不放后端并不存在的导出能力（PDF / Word / 报告模板）——只提供真实可用的浏览器打印。
+ *   6. 「导出 PDF 报告」调用后端真实导出接口 GET /contracts/{id}/audit-report/pdf
+ *      （服务端按本页同源数据渲染正式 PDF），浏览器打印作为辅助入口保留；
+ *      报告里不出现审核人 / 报告编号 / 报告版本 / 审批状态等数据库不存在的字段。
  *
  * 刻意不做的事：
  *   - **不调用 GET /clause-comparison**：该接口在无缓存时会当场跑 LLM 比对并回写报告，
@@ -426,10 +435,13 @@
 import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, ArrowRight, Printer, Warning, Loading } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight, Printer, Warning, Loading, Download } from '@element-plus/icons-vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import { getAuditReport, getAuditResult, getContractDetail, getContractFile } from '../api/contract.js'
+import {
+  getAuditReport, getAuditResult, getContractDetail, getContractFile, exportAuditReportPdf,
+} from '../api/contract.js'
+import { readApiError, saveBlob } from '../utils/request.js'
 import { riskName, riskLevelLabel, detectionLabel, CMP_STATUS_LABELS } from '../constants/riskTypes.js'
 import { typeLabel } from '../constants/contractTypes.js'
 import {
@@ -525,7 +537,14 @@ const headSub = computed(() => [typeText.value, fileName.value].filter(Boolean).
 
 const auditTime = computed(() => (report.value?.created_at ? formatTime(report.value.created_at) : ''))
 const modeText = computed(() => (auditModeLabel(contract.value?.audit_mode) ? `审核方式 ${auditModeLabel(contract.value.audit_mode)}` : ''))
-const statusText = computed(() => (contractStatusLabel(contract.value?.status) ? `审核状态 ${contractStatusLabel(contract.value.status)}` : ''))
+/**
+ * 合同状态（contracts.status）。
+ *
+ * 语义修正（P1）：这里**必须**叫「合同状态」而不是「审核状态」—— `contracts.status` 是合同
+ * 生命周期状态（已上传/已解析/审核中/审核完成/待验收/已验收），**不是审批状态**。
+ * 页面上一律不出现审核人 / 审批状态 / 报告编号 / 报告版本等数据库不存在的字段。
+ */
+const statusText = computed(() => (contractStatusLabel(contract.value?.status) ? `合同状态 ${contractStatusLabel(contract.value.status)}` : ''))
 const headMeta = computed(() => [
   auditTime.value ? `审核时间 ${auditTime.value}` : '',
   modeText.value,
@@ -887,9 +906,45 @@ function goRevise(v) {
   router.push(`/contracts/${contractId.value}`)
 }
 
-// ── 打印（唯一的「导出」能力：真实可用的浏览器打印） ──
+// ── 打印（浏览器打印：作为「导出 PDF」之外的辅助入口保留） ──
 function printReport() {
   window.print()
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 导出 PDF 报告 —— **正式的系统导出接口**
+//   GET /contracts/{id}/audit-report/pdf
+// 后端只读渲染（不调 LLM / RAG / 规则引擎、不重算评分与计数、不写库），
+// 数据与页面审核报告同源；失败时**必须**把后端真实错误暴露给用户，
+// 绝不把失败显示成成功。
+// ══════════════════════════════════════════════════════════════════
+const exporting = ref(false)
+
+/** 有报告或有风险结果才可导出（与页面可渲染条件一致，避免必然失败的请求） */
+const canExport = computed(() => !!report.value || riskItems.value.length > 0)
+
+async function exportPdf() {
+  if (exporting.value || !contractId.value) return
+  exporting.value = true
+  try {
+    const blob = await exportAuditReportPdf(contractId.value)
+    if (!blob || !blob.size) {
+      ElMessage.error('导出失败：后端返回了空文件')
+      return
+    }
+    saveBlob(blob, `${fileName.value || '合同'}_审核报告.pdf`)
+    ElMessage.success('审核报告 PDF 已开始下载')
+  } catch (e) {
+    // 404 = 该合同暂无审核结果可导出；其余情况如实展示后端 detail
+    const status = e?.response?.status
+    const fallback = status === 404
+      ? '该合同暂无可导出的审核报告'
+      : '审核报告导出失败'
+    const detail = await readApiError(e, fallback)
+    ElMessage.error(detail)
+  } finally {
+    exporting.value = false
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════

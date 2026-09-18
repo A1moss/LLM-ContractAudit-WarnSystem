@@ -104,8 +104,11 @@ import { positionText } from '../../composables/useContractWorkspace.js'
 /**
  * InlinePositionPicker — 新增条款「插入位置」选择器（**右栏工作区专用**）。
  *
- * 与 AddClauseSteps 共用同一份 addWizard 状态与同一条规则（addPositionOk / beforeAnchorOf），
- * 只是外壳不同：这里不带步骤条、不带需求表单，直接摆在工作区里。
+ * 新增条款「插入位置」的**唯一**选择器（右栏工作区专用；原弹窗版 AddClauseSteps 已删除，
+ * 因为它的根节点 v-if="mode === 'dialog'" 引用了未定义的 mode，永远不会渲染）。
+ *
+ * 状态与规则全部来自 useContractWorkspace 的同一份 addWizard
+ * （addPositionOk / beforeAnchorOf / chooseAddPosition），不存在第二套位置规则。
  *
  * 硬约束（V2.2 与产品红线，逐条来自既有实现）：
  *   - 推荐位置只作为**候选**填入 posMode，`confirmedPosition` 只有用户点「确认位置」才成立；

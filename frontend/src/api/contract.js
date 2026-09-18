@@ -1,6 +1,7 @@
 import request from '../utils/request.js'
 import {
   REVISE_TIMEOUT, COMPARE_TIMEOUT, FILE_TIMEOUT, LOCATE_TIMEOUT, OVERVIEW_PLAN_TIMEOUT,
+  REPORT_PDF_TIMEOUT,
 } from './timeouts.js'
 
 /**
@@ -75,6 +76,24 @@ export function getAuditReport(id) {
  */
 export function getClauseComparison(id) {
   return request.get(`/contracts/${id}/clause-comparison`, { timeout: COMPARE_TIMEOUT })
+}
+
+/**
+ * 导出正式《合同智能审核报告》PDF（返回 Blob）。
+ *
+ * 后端 `GET /contracts/{id}/audit-report/pdf` 只读：不调 LLM / RAG / 规则引擎，
+ * 不重算评分与风险计数，也不写任何表；数据与页面审核报告严格同源。
+ * 权限与 `GET /audit-report` 完全一致（无权限时后端返回 404）。
+ *
+ * 失败时后端返回 JSON 错误体，而这里 responseType='blob'，因此错误对象里的
+ * `response.data` 也是 Blob —— 调用方需用 readApiError 读出 detail，不能直接读字符串。
+ * @param {number|string} id — 合同 ID
+ */
+export function exportAuditReportPdf(id) {
+  return request.get(`/contracts/${id}/audit-report/pdf`, {
+    responseType: 'blob',
+    timeout: REPORT_PDF_TIMEOUT,
+  })
 }
 
 /**

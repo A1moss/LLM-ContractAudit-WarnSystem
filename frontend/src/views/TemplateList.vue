@@ -70,8 +70,16 @@
 
     <!-- 历史版本对话框 -->
     <el-dialog v-model="history.visible" :title="`历史版本 - ${history.name}`" width="720px">
+      <el-alert
+        v-if="history.error" type="error" show-icon :closable="false"
+        :title="history.error" class="hist-alert"
+      >
+        <el-button size="small" @click="reloadHistory">重试</el-button>
+      </el-alert>
       <el-table v-loading="history.loading" :data="history.items" stripe border>
-        <template #empty><el-empty description="暂无历史版本" /></template>
+        <template #empty>
+          <el-empty :description="history.error ? '历史版本加载失败' : '暂无历史版本'" />
+        </template>
         <el-table-column prop="version" label="版本" width="90">
           <template #default="{ row }">
             v{{ row.version }}
@@ -99,7 +107,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus, Files } from '@element-plus/icons-vue'
-import { getTemplates, createTemplate, updateTemplate, deleteTemplate } from '../api/template.js'
+import { getTemplates, getTemplateHistory, createTemplate, updateTemplate, deleteTemplate } from '../api/template.js'
 import { CONTRACT_TYPES } from '../constants/contractTypes.js'
 import { formatTime } from '../utils/format.js'
 
@@ -119,7 +127,9 @@ const dialog = reactive({
 const history = reactive({
   visible: false,
   loading: false,
+  error: '',
   name: '',
+  templateId: null,
   latestId: null,
   items: [],
 })
@@ -161,18 +171,44 @@ function openEdit(row) {
   dialog.clausesText = JSON.stringify(row.clauses, null, 2)
 }
 
+/**
+ * 打开「历史」：查询该模板的完整版本链（后端 GET /templates/{id}/history）。
+ *
+ * 展示口径（与后端返回结构严格一致，不新增第二套字段）：
+ *   - 后端返回 items 按**从最早到最新**排列（`templates.template_history` 先沿
+ *     previous_version_id 向前追溯再 reverse），因此被点击的这一行就是**当前最新版**；
+ *   - 列表里的「当前」标记 = 被点击的模板 id（旧实现取 items 的最后一个，等于把
+ *     **最早**那版标成了「当前」，与真实语义相反，这里一并修正）；
+ *   - 无历史版本时显示空状态；请求失败时显示错误 + 重试，而不是让用户误以为「暂无历史版本」。
+ */
 async function openHistory(row) {
   history.visible = true
-  history.loading = true
+  history.templateId = row.id
   history.name = row.name
   history.latestId = row.id
+  await fetchHistory(row.id)
+}
+
+/** 重新拉取当前模板的历史版本（错误态「重试」用） */
+async function reloadHistory() {
+  if (history.templateId == null) return
+  await fetchHistory(history.templateId)
+}
+
+async function fetchHistory(templateId) {
+  history.loading = true
+  history.error = ''
   history.items = []
   try {
-    const res = await getTemplateHistory(row.id)
-    history.items = res.data?.items || []
-    history.latestId = history.items[history.items.length - 1]?.id ?? row.id
-  } catch {
-    // 错误已在拦截器处理
+    const res = await getTemplateHistory(templateId)
+    const items = res?.data?.items
+    history.items = Array.isArray(items) ? items : []
+    // 兜底：后端若按其它顺序返回，以链尾（最新）为准；拿不到就保持被点击的模板 id
+    const last = history.items[history.items.length - 1]
+    if (last?.id != null) history.latestId = last.id
+  } catch (e) {
+    // 拦截器已弹过提示，这里保留行内错误态，避免"失败"被显示成"暂无历史版本"
+    history.error = e?.response?.data?.detail || '历史版本加载失败'
   } finally {
     history.loading = false
   }
@@ -228,4 +264,5 @@ onMounted(() => fetchList())
   padding: 24px;
   margin: 0 auto;
 }
+.hist-alert { margin-bottom: 10px; }
 </style>

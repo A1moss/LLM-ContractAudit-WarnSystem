@@ -11,7 +11,7 @@
  *    anchor 只能由 POST /revise 在落库时建立（original_clause_text）。
  * 4. 前端预检（previewLocate）只用于**UI 提示与导出前预警**，绝不作为「可导出」的结论；
  *    最终以下载时后端 400 detail 为准。
- * 5. 「用户确认定位」「新增条款向导进度」等**只是 UI 状态**，后端没有对应持久化字段
+ * 5. 「用户确认定位」「新增条款的插入位置确认」等**只是 UI 状态**，后端没有对应持久化字段
  *    （clause_revisions / audit_records 均无 location_confirmed / anchor_confirmed 之类列）。
  *    刷新后这些 UI 状态会丢失——但一旦提交过一轮修改，服务端 anchor 已建立，效果不会丢。
  *
@@ -31,11 +31,10 @@ import {
   getFeedback, submitFeedback, deleteFeedback,
   // 采用态（「确认采用此版」）
   adoptRevision,
-  // 总体修改（整份合同总控台）—— 只读汇总 + 结构化方案
-  // 注意：/overview/confirm 当前无业务调用（[纳入方案] 是纯前端会话态，见下方注释），
-  // 因此这里不导入 confirmOverviewProposal，避免死导入。
+  // 总体修改（整份合同总控台）—— 只读汇总 + 结构化方案 + 用户确认落库
+  // 注意：/overview/confirm 是「纳入方案」的**唯一**落库入口（见 toggleIncludeItem）。
   getRevisionOverview, createOverviewProposal, listOverviewProposals,
-  getOverviewProposal,
+  getOverviewProposal, confirmOverviewProposal,
 } from '../api/contract.js'
 import { getTemplates } from '../api/template.js'
 import { riskName, riskLevelLabel } from '../constants/riskTypes.js'
@@ -124,10 +123,12 @@ export function useContractWorkspace() {
   const planError = ref('')
   const proposals = ref([])
   const activeProposalId = ref(null)
-  // 「已纳入方案」= **仅前端会话态**（见文件头注释与 V2.2 定稿）：
-  //   - 不调用 /overview/confirm、不产生 ClauseRevision、不进 DOCX 可导出集合、不计入「已确认修改」；
-  //   - 刷新后丢失属当前版本已知边界，后端没有持久化该工作流状态的位置，不在本轮补接口。
-  const includedItemIds = ref(new Set())
+  // 「已纳入方案」的**唯一权威来源** = 后端 `proposal.confirmed_ids`
+  // （POST /overview/confirm 落库后由 GET /overview/proposals 原样带回）：
+  //   - 点击「纳入方案」→ 调接口 → 成功后刷新方案与汇总 → UI 才显示已纳入；
+  //   - 刷新页面后状态从后端恢复，不再依赖任何前端会话态；
+  //   - 旧实现把 includedItemIds 当本地 Set 维护，刷新即丢、且与真实落库无关，已删除。
+  const confirmingItemId = ref(null)
   // 标准条款模板（用于条款比对的「真实参考条款」；无模板时比对区退化为两栏）
   const referenceTemplates = ref([])
 
@@ -802,8 +803,7 @@ export function useContractWorkspace() {
         return null
       }
       activeProposalId.value = data.proposal_id
-      // 新方案到来 → 上一轮的"已纳入"选择不再适用（它是前端会话态，不跨方案沿用）
-      includedItemIds.value = new Set()
+      // 新方案到来 → 上一轮的「已纳入」不再适用；新方案的 confirmed_ids 由后端返回
       await loadProposals()
       return data
     } catch (e) {
@@ -818,44 +818,106 @@ export function useContractWorkspace() {
     () => proposals.value.find((p) => p.proposal_id === activeProposalId.value) || null,
   )
 
+  /** 当前方案里**已被后端确认落库**的方案项 id 集合（来源：confirmed_ids，字符串比较） */
+  const confirmedItemIds = computed(() => {
+    const p = activeProposal.value
+    const out = new Set()
+    for (const id of p?.confirmed_ids || []) out.add(String(id))
+    return out
+  })
+
+  /** 某一方案项是否已被纳入（= 后端已确认落库；刷新后仍为真） */
+  function isItemConfirmed(item) {
+    return !!item?.id && confirmedItemIds.value.has(String(item.id))
+  }
+
   /**
-   * 「纳入方案」/「取消纳入」—— **纯前端工作流状态**。
+   * 「纳入方案」—— **真实调用 `POST /overview/confirm` 落库**（本轮 P0-4）。
    *
-   * 明确不做的事（V2.2 定稿）：
-   *   - 不调用 /overview/confirm，不创建 ClauseRevision，不进入 DOCX 可导出集合；
-   *   - 不计入「已确认修改 N」；
-   *   - 刷新后丢失（后端没有持久化该状态的位置，本轮不新增接口/字段）。
+   * 语义（**与后端实现严格一致，不再只是前端选中态**）：
+   *   - 后端把该方案项转换成既有安全的 clause / add_clause `ClauseRevision`，
+   *     并置 `adopted=True`（不调 LLM，只做确定性落库）；
+   *   - 因此它会进入合同修改链路，后续下载修订版 DOCX 时可被包含；
+   *   - 幂等：后端对已确认的项返回「请勿重复确认」，不会重复落库；
+   *   - 失败**绝不显示成功**：单项失败原因原样展示，前端状态只在成功刷新后变化。
    *
-   * 它只表示"本轮综合方案里这一项我要处理，准备进专项会话"。
+   * 「取消纳入」只对本轮新生成、**尚未落库**的项开放（本轮前端没有取消落库的入口；
+   * 后端也没有 un-confirm 端点，不新增第二套确认/取消机制）。
+   *
+   * @returns {Promise<boolean>} 是否最终处于「已纳入」状态
    */
-  function toggleIncludeItem(item) {
+  async function toggleIncludeItem(item) {
     if (!item?.id) return false
-    const next = new Set(includedItemIds.value)
-    if (next.has(item.id)) {
-      next.delete(item.id)
-      includedItemIds.value = next
-      return false
+    const id = String(item.id)
+
+    // 已落库 → 不做任何后端写入，仅提示（避免"取消纳入"给人"已撤销落库"的错觉）
+    if (confirmedItemIds.value.has(id)) {
+      ElMessage.info('该修改项已纳入并写入合同修改记录，无法在总控台取消；如不再需要，请到对应专项会话继续调整。')
+      return true
     }
+
     if (!canIncludeProposalItem(item)) {
       ElMessage.warning(proposalBlockingText(item))
       return false
     }
-    next.add(item.id)
-    includedItemIds.value = next
-    return true
+    if (confirmingItemId.value) return false
+
+    const proposalId = activeProposal.value?.proposal_id
+    if (!proposalId) {
+      ElMessage.error('没有可确认的方案（请先生成综合修改方案）')
+      return false
+    }
+
+    confirmingItemId.value = id
+    try {
+      const res = await confirmOverviewProposal(contractId.value, {
+        proposal_id: proposalId,
+        items: [{ id }],
+      })
+      const applied = res?.data?.applied || []
+      const failed = res?.data?.failed || []
+      const ok = applied.some((a) => String(a.id) === id)
+
+      // 先刷新后端真实状态（方案 confirmed_ids / 汇总 / 修订记录），再决定 UI 展示
+      await loadProposals()
+      await Promise.all([loadOverview(), loadRevisions()])
+
+      if (ok) {
+        const rev = applied.find((a) => String(a.id) === id)
+        ElMessage({
+          type: 'success',
+          dangerouslyUseHTMLString: true,
+          message: '已纳入方案：已写入合同修改记录'
+            + (rev?.exportable === false ? '（该修改暂不可导出，需在专项会话确认位置）' : '')
+            + '<br/>如需调整，可在中栏继续修改；下载修订版合同时会包含这条修改。',
+        })
+        return true
+      }
+
+      const reason = failed.find((f) => String(f.id) === id)?.reason
+      ElMessage.error(reason || '纳入失败：后端未应用该修改项')
+      return false
+    } catch (e) {
+      // 失败绝不能显示成成功：只读后端 detail
+      ElMessage.error(e?.response?.data?.detail || '纳入方案失败，请稍后重试')
+      return false
+    } finally {
+      confirmingItemId.value = null
+    }
   }
 
+  /** 当前方案中「已纳入」的项（已落库；来自后端 confirmed_ids） */
   const includedItems = computed(() => {
     const p = activeProposal.value
     if (!p) return []
-    return (p.items || []).filter((it) => includedItemIds.value.has(it.id))
+    return (p.items || []).filter((it) => isItemConfirmed(it))
   })
 
   /**
    * 「去专项会话处理」：把方案项落到它对应的专项会话上。
    *
    * - 已有 target_session_key → 直接切到该会话；
-   * - 新增条款类且无会话 → 打开现有新增条款向导（位置必须用户确认，绝不默认追加末尾）；
+   * - 新增条款类且无会话 → 进入现有「新增条款」内联工作区（位置必须用户确认，绝不默认追加末尾）；
    * - 普通条款修改且无会话 → 落到总体会话并在中栏提示：该修改项还需要先指定位置。
    */
   function gotoProposalItem(item) {
@@ -982,7 +1044,7 @@ export function useContractWorkspace() {
       return
     }
 
-    // ① 总体会话里自然表达「新增…条款」→ 进入新增条款向导（由用户确认位置，绝不默认 append）
+    // ① 总体会话里自然表达「新增…条款」→ 进入新增条款工作区（由用户确认位置，绝不默认 append）
     if (s.key === OVERVIEW_KEY && !ui.refineMode && /(新增|增加|补充|添加).{0,12}?条款/.test(instruction)) {
       ui.input = ''
       openAddWizard({ targetKey: OVERVIEW_KEY, targetScope: 'overview', riskType: '', prefill: instruction })
@@ -994,7 +1056,7 @@ export function useContractWorkspace() {
       const pos = ui.confirmAnchor?.position || s.lastRev?.position
       if (!addPositionOk(pos)) {
         ui.refineMode = false
-        ElMessage.warning('该会话没有可复用的插入位置，请用「新增条款」向导重新确认位置')
+        ElMessage.warning('该会话没有可复用的插入位置，请用「新增条款」重新确认插入位置')
         return
       }
       return submitRevise(s, ui, {
@@ -1011,7 +1073,7 @@ export function useContractWorkspace() {
 
     // ③ 缺失型会话（R09 / 比对缺失，或任何没有可靠原文的条款）：
     //    没有原文就无法建立 anchor，**不能**走 replace（那会产出一条永远导出不了的修订）。
-    //    改为把用户已输入的要求带进「新增条款」向导，由用户确认插入位置——既不禁止处理，
+    //    改为把用户已输入的要求带进「新增条款」工作区，由用户确认插入位置——既不禁止处理，
     //    也不替用户决定位置。
     if (sessionAction(s) === 'add_clause') {
       const pos = s.lastRev?.position
@@ -1104,11 +1166,10 @@ export function useContractWorkspace() {
   }
 
   // ══════════════════════════════════════════════════════════════
-  // 新增条款向导（Phase 6）
+  // 新增条款（Phase 6）—— 状态由右栏内联工作区消费
   // ══════════════════════════════════════════════════════════════
 
   const addWizard = reactive({
-    visible: false,
     step: 1,
     riskType: '',
     riskTypeLabel: '',
@@ -1134,7 +1195,7 @@ export function useContractWorkspace() {
 
   function resetAddWizard() {
     Object.assign(addWizard, {
-      visible: false, step: 1, riskType: '', riskTypeLabel: '', requirement: '',
+      step: 1, riskType: '', riskTypeLabel: '', requirement: '',
       templates: [], legalBasis: [], suggestedPosition: null,
       loading: false, submitting: false, loaded: false,
       targetKey: OVERVIEW_KEY, targetScope: 'overview', targetClauseNo: '',
@@ -1144,15 +1205,18 @@ export function useContractWorkspace() {
   }
 
   /**
-   * 打开新增条款向导。
-   * 注意：`suggested_position` 允许为空，此时**绝不默认 append**，必须由用户显式选择。
+   * 准备一次「新增条款」并切到对应会话（**不开弹窗** —— 新增条款只有一个入口：
+   * 「修改合同」Tab 右栏的内联工作区 InlinePositionPicker）。
    *
-   * @param {boolean} startAtPositionStep 直接从「插入位置」这一步开始（右栏内嵌工作台用：
-   *        需求与 AI 建议已经在对话里出现过，用户点「选择插入位置」时不该再走一遍前两步）。
+   * 调用方拿到的效果 = 填好 addWizard（需求 / 风险类型 / 目标会话）+ 切到该会话，
+   * 右栏随即渲染插入位置选择器。位置**永远由用户显式确认**：`suggested_position`
+   * 允许为空，此时绝不默认 append（见 chooseAddPosition / addPositionOk）。
+   *
+   * @param {boolean} startAtPositionStep 直接把 step 设为「插入位置」这一步（右栏内联工作区
+   *        固定只呈现该步骤；需求与 AI 建议已经在会话里出现过）。
    */
   async function openAddWizard({ targetKey, targetScope, riskType, riskTypeLabel, prefill, clauseNo, startAtPositionStep = false }) {
     resetAddWizard()
-    addWizard.visible = true
     addWizard.riskType = riskType || ''
     addWizard.riskTypeLabel = riskTypeLabel || ''
     addWizard.requirement = prefill || ''
@@ -1161,7 +1225,7 @@ export function useContractWorkspace() {
     addWizard.targetClauseNo = clauseNo || ''
     await reloadAddSuggestion()
     // 直接进位置步骤时，仍需用推荐位置作为**候选**填充 posMode；
-    // 但 confirmedPosition 只在用户点「确认位置」后才成立（见 AddClauseWizard.go3 / go4）。
+    // 但 confirmedPosition 只在用户显式确认位置后才成立（见 chooseAddPosition）。
     addWizard.step = startAtPositionStep ? 3 : 2
     if (startAtPositionStep) {
       const sp = addWizard.suggestedPosition
@@ -1169,12 +1233,7 @@ export function useContractWorkspace() {
     }
   }
 
-  function gotoAddStep3() {
-    if (!String(addWizard.requirement || '').trim()) return
-    addWizard.step = 3
-  }
-
-  /** 按当前已填写的要求重新拉取建议（向导内「生成 AI 建议 / 重新生成」用，不重置其它状态） */
+  /** 按当前已填写的要求重新拉取建议（只读 /add-clause-suggestion，不重置其它状态） */
   async function reloadAddSuggestion() {
     addWizard.loading = true
     try {
@@ -1199,7 +1258,7 @@ export function useContractWorkspace() {
   const addAnchorHeadings = computed(() => headings.value)
 
   // ══════════════════════════════════════════════════════════════
-  // 新增条款右栏工作区（与向导共用同一份 addWizard 状态，不新建第二套系统）
+  // 新增条款右栏工作区（消费上面同一份 addWizard 状态，不新建第二套系统）
   // ══════════════════════════════════════════════════════════════
 
   /**
@@ -1221,9 +1280,7 @@ export function useContractWorkspace() {
    */
   async function ensureAddWorkspace(session) {
     if (!session) return
-    // 幂等：同一会话已经取过参考数据就不再重拉。
-    // 注意**不使用 addWizard.visible 做标记** —— visible 是「弹窗是否打开」，
-    // 右栏工作区不该把弹窗打开（否则从右栏进入新增会话会弹出向导对话框）。
+    // 幂等：同一会话已经取过参考数据就不再重拉（按 targetKey + loaded 判断）。
     if (addWizard.targetKey === session.key && addWizard.loaded) return
     const ui = uiFor(session.key)
     // 会话已有的位置选择（用户之前选过 / 已保存记录上的位置）要在重置后恢复，
@@ -1251,12 +1308,12 @@ export function useContractWorkspace() {
    * 诚实的语义（与后端事实一致）：
    *   - 正文由这次调用生成，**并立即写入一条正式修改记录**（ClauseRevision）；
    *   - 因此**必须已经由用户选定插入位置**才允许触发（不允许默认合同末尾）；
-   *   - 这与既有向导的"确认位置 → 生成并保存"是同一个动作，不是新的生成入口。
+   *   - 这与既有实现的"确认位置 → 生成并保存"是同一个动作，不是新的生成入口。
    */
   async function generateAddDraft(session) {
     if (!session) return
     const ui = uiFor(session.key)
-    // 需求来源优先级：中栏刚输入的内容 → 向导已填内容（由 openAddWorkspace 预填）
+    // 需求来源优先级：中栏刚输入的内容 → 已填内容（由 openAddWorkspace / openAddWizard 预填）
     const req = String(ui.input || '').trim() || String(addWizard.requirement || '').trim()
     if (!req) {
       ElMessage.warning('请先在中栏描述你希望新增的内容，再生成推荐草案')
@@ -1294,7 +1351,7 @@ export function useContractWorkspace() {
   }
 
   // 「在 X 条之前」的换算规则见 workspaceLogic.beforeAnchorOf（后端只支持「某编号条款之后插入」）。
-  // 这里只做「绑定当前合同 headings」的包装，供向导直接调用。
+  // 这里只做「绑定当前合同 headings」的包装，供位置选择器直接调用。
 
   function chooseAddPosition(mode, payload) {
     addWizard.posMode = mode
@@ -1393,8 +1450,6 @@ export function useContractWorkspace() {
       const ui = uiFor(addWizard.targetKey)
       ui.refineMode = true
       ui.confirmAnchor = { ...(ui.confirmAnchor || {}), position: pos }
-      // 只在弹窗流程里关闭弹窗；右栏工作区不走 visible（否则会误关/误开对话框）
-      if (addWizard.visible) addWizard.visible = false
       ElMessage.success('新增条款已保存（下载修订版 DOCX 时按确认位置插入）')
     } catch (e) {
       if (e?.code === 'ECONNABORTED' || /timeout/i.test(e?.message || '')) {
@@ -1503,16 +1558,19 @@ export function useContractWorkspace() {
   }
 
   /**
-   * 某个 session key 是否已被"纳入方案"（前端会话态）。
-   * 两种命中方式：① 当前方案里该 key 被纳入；② 方案项还落在总体会话（target 为空，
-   * 等用户在专项里确认位置）时，用其 clause_no/原文与专项会话对齐。
+   * 某个 session key 是否已被「纳入方案」。
+   *
+   * 判据 = 当前方案里存在**已被后端确认落库**（confirmed_ids 命中）且指向该会话的项。
+   * 不再是前端会话态，因此刷新页面后状态仍然正确。
    */
   function sessionIncluded(key) {
     const p = activeProposal.value
-    if (!p || !includedItemIds.value.size) return false
+    if (!p) return false
+    const confirmed = confirmedItemIds.value
+    if (!confirmed.size) return false
     const k = String(key || '')
     for (const it of p.items || []) {
-      if (!includedItemIds.value.has(it.id)) continue
+      if (!it?.id || !confirmed.has(String(it.id))) continue
       if (it.target_session_key && String(it.target_session_key) === k) return true
     }
     return false
@@ -1873,13 +1931,13 @@ export function useContractWorkspace() {
     revisions.value = []
     revisionsError.value = ''
     revisionsLoading.value = false
-    // 总控台：只读汇总 + 方案列表；「已纳入方案」是前端会话态，切合同必须清空
+    // 总控台：只读汇总 + 方案列表；「已纳入方案」来自后端 confirmed_ids，切合同必须整体清空
     overview.value = null
     overviewError.value = ''
     overviewLoading.value = false
     proposals.value = []
     activeProposalId.value = null
-    includedItemIds.value = new Set()
+    confirmingItemId.value = null
     planError.value = ''
     planLoading.value = false
     referenceTemplates.value = []
@@ -1960,17 +2018,17 @@ export function useContractWorkspace() {
     overview, overviewLoading, overviewError, loadOverview,
     proposals, loadProposals, activeProposal, activeProposalId,
     generateProposal, planLoading, planError,
-    includedItemIds, includedItems, toggleIncludeItem, gotoProposalItem, sessionIncluded,
+    confirmedItemIds, isItemConfirmed, confirmingItemId, includedItems, toggleIncludeItem,
+    gotoProposalItem, sessionIncluded,
     modificationPoints, modificationCounts, confirmedCount, isSessionExportable,
     sessionModificationState, referenceTextFor, comparisonLayoutFor, activeLocateCandidates,
     hasConfirmedLocation,
     proposalItemKind, proposalItemTitle, canIncludeProposalItem, proposalBlockingText, positionText,
-    // 新增条款向导
-    addWizard, openAddWizard, gotoAddStep3, reloadAddSuggestion, chooseAddPosition,
+    // 新增条款（唯一入口 = 右栏内联工作区；addWizard 是两边共用的同一份状态）
+    addWizard, openAddWizard, reloadAddSuggestion, chooseAddPosition,
     beforeAnchorOf: (num) => beforeAnchorOf(headings.value, num),
     runAddLocate, chooseAddLocateCandidate, submitAddClause, resetAddWizard,
     addAnchorHeadings,
-    // 新增条款右栏工作区（共用同一份 addWizard 状态）
     addPositionCtx, ensureAddWorkspace, openAddWorkspace, generateAddDraft, canGenerateAddDraft,
     // 上下文
     activeContextItems,

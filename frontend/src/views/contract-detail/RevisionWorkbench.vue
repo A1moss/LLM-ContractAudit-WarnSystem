@@ -553,7 +553,10 @@
       </aside>
     </div>
 
-    <AddClauseWizard :ws="ws" />
+    <!-- 新增条款向导弹窗已移除：本文件的右栏内联工作区（InlinePositionPicker）
+         是「新增条款」的唯一入口，它的 v-if="mode === 'dialog'" 因无人传入 mode 而永不渲染，
+         属于死代码。新增条款的状态与位置规则仍全部由 useContractWorkspace 提供，
+         没有第二套实现。 -->
   </div>
 </template>
 
@@ -561,7 +564,6 @@
 import { computed, ref, watch, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import LocateClausePanel from './LocateClausePanel.vue'
-import AddClauseWizard from './AddClauseWizard.vue'
 import InlinePositionPicker from './InlinePositionPicker.vue'
 import ClauseDiffView from './ClauseDiffView.vue'
 import OverviewPlanPanel from './OverviewPlanPanel.vue'
@@ -902,6 +904,16 @@ async function reloadAll() {
   await Promise.all([props.ws.loadRevisions(), props.ws.loadOverview(), props.ws.loadProposals()])
   ElMessage.success('已刷新')
 }
+/**
+ * 「新增其它条款」：在同一合同里再起一条新增条款。
+ *
+ * 直接进右栏内联新增工作区（= 本组件里唯一的「新增条款」入口）：
+ * 把本次预填的要求放进中栏输入框，再让 openAddWorkspace 把它带入 addWizard，
+ * 用户在右栏 InlinePositionPicker 里必须显式选定插入位置后才能生成。
+ *
+ * 不再调用 openAddWizard：它只会把 addWizard.step 设为 2（「AI 建议」步骤），
+ * 而右栏内联工作区固定只呈现第 3 步（插入位置），调用它反而会把状态设成不可用的步骤。
+ */
 function openAddForSession() {
   const item = s.value
   if (!item) return
@@ -912,14 +924,9 @@ function openAddForSession() {
     : item.cmp
       ? `${item.cmp.title || '缺失条款'}：${(item.cmp.completion || '').trim() || '请依据标准范本起草该条款'}`
       : (item.lastRev ? displayInstruction(item.lastRev.instruction) : '')
-  props.ws.openAddWizard({
-    targetKey: item.key,
-    targetScope: 'clause',
-    riskType: item.risk?.risk_type || item.cmp?.title || '',
-    riskTypeLabel: item.risk ? riskName(item.risk.risk_type) : (item.cmp?.title || ''),
-    clauseNo: item.clauseNo ? String(item.clauseNo) : '',
-    prefill,
-  })
+  const ui = props.ws.uiFor(item.key)
+  ui.input = prefill
+  props.ws.openAddWorkspace(item)
 }
 async function copyText(t) {
   try {

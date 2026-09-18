@@ -315,8 +315,9 @@
       </section>
 
       <!-- ══════════════════════════════════════════════════════════════
-           F 操作区 —— 只保留真实存在的两个入口
-           后端没有报告导出 / 模板配置能力，因此这里不放任何占位按钮
+           F 操作区 —— 只保留真实存在的入口
+           「导出 PDF 报告」属于完整审核报告页（AuditReportDetail），本 Tab 不重复放置导出按钮；
+           本 Tab 只提供「查看完整审核报告 / 去修改合同」两个真实入口。
            ══════════════════════════════════════════════════════════════ -->
       <section class="rpt-actions">
         <div class="rpt-actions-l">
@@ -326,6 +327,7 @@
         <div class="rpt-actions-r">
           <span v-if="auditTime">审核时间 {{ auditTime }}</span>
           <span v-if="modeLabel">审核方式 {{ modeLabel }}</span>
+          <span v-if="statusLabel">合同状态 {{ statusLabel }}</span>
         </div>
       </section>
 
@@ -379,7 +381,7 @@ import {
 } from '../../constants/riskTypes.js'
 import {
   CMP_COLORS, REPORT_LEVELS,
-  groupRisksByLevel, sortByConfidence, stackSegments, auditModeLabel,
+  groupRisksByLevel, sortByConfidence, stackSegments, auditModeLabel, contractStatusLabel,
   scoreColor, amountParts, performancePeriodText, priorityLabel,
 } from '../../constants/reportTokens.js'
 import { typeLabel } from '../../constants/contractTypes.js'
@@ -601,6 +603,13 @@ const riskGroups = computed(() => groupRisksByLevel(props.ws.riskItems).map((g) 
 
 const auditTime = computed(() => (props.ws.report?.created_at ? formatTime(props.ws.report.created_at) : ''))
 const modeLabel = computed(() => auditModeLabel(props.ws.contract?.audit_mode))
+
+/**
+ * 合同状态（`contracts.status`）—— 生命周期状态，**不是审批状态**。
+ * 与 AuditReportDetail.vue / ContractList.vue 统一用同一名称「合同状态」，
+ * 避免同一个字段在不同页面被叫成审核状态 / 审批状态。
+ */
+const statusLabel = computed(() => contractStatusLabel(props.ws.contract?.status))
 
 /**
  * 判断把握度 → 百分比整数。

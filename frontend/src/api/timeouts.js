@@ -24,3 +24,7 @@ export const LOCATE_TIMEOUT = 20_000
 // POST /contracts/{id}/overview/plan：单次 LLM，但 prompt 含整份合同正文（最长约 24000 字）
 // + 全部专项会话结果，输入远大于 /revise；给 180s 覆盖长合同与限流重试。
 export const OVERVIEW_PLAN_TIMEOUT = 180_000
+
+// GET /contracts/{id}/audit-report/pdf：后端纯排版（不调 LLM / 不查 RAG / 不重算指标），
+// 长合同（十页以上）实测约 1–3s；给 60s 覆盖冷启动与超大报告。
+export const REPORT_PDF_TIMEOUT = 60_000

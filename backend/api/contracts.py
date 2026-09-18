@@ -6,9 +6,10 @@ import time
 import uuid
 import mimetypes
 import html
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, status, BackgroundTasks
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import func, case, or_, and_
 from sqlalchemy.exc import OperationalError
@@ -35,6 +36,7 @@ from ai.taxonomy import business_tag_names
 from models.audit_record import AuditRecord
 from models.template import Template
 from services.docx_converter import docx_to_pdf
+from services import report_pdf
 from models.audit_report import AuditReport
 from models.clause_revision import ClauseRevision
 from services.docx_reviser import build_revised_docx
@@ -1676,6 +1678,86 @@ def get_audit_report(
             "created_at": _iso(report.created_at),
         },
     }
+
+@router.get("/{contract_id}/audit-report/pdf")
+def export_audit_report_pdf(
+    contract_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """导出正式《合同智能审核报告》PDF（**只读**）。
+
+    数据来源与权限边界：
+    - 权限完全复用 ``GET /{id}/audit-report``：同一个 ``_can_view_contract``
+      （上传者只看自己的合同；reviewer/approver/admin 可看工作流内的全部合同；已删除合同一律 404），
+      **不新增任何第二套权限判断**；
+    - 数据全部取自已落库的真实行：contracts / audit_reports（最新一份）/ audit_records（最新批次，
+      与 ``GET /{id}/audit-result`` 同一口径：按 created_at + id 取最新 audit_batch），
+      再由 ``services.report_pdf`` 纯排版成 PDF；
+    - **不调用 LLM / RAG / 规则引擎**，**不重算**评分与风险计数（直接取报告快照），
+      **不写任何表**（不新建审核记录、不改变 contract.status 与 result_status）；
+    - 报告里**不出现**审核人 / 报告编号 / 报告版本 / 审批状态等数据库不存在字段。
+    """
+    c = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not c or not _can_view_contract(current_user, c):
+        raise HTTPException(status_code=404, detail="contract not found")
+
+    report = (
+        db.query(AuditReport)
+        .filter(AuditReport.contract_id == contract_id)
+        .order_by(AuditReport.created_at.desc())
+        .first()
+    )
+
+    # 只取最新批次（与 GET /audit-result 完全同一口径，避免并发审核多批次混杂）
+    latest = (
+        db.query(AuditRecord.audit_batch)
+        .filter(AuditRecord.contract_id == contract_id)
+        .order_by(AuditRecord.created_at.desc(), AuditRecord.id.desc())
+        .first()
+    )
+    records = []
+    if latest:
+        records = (
+            db.query(AuditRecord)
+            .filter(AuditRecord.contract_id == contract_id, AuditRecord.audit_batch == latest[0])
+            .order_by(
+                case(
+                    (AuditRecord.risk_level == "high", 3),
+                    (AuditRecord.risk_level == "medium", 2),
+                    (AuditRecord.risk_level == "low", 1),
+                    else_=0,
+                ).desc()
+            )
+            .all()
+        )
+
+    if not report and not records:
+        # 与 GET /audit-report 一致的业务错误语义：没有审核结果就没有报告可导出
+        raise HTTPException(status_code=404, detail="no audit report found")
+
+    try:
+        data = report_pdf.build_report_data(c, report, records)
+        pdf_bytes = report_pdf.build_report_pdf(data)
+    except Exception as e:  # 导出失败必须给出明确错误，不能返回半截文件
+        logger.exception("审核报告 PDF 生成失败 contract=%s: %s", contract_id, e)
+        raise HTTPException(status_code=500, detail=f"审核报告 PDF 生成失败：{e}")
+
+    doc_name = report_pdf.safe_filename(c.file_name or f"合同{contract_id}")
+    filename = f"{doc_name}_审核报告.pdf"
+    # 中文文件名用 RFC 5987 编码，同时给出 ASCII 回退名（跨浏览器/客户端一致）
+    ascii_name = f"contract-{contract_id}-audit-report.pdf"
+    quoted = quote(filename, safe="")
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quoted}",
+            "Content-Length": str(len(pdf_bytes)),
+            "Cache-Control": "no-store",
+        },
+    )
+
 
 @router.post("/{contract_id}/compare")
 def compare_contract_clauses(
