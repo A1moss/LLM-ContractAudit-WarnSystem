@@ -36,13 +36,16 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
-_SERVICE_DIR = _BACKEND_DIR.parent.parent
 
 # 默认语料（顺序即优先级；缺失的会跳过并告警）
+# 注意：第三份「合同范本样本集」原先指向**仓库之外**的 `<仓库上一级>/03_数据集/测试集/testset.json`。
+# 该文件已随源码迁入仓库（backend/ai/rag/resources/contract_templates_source.json，
+# 与 ai/rag/vector_store.py 的 TESTSET_PATH 保持同一份资源），此处同步指向仓库内路径 ——
+# 否则本闸会静默少掉一份语料（它只告警不阻断，属"悄悄失效"）。
 DEFAULT_CORPUS_PATHS = [
     _BACKEND_DIR / "evaluate" / "realtest.json",
     _BACKEND_DIR / "evaluate" / "classification_test.json",
-    _SERVICE_DIR / "03_数据集" / "测试集" / "testset.json",
+    _BACKEND_DIR / "ai" / "rag" / "resources" / "contract_templates_source.json",
 ]
 
 # 每份语料里承载正文的字段名（按出现顺序探测）

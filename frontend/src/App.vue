@@ -52,6 +52,9 @@
       <!-- 右侧占位 -->
       <div class="nav-spacer" />
 
+      <!-- AI 服务预热状态胶囊 -->
+      <AiWarmPill />
+
       <!-- 登录状态：个人中心下拉 -->
       <el-sub-menu v-if="isLoggedIn" index="user-sub" popper-class="user-popper">
         <template #title>
@@ -101,6 +104,7 @@ import {
   HomeFilled, FolderOpened, Checked, User,
   SwitchButton, ArrowLeft, Document, Files, Setting,
 } from '@element-plus/icons-vue'
+import AiWarmPill from './components/AiWarmPill.vue'
 
 const router = useRouter()
 const route = useRoute()

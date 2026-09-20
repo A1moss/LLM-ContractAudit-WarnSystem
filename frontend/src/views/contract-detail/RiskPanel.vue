@@ -161,10 +161,13 @@
       </div>
     </div>
 
-    <!-- 反馈标注（沿用现有组件与现有反馈接口） -->
+    <!-- 反馈标注（沿用现有组件与现有反馈接口）
+         紧凑模式：只保留 等级 + 风险码/名称 + 一句摘要 + 操作按钮，
+         完整风险详情由上方风险卡片负责展示，避免同一批风险完整渲染两遍。 -->
     <FeedbackPanel
       v-if="ws.riskItems.length"
       ref="feedbackRef"
+      compact
       :risk-items="ws.riskItems"
       :contract-id="ws.contract?.id"
       :loaded-feedbacks="ws.loadedFeedbacks"

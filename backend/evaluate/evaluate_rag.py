@@ -13,14 +13,15 @@ from pathlib import Path
 from collections import defaultdict
 
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
-_SERVICE_DIR = _BACKEND_DIR.parent.parent
 sys.path.insert(0, str(_BACKEND_DIR))
 
 from ai.classifier.rag_classifier import classify_by_rag
 from ai.taxonomy import ENABLED_TYPES
 
 TESTSET_REAL = Path(__file__).resolve().parent / "classification_test.json"  # 分类正式测试集（147 份，Gold 冻结）
-TESTSET_FALLBACK = _SERVICE_DIR / "03_数据集" / "测试集" / "testset.json"  # 范本样本集（与检索库同源，仅冒烟参考）
+# 范本样本集：与生产检索库用**同一份资源**（已随源码迁入仓库，不再指向仓库外），仅冒烟参考。
+# 注意：这是「建库源」，与上面的正式分类测试集**不同源**，绝不可互相替代。
+TESTSET_FALLBACK = _BACKEND_DIR / "ai" / "rag" / "resources" / "contract_templates_source.json"
 PRED_FILE = Path(__file__).resolve().parent / "rag_predictions.json"  # 预测快照（可离线复核）
 
 

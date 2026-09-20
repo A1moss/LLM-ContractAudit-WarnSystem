@@ -1,0 +1,52 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# A24 合同智能审核系统 —— Web 镜像（Vue 3 静态托管）
+#
+# ⚠️ 状态：本文件由开发机（未安装 Docker）静态编写，**尚未经过 docker build 验证**。
+#    正式交付前必须在具备 Docker 的机器上完成构建与干净环境验收。
+#
+# 为什么必须是独立的第二个容器：
+#   后端 FastAPI **没有** 静态资源挂载（全仓无 StaticFiles / mount，只有用于文件下载的
+#   FileResponse），因此 frontend/dist 必须由一个独立的静态服务进程提供。
+#
+# 为什么端口必须是 5173（不能改成 80）：
+#   frontend/src/utils/request.js:6   baseURL = 'http://localhost:8080/api'   （绝对地址）
+#   backend/config.py:18              CORS_ORIGINS 默认 'http://localhost:5173'
+#   两边都按 5173 写死，改成 80 会直接跨域失败。
+#
+# 为什么需要 SPA fallback（serve -s）：
+#   frontend/src/router/index.js:1,83 使用 createWebHistory()（HTML5 history 模式），
+#   刷新/直达 /contracts/12 这类路径必须回退到 index.html，否则 404。
+#
+# 构建（在仓库根目录执行）：
+#   docker build -f Dockerfile.web -t a24-web:1.0 .
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── Stage 1：构建前端产物（Node 20 只用于构建，不进最终镜像）──────────────
+FROM node:20-alpine AS build
+
+WORKDIR /build
+
+# 先只拷 lock + manifest，最大化利用层缓存
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+# 再拷源码并构建
+COPY frontend/ ./
+RUN npm run build
+
+# 构建期自检：产物必须存在
+RUN test -f /build/dist/index.html || (echo "ERROR: 前端构建产物缺失 /build/dist/index.html" && exit 1)
+
+# ── Stage 2：只负责静态托管 ──────────────────────────────────────────────
+FROM node:20-alpine
+
+# 轻量静态服务器（构建期安装，运行期无需联网）。
+# 说明：这不是引入 Nginx 或任何反代/中间件，只是把 dist 端出去的最小静态服务。
+RUN npm install -g serve@14.2.4
+
+COPY --from=build /build/dist /site
+
+EXPOSE 5173
+
+# -s = single page application 模式（未知路径回退 index.html，适配 createWebHistory）
+CMD ["serve", "-s", "/site", "-l", "5173"]

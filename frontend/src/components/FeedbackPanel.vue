@@ -1,56 +1,73 @@
 <template>
-  <div class="feedback-panel">
+  <div class="feedback-panel" :class="{ 'feedback-panel-compact': compact }">
+    <!-- 区域标题：仅紧凑模式显示。
+         作用：明确这里不是"第二份风险清单"，而是对上方风险的反馈标注。
+         默认模式（compact=false）不渲染此标题，保持其它调用点渲染行为不变。 -->
+    <div v-if="compact" class="feedback-compact-head">
+      <span class="t">反馈标注</span>
+      <span class="d">对上方识别出的风险进行反馈标注，用于后续优化。</span>
+    </div>
+
     <el-empty v-if="!items.length" description="暂无风险项需要反馈" />
 
     <div
       v-for="item in items"
       :key="item.id"
       class="risk-item"
-      :class="{ 'risk-processed': isProcessed(item) }"
+      :class="{ 'risk-processed': isProcessed(item), 'risk-item-compact': compact }"
     >
       <div class="risk-header">
         <div class="risk-meta">
           <RiskBadge :level="levelLabel(item.risk_level || item.level)" size="small" />
+          <span v-if="compact && item.risk_type" class="risk-code">{{ item.risk_type }}</span>
           <span class="risk-type">{{ riskTypeLabel(item.risk_type) }}</span>
-          <span class="risk-method" v-if="item.detection_method">
-            <el-tag size="small" type="info" effect="plain">
-              {{ methodLabel(item.detection_method) }}
-            </el-tag>
-          </span>
-          <span class="risk-confidence" v-if="item.confidence != null">
-            置信度 {{ (item.confidence * 100).toFixed(0) }}%
-          </span>
+          <!-- 检测方式 / 置信度：紧凑模式不重复（上方风险列表已展示） -->
+          <template v-if="!compact">
+            <span class="risk-method" v-if="item.detection_method">
+              <el-tag size="small" type="info" effect="plain">
+                {{ methodLabel(item.detection_method) }}
+              </el-tag>
+            </span>
+            <span class="risk-confidence" v-if="item.confidence != null">
+              置信度 {{ (item.confidence * 100).toFixed(0) }}%
+            </span>
+          </template>
         </div>
+        <!-- 紧凑模式：仅一句简短摘要（截断）；完整条款/理由/建议由上方风险详情负责展示 -->
+        <div v-if="compact" class="risk-compact-summary">{{ compactSummary(item) }}</div>
       </div>
 
-      <div class="risk-clause" v-if="item.clause_text">
-        <span class="label">涉及条款：</span>
-        <span class="text">{{ item.clause_text }}</span>
-      </div>
-      <div class="risk-reason" v-if="item.reason">
-        <span class="label">判定理由：</span>
-        <span class="text">{{ item.reason }}</span>
-      </div>
-      <div class="risk-suggestion" v-if="item.suggestion">
-        <span class="label">修改建议：</span>
-        <span class="text">{{ item.suggestion }}</span>
-      </div>
-      <!-- v6.5 建议层结构化字段（BUG-021） -->
-      <div class="risk-recommendation" v-if="item.risk_description">
-        <span class="label">风险说明：</span>
-        <span class="text">{{ item.risk_description }}</span>
-      </div>
-      <div class="risk-recommendation" v-if="item.example">
-        <span class="label">修改示例：</span>
-        <span class="text">{{ item.example }}</span>
-      </div>
-      <div class="risk-recommendation" v-if="item.legal_basis">
-        <span class="label">法律依据：</span>
-        <span class="text">{{ item.legal_basis }}</span>
-      </div>
-      <div class="risk-grounding-warning" v-if="item.grounding_warning">
-        ⚠ 该建议含未经证据核实的数值，请结合合同原文确认。
-      </div>
+      <!-- 完整风险详情：仅默认（非紧凑）模式渲染，避免同一批风险被完整展示两遍 -->
+      <template v-if="!compact">
+        <div class="risk-clause" v-if="item.clause_text">
+          <span class="label">涉及条款：</span>
+          <span class="text">{{ item.clause_text }}</span>
+        </div>
+        <div class="risk-reason" v-if="item.reason">
+          <span class="label">判定理由：</span>
+          <span class="text">{{ item.reason }}</span>
+        </div>
+        <div class="risk-suggestion" v-if="item.suggestion">
+          <span class="label">修改建议：</span>
+          <span class="text">{{ item.suggestion }}</span>
+        </div>
+        <!-- v6.5 建议层结构化字段（BUG-021） -->
+        <div class="risk-recommendation" v-if="item.risk_description">
+          <span class="label">风险说明：</span>
+          <span class="text">{{ item.risk_description }}</span>
+        </div>
+        <div class="risk-recommendation" v-if="item.example">
+          <span class="label">修改示例：</span>
+          <span class="text">{{ item.example }}</span>
+        </div>
+        <div class="risk-recommendation" v-if="item.legal_basis">
+          <span class="label">法律依据：</span>
+          <span class="text">{{ item.legal_basis }}</span>
+        </div>
+        <div class="risk-grounding-warning" v-if="item.grounding_warning">
+          ⚠ 该建议含未经证据核实的数值，请结合合同原文确认。
+        </div>
+      </template>
 
       <!-- 未处理：显示四个操作按钮 -->
       <div v-if="!isProcessed(item)" class="risk-actions">
@@ -198,6 +215,14 @@ const props = defineProps({
   contractId: { type: [Number, String], default: null },
   /** API 加载的已有反馈记录: [{ record_id, action_type, comment, corrected_risk? }] */
   loadedFeedbacks: { type: Array, default: () => [] },
+  /**
+   * 紧凑模式（默认 false）：
+   * 只保留「风险等级 + 风险码/名称 + 一句简短摘要 + 反馈操作按钮」，
+   * 完整条款/判定理由/修改建议/风险说明/修改示例/法律依据由外部的风险列表展示，
+   * 避免同一批风险在同一页面被完整渲染两遍（4 条看起来像 8 条）。
+   * 默认 false ⇒ 其它调用点的渲染行为保持不变。
+   */
+  compact: { type: Boolean, default: false },
 })
 
 const emit = defineEmits([
@@ -226,6 +251,18 @@ const reasonsForFalsePositive = REASON_OPTIONS
 
 function reasonLabel(v) {
   return REASON_OPTIONS.find(r => r.value === v)?.label || v
+}
+
+// ── 紧凑模式：一句简短摘要 ──
+// 只取一个字段并截断为一句，用于让用户分辨"正在给哪一条风险做标注"；
+// 完整内容由上方风险详情区域负责展示，这里刻意不重复（也不通过 title 暴露全文）。
+const COMPACT_SUMMARY_MAX = 52
+function compactSummary(item) {
+  const raw = String(
+    (item && (item.clause_text || item.clause || item.reason || item.suggestion)) || '',
+  ).replace(/\s+/g, ' ').trim()
+  if (!raw) return '（该风险未返回条款原文）'
+  return raw.length > COMPACT_SUMMARY_MAX ? raw.slice(0, COMPACT_SUMMARY_MAX) + '…' : raw
 }
 
 watch(() => props.riskItems, (val) => { items.value = val || [] }, { immediate: true, deep: true })
@@ -395,6 +432,47 @@ defineExpose({
 
 <style scoped>
 .feedback-panel { width: 100%; }
+
+/* ── 紧凑模式：把面板降级为"反馈标注"控件行，不再复述风险详情 ── */
+.feedback-panel-compact { margin-top: 4px; }
+.feedback-compact-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 16px 0 10px;
+  padding-top: 12px;
+  border-top: 1px solid #ebeef5;
+}
+.feedback-compact-head .t { font-size: 14px; font-weight: 600; color: #303133; }
+.feedback-compact-head .d { font-size: 12px; color: #909399; }
+.risk-item-compact {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+/* 紧凑行：标题区改为上下两行（元信息 + 摘要），让出右侧空间给操作按钮 */
+.risk-item-compact .risk-header { display: block; flex: 1 1 260px; min-width: 0; margin-bottom: 0; }
+.risk-item-compact .risk-actions { flex: 0 0 auto; margin-top: 0; }
+/* 已标注：结果块独占一行，保证"状态 + 撤销 + 人工意见"可读 */
+.risk-item-compact .feedback-result { flex: 1 1 100%; margin-top: 8px; }
+.risk-code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  color: #909399;
+}
+.risk-compact-summary {
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: #606266;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .risk-item {
   border: 1px solid #e4e7ed;

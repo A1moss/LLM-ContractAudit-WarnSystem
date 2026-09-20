@@ -1,0 +1,112 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# A24 合同智能审核系统 —— API 镜像（FastAPI + Embedded Chroma + SQLite）
+#
+# ⚠️ 状态：本文件由开发机（未安装 Docker）静态编写，**尚未经过 docker build 验证**。
+#    正式交付前必须在具备 Docker 的机器上完成构建与干净环境验收。
+#
+# 架构约束（不得为了 Docker 改变业务架构）：
+#   · 仍是 FastAPI + uvicorn，端口 8080
+#   · 仍是 **嵌入式** ChromaDB PersistentClient（不引入独立 Chroma Server）
+#   · 仍是 SQLite（不引入 MySQL / Redis）
+#   · 不修改任何业务代码 / RAG 分类逻辑 / 风险规则
+#
+# 镜像内固化（评委无需自行安装）：
+#   · Python 运行依赖（backend/requirements.txt，去掉 Windows-only 的 pywin32）
+#   · CPU 版 torch（避免 Linux 默认拉入 CUDA/NVIDIA 包，可省约 2 GB）
+#   · embedding 模型 shibing624/text2vec-base-chinese（构建期下载进镜像）
+#   · **预构建生产向量库 backend/chroma_data**（含 contract_templates 363 条）
+#   · RapidOCR 3.9.2 + ONNX Runtime 1.23.2（OCR 模型随 wheel 自带，无需联网）
+#   · reportlab（PDF 报告；中文走内置 CID 字体 STSong-Light，无需系统字体）
+#   · pdfplumber / pypdfium2（PDF 读取与栅格化）、python-docx（DOCX 修订与导出）
+#
+# 构建（在仓库根目录执行，无任何仓库外依赖）：
+#   docker build -f Dockerfile.api -t a24-api:1.0 .
+#
+# 说明：合同范本建库源已随源码迁入仓库
+#   （backend/ai/rag/resources/contract_templates_source.json），
+#   由下面的 `COPY backend/` 一并带入镜像，因此**不再需要**额外 build context，
+#   也不再依赖仓库外的 03_数据集/测试集/。
+# ═══════════════════════════════════════════════════════════════════════════
+FROM python:3.11-slim
+
+ARG TORCH_CPU_INDEX=https://download.pytorch.org/whl/cpu
+ARG CHROMADB_VERSION=1.5.9
+ARG HF_ENDPOINT_ARG=https://huggingface.co
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    HF_HOME=/opt/hf-cache \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    APP_ROOT=/app/LLM-ContractAudit-WarnSystem
+
+# ── 系统库 ────────────────────────────────────────────────────────────────
+# libgl1 / libglib2.0-0：rapidocr 依赖 opencv_python（GUI 版），缺 libGL.so.1 时
+#                        `from rapidocr import RapidOCR` 会直接 ImportError
+# libgomp1            ：torch / onnxruntime 的 OpenMP 运行时
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgl1 \
+        libglib2.0-0 \
+        libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR ${APP_ROOT}/backend
+
+# ── 1) 依赖 ──────────────────────────────────────────────────────────────
+COPY backend/requirements.txt ./requirements.txt
+
+# CPU 版 torch 先装：Linux 上直接 `pip install torch` 会拉入 nvidia-* CUDA 包（镜像 +2 GB）
+# --extra-index-url 兜底 torch 的纯 Python 依赖（sympy / networkx / filelock 等）
+# 若该索引在当前网络不可达：删掉 --index-url 部分，退回默认 PyPI 安装（镜像会大很多但能构建）
+RUN pip install --index-url "${TORCH_CPU_INDEX}" --extra-index-url https://pypi.org/simple torch
+
+# chromadb 固定到与镜像内预构建向量库 schema 对齐的版本
+# （实测 backend/chroma_data 已是 chromadb 1.x 新 schema：collections.config_json_str /
+#   schema_str、embeddings_queue、FTS5 表；requirements.txt 里写的是 >=0.4.0，若不锁定，
+#   未来解析到不兼容版本会导致向量库读不出来）
+RUN pip install "chromadb==${CHROMADB_VERSION}"
+
+# 其余依赖：构建期过滤掉 Windows-only 的 pywin32（Linux 上无 wheel，会直接安装失败）
+# —— 只生成临时文件，不修改仓库里的 requirements.txt
+RUN grep -viE '^[[:space:]]*pywin32' requirements.txt > /tmp/requirements.docker.txt \
+    && cat /tmp/requirements.docker.txt \
+    && pip install -r /tmp/requirements.docker.txt
+
+# ── 2) embedding 模型：构建期写入镜像 ────────────────────────────────────
+# 运行期代码默认 HF_HUB_OFFLINE=1（ai/rag/vector_store.py:12-13），因此模型**必须**在镜像里。
+# 这里用 huggingface_hub 官方快照方式下载（会生成标准 cache 布局），比直接 COPY 宿主机
+# Windows 缓存更可靠（后者 snapshots/ 下全是符号链接，跨平台 COPY 容易变断链）。
+ARG EMBED_MODEL=shibing624/text2vec-base-chinese
+RUN HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 HF_ENDPOINT="${HF_ENDPOINT_ARG}" \
+      python -c "from huggingface_hub import snapshot_download; print(snapshot_download('${EMBED_MODEL}'))"
+
+# ── 3) 业务源码 + 预构建向量库 ───────────────────────────────────────────
+# .dockerignore 已排除 venv / node_modules / contract.db / backend/data / __pycache__ 等，
+# 但**保留** backend/chroma_data（预构建向量库必须进镜像）。
+# 同时带入 backend/ai/rag/resources/contract_templates_source.json ——
+# 它既是 contract_templates 的建库源，也让「向量库万一丢失」时可以自我重建，
+# 而不是静默退化成 rag-fallback-llm。
+COPY backend/ ${APP_ROOT}/backend/
+
+# ── 5) 构建期自检：把「运行期才暴露」的问题提前到构建期失败 ───────────────
+#  5.1 预构建向量库必须在镜像里，且必须含关键集合
+RUN python -c "import sqlite3;c=sqlite3.connect('file:chroma_data/chroma.sqlite3?mode=ro',uri=True);n=sorted(r[0] for r in c.execute('SELECT name FROM collections'));print('Chroma collections =',n);assert 'contract_templates' in n,'预构建向量库缺少 contract_templates（分类 RAG 会失效）';assert 'laws' in n,'预构建向量库缺少 laws'"
+#  5.2 embedding 模型必须能在离线模式下加载并产出 768 维向量
+RUN python -c "from sentence_transformers import SentenceTransformer as S;m=S('shibing624/text2vec-base-chinese');v=m.encode(['离线自检']);print('embedding dim =',v.shape[-1]);assert v.shape[-1]==768,'embedding 维度异常'"
+#  5.3 OCR 引擎必须能初始化（缺 libGL 会在这里就构建失败）
+RUN python -c "from rapidocr import RapidOCR;RapidOCR();print('RapidOCR init OK')"
+#  5.4 reportlab 中文 CID 字体必须可注册（PDF 报告中文依赖它）
+RUN python -c "from reportlab.pdfbase import pdfmetrics;from reportlab.pdfbase.cidfonts import UnicodeCIDFont;pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light'));print('reportlab CJK CID font OK')"
+
+# ── 6) 运行 ──────────────────────────────────────────────────────────────
+# 容器内数据目录（运行时由 compose 用 named volume 挂载；不挂也能跑，只是数据不持久）
+# 这里写绝对路径而不复用 ${APP_ROOT}，避免 VOLUME 的变量展开在不同 Docker 版本上行为差异。
+VOLUME ["/data", "/app/LLM-ContractAudit-WarnSystem/backend/data", "/app/LLM-ContractAudit-WarnSystem/backend/chroma_data"]
+
+EXPOSE 8080
+
+# 与 scripts/start_backend.bat 完全一致：WORKDIR 必须在 backend/（main.py 用的是
+# `from config import ...` / `from ai.rag...` 这类裸绝对导入）
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]

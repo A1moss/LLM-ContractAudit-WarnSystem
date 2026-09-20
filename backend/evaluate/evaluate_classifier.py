@@ -28,9 +28,9 @@ sys.path.insert(0, str(_BACKEND_DIR))
 
 from ai.classifier.classifier import classify_contract, CONTRACT_TYPES  # noqa: E402
 
-_SERVICE_DIR = _BACKEND_DIR.parent.parent  # 服务外包/（03_数据集 在这一层）
+# 范本样本集：与生产检索库用**同一份资源**（已随源码迁入仓库，不再指向仓库外），仅冒烟参考。
 TESTSET_REAL = Path(__file__).resolve().parent / "realtest.json"   # 真实合同测试集（人工标注，跨域泛化）
-TESTSET_FALLBACK = _SERVICE_DIR / "03_数据集" / "测试集" / "testset.json"  # 范本样本集（仅冒烟参考）
+TESTSET_FALLBACK = _BACKEND_DIR / "ai" / "rag" / "resources" / "contract_templates_source.json"
 
 
 def _resolve_testset():

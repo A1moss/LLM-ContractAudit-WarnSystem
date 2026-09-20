@@ -21,6 +21,11 @@ reportlab>=4.0.0
 openai>=1.0.0
 chromadb>=0.4.0
 sentence-transformers>=2.2.0
+# A2A 最小闭环的 Agent→Agent 真实 HTTP 传输（ai/a2a/transport.py）。
+# 说明：httpx **本来就已存在于本环境**（由 chromadb / huggingface_hub / openai
+# 传递带入，FastAPI TestClient 亦依赖它），此处只是把它**显式声明**出来，
+# 避免"隐式依赖某个传递依赖恰好提供 HTTP 客户端"。不新增运行时负担。
+httpx>=0.27.0
 
 email-validator>=2.0.0
 pywin32>=306

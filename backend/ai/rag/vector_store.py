@@ -43,15 +43,24 @@ COLLECTIONS = {
     "contract_templates": "合同范本分类库",
 }
 
-# ── 建库源 与 评测测试集 分离（防同源泄漏，见 02_项目文档/检索库改造交接.md）──
-# TESTSET_PATH（testset.json）：合同范本样本集，由 build_testset.py 从 05_合同/合同范本 抽取生成，
-#   按法理类型（taxonomy.ENABLED_TYPES）归类，作为「范本检索库」的唯一建库源。
-# REALTEST_PATH（realtest.json）：评测测试集 = 真实合同 + 人工标注，与建库源不同源，
-#   供 kNN/RAG 分类做「跨域泛化」评估，防止「用范本考范本」导致指标虚高。
-_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-_SERVICE_DIR = os.path.dirname(os.path.dirname(_BACKEND_DIR))
-TESTSET_PATH = os.path.join(_SERVICE_DIR, "03_数据集", "测试集", "testset.json")      # 建库源（范本样本集）
-REALTEST_PATH = os.path.join(_SERVICE_DIR, "03_数据集", "测试集", "realtest.json")    # 评测测试集（真实合同，待收集+标注）
+# ── 建库源（**随源码交付，位于仓库内**）────────────────────────────────
+# `resources/contract_templates_source.json`：合同范本样本集（363 条），由 build_testset.py
+#   从 05_合同/合同范本 抽取生成，按法理类型（taxonomy.ENABLED_TYPES）归类，
+#   是「合同范本检索库」collection `contract_templates` 的**唯一建库源**。
+#
+# 为什么放在仓库内（重要）：
+#   原实现指向**仓库之外**的 `<仓库上一级>/03_数据集/测试集/testset.json`。一旦只拿到仓库
+#   （git clone / 解压交付包），init_contract_templates() 就建不起集合 →
+#   search_similar_templates() 返回空 → 分类**静默**退化为 rag-fallback-llm（只打 warning，
+#   不报错、不改状态），正式 RAG 链实际失效。现改为仓库内固定路径随源码交付，
+#   并由 start.bat（本地）与 Dockerfile.api（构建期自检）做资源预检。
+#
+# 与评测集**不同源**（防同源泄漏）：建库源是「合同范本」，分类/风险评测集是「真实合同」，
+#   分别位于 backend/evaluate/classification_test.json 与 realtest.json，二者不得混用。
+#
+# 重建向量库：cd backend && python -m ai.rag.init_chroma
+RESOURCES_DIR = os.path.join(os.path.dirname(__file__), "resources")
+TESTSET_PATH = os.path.join(RESOURCES_DIR, "contract_templates_source.json")
 
 
 def _get_client() -> chromadb.PersistentClient:
@@ -67,14 +76,35 @@ def _get_client() -> chromadb.PersistentClient:
     return _client
 
 
+_EMBED_MODEL_ID = "shibing624/text2vec-base-chinese"
+
+# 缺模型时的**可操作**提示（绝不静默退化）。
+# 边界：本处只负责"加载失败时把原因与排查步骤说清楚"，**不改变任何检索/分类逻辑**；
+#       加载成功后的行为（同一模型 id、同一 max_seq_length、同一进程内单例）与改动前逐字一致。
+_EMBED_MISSING_HINT = (
+    "embedding 模型 {m} 无法加载：稠密语义检索将不可用，合同分类会退化为纯 LLM 零样本"
+    "（rag-fallback-llm），不再是正式 RAG 链路。\n"
+    "  排查步骤：\n"
+    "    ① 确认模型已随交付包提供：本地启动应为 <项目根>/models/hf-cache；Docker 部署已烤进镜像；\n"
+    "    ② 本地启动请通过项目根目录 start.bat（它会设置 HF_HOME 指向该目录）；\n"
+    "    ③ 若使用自己的 HuggingFace 缓存，请确认 {m} 已下载完成；\n"
+    "    ④ 向量库可重建：cd backend && python -m ai.rag.init_chroma"
+).format(m=_EMBED_MODEL_ID)
+
+
 def _get_embedder() -> SentenceTransformer:
     global _embedder
     if _embedder is None:
         with _embedder_lock:
             if _embedder is None:
-                _embedder = SentenceTransformer("shibing624/text2vec-base-chinese")
+                try:
+                    model = SentenceTransformer(_EMBED_MODEL_ID)
+                except Exception as e:
+                    logger.error("%s\n  原始错误：%s: %s", _EMBED_MISSING_HINT, type(e).__name__, e)
+                    raise RuntimeError(_EMBED_MISSING_HINT) from e
                 # 默认 max_seq_length=128（约128汉字）对长合同太短，提到 512（BERT 上限）
-                _embedder.max_seq_length = 512
+                model.max_seq_length = 512
+                _embedder = model
     return _embedder
 
 

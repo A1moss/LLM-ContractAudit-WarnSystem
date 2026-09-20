@@ -12,6 +12,9 @@ from api.overview import router as overview_router
 from api.feedback import router as feedback_router
 from api.templates import router as templates_router
 from api.stats import router as stats_router
+from api.skills import router as skills_router
+from api.a2a import router as a2a_router
+from api.router import router as router_router
 from ai.taxonomy import to_dict as taxonomy_dict
 from services import warmup as warmup_service
 from services import role_bootstrap
@@ -298,3 +301,9 @@ app.include_router(overview_router, prefix="/api")
 app.include_router(feedback_router, prefix="/api")
 app.include_router(templates_router, prefix="/api")
 app.include_router(stats_router, prefix="/api")
+# 省赛 Skill 能力层（旁路暴露；不参与 _run_audit 主链路）
+app.include_router(skills_router, prefix="/api")
+# 省赛 A2A 最小闭环（旁路暴露；主链路无引用）
+app.include_router(a2a_router, prefix="/api")
+# 省赛 Task-level Expert Router（旁路暴露；主链路无引用）
+app.include_router(router_router, prefix="/api")

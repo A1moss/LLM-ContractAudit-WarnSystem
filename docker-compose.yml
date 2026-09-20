@@ -1,12 +1,91 @@
-# ChromaDB 向量数据库 — 开发环境（前后端跑宿主机）
+# ═══════════════════════════════════════════════════════════════════════════
+# A24 合同智能审核系统 —— 评委运行编排（2 个服务：api + web）
+#
+# ⚠️ 状态：本文件由开发机（未安装 Docker）静态编写，**尚未经过 docker compose up 验证**。
+#    正式交付前必须在具备 Docker 的机器上完成干净环境验收。
+#
+# 明确不包含（当前代码也确实不需要）：
+#   · MySQL        —— 应用用 SQLite（文件型），无 DB 服务端
+#   · Redis        —— 代码零引用
+#   · Nginx        —— 无反向代理需求
+#   · Chroma Server—— 应用用 **嵌入式** PersistentClient（ai/rag/vector_store.py:57-67）
+#                     即原 compose 里那个 chromadb 服务是冗余的，已删除
+#
+# 使用方法（评委）：见 README「评委启动」章节
+#   docker load -i images/a24-api.tar
+#   docker load -i images/a24-web.tar
+#   cp .env.example .env      # 并填写必填项
+#   docker compose up -d
+# ═══════════════════════════════════════════════════════════════════════════
+
 services:
-  chromadb:
-    image: chromadb/chroma:0.5.23
-    ports:
-      - "8001:8000"
-    volumes:
-      - ./chroma_data:/chroma/chroma
+  # ── API：FastAPI + 嵌入式 Chroma + SQLite + OCR + embedding 模型 ────────
+  api:
+    image: a24-api:1.0
+    container_name: a24-api
+    # .env 里放 SECRET_KEY（必填）、DEEPSEEK_API_KEY（系统默认 Key，可留空）等
+    env_file:
+      - .env
     environment:
-      - IS_PERSISTENT=TRUE
-      - ANONYMIZED_TELEMETRY=FALSE
+      # 关键：让 SQLite 落在持久卷上，而不是镜像层（评委运行产生的数据不写回镜像）
+      #   —— 覆盖 .env 里的 DATABASE_URL（compose 的 environment 优先级高于 env_file）
+      #   —— config.py:8 从环境变量读取；已实测 sqlite:////<绝对路径> 可正常解析与读写
+      DATABASE_URL: "sqlite:////data/contract.db"
+      # 保持与代码默认一致：模型已在镜像内，运行期不联网拉模型
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    ports:
+      - "8080:8080"
+    volumes:
+      # ① SQLite 数据库（容器内绝对路径由上面的 DATABASE_URL 指定）
+      - a24_db:/data
+      # ② 上传的合同原件与软删除归档（UPLOAD_DIR = <backend>/data，contracts.py:53）
+      - a24_uploads:/app/LLM-ContractAudit-WarnSystem/backend/data
+      # ③ 向量库（CHROMA_DIR = <backend>/chroma_data，vector_store.py:23）
+      #    ⚠️ 必须用 **named volume**，不要改成 bind mount（原因见下方注释）
+      - a24_chroma:/app/LLM-ContractAudit-WarnSystem/backend/chroma_data
+    healthcheck:
+      # python:3.11-slim 里没有 curl，直接用 python 探活，不额外装工具
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
     restart: unless-stopped
+
+  # ── Web：静态托管 frontend/dist ─────────────────────────────────────────
+  web:
+    image: a24-web:1.0
+    container_name: a24-web
+    ports:
+      # 必须是 5173：前端 baseURL 与后端 CORS 默认值都写死 localhost:5173
+      - "5173:5173"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  a24_db:
+  a24_uploads:
+  a24_chroma:
+# ═══════════════════════════════════════════════════════════════════════════
+# 关于 a24_chroma（预置生产向量库）—— 请勿改成 bind mount
+#
+# 镜像里已经烤好了 backend/chroma_data（含 contract_templates 363 条 / laws 161 条 /
+# standard_clauses 227 条）。Docker 对 **named volume** 的语义是：
+#     首次创建空卷时，会把镜像里该路径的**已有内容复制进卷**，然后才挂载。
+# 因此用 named volume 时，镜像里的预置向量库会被完整保留（RAG 正常）。
+#
+# 反之，**bind mount**（- ./some-empty-dir:/app/.../chroma_data）不会复制镜像内容，
+# 而是用宿主空目录**遮蔽**镜像里的向量库。后果（已在本机实测复现）：
+#     · 集合为空 → search_similar_templates() 返回 0 条
+#     · classify_by_rag 静默退化为 method="rag-fallback-llm"（纯 LLM 零样本）
+#       —— 不再走正式 RAG 链，且**不会报错**，只有一行 warning
+#     · 建库源现已随源码在仓库内（backend/ai/rag/resources/contract_templates_source.json），
+#       因此可以手工重建（容器内 cd backend && python -m ai.rag.init_chroma）；
+#       但运行期**不会自动重建**，不重建就一直处于降级状态。
+# 结论：部署一律用 named volume；若确需 bind mount，挂载后必须手工重建并校验。
+# 详见交付说明中的验证记录。
+#
+# 如需彻底重置向量库：docker compose down -v 后再 up，卷会重新从镜像内容播种。
+# ═══════════════════════════════════════════════════════════════════════════

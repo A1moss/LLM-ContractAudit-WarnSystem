@@ -48,6 +48,7 @@
       <!-- 右：合同信息表单 -->
       <el-col :xs="24" :md="10">
         <el-card shadow="hover" class="upload-card">
+          <AiWarmInline />
           <el-form
             ref="formRef"
             :model="form"
@@ -112,6 +113,7 @@ import { ElMessage } from 'element-plus'
 import { UploadFilled } from '@element-plus/icons-vue'
 import { uploadContract, triggerAudit } from '../api/contract.js'
 import { CONTRACT_TYPES } from '../constants/contractTypes.js'
+import AiWarmInline from '../components/AiWarmInline.vue'
 
 const router = useRouter()
 

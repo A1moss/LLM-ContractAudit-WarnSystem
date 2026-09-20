@@ -18,6 +18,9 @@
       </div>
     </section>
 
+    <!-- AI 服务预热横幅（hero 与 metrics 之间） -->
+    <AiWarmBanner />
+
     <!-- 核心数据条（实时，来自后端 /stats/dashboard，每 30s 自动刷新） -->
     <section class="metrics">
       <div class="metrics-inner">
@@ -109,7 +112,7 @@
             <span @click="router.push('/templates')">模板管理</span>
           </div>
         </div>
-        <div class="f-bottom">© 2026 A24 · 海底汪汪队 —— 命题企业：网新恒天</div>
+        <div class="f-bottom">© 2026 A24 · 海底喵喵队 —— 命题企业：网新恒天</div>
       </div>
     </footer>
   </div>
@@ -120,6 +123,7 @@ import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import request from '../utils/request.js'
 import { formatTime } from '../utils/format.js'
+import AiWarmBanner from '../components/AiWarmBanner.vue'
 
 const router = useRouter()
 const username = ref(localStorage.getItem('username') || '用户')

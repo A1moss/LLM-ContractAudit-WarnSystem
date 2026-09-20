@@ -1,0 +1,40 @@
+# ── Docker 构建上下文排除清单 ─────────────────────────────────────────
+# 目的：① 把上下文从 ~1.7 GB 压到 ~60 MB；② 防止把开发机的真实数据与密钥打进镜像。
+# 注意：backend/chroma_data 必须 **保留**（它是预构建的生产向量库，要进 api 镜像）。
+
+# —— 绝不能进镜像的真实数据 / 密钥 ——
+.env
+backend/contract.db
+backend/contract.db-shm
+backend/contract.db-wal
+backend/data/
+mysql_data/
+backend/evaluate/_pilot5/
+backend/evaluate/cache.json
+backend/evaluate/cache_elements.json
+backend/evaluate/cache_risks_llm.json
+backend/evaluate/rag_predictions.json
+
+# —— 体积大且可重建的依赖 / 构建产物 ——
+venv/
+backend/venv/
+frontend/node_modules/
+frontend/dist/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# —— 与本轮交付无关的开发素材 ——
+.git/
+.gitignore
+.idea/
+.vscode/
+.claude/
+CLAUDE.md
+sketches/
+答辩PPT/
+docs/.gitkeep
+**/.gitkeep
+*.log

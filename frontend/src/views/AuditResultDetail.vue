@@ -107,9 +107,11 @@
           </el-table-column>
         </el-table>
 
-        <!-- 反馈标注面板 -->
+        <!-- 反馈标注（紧凑模式）：只保留 等级 + 风险码/名称 + 一句摘要 + 操作按钮。
+             完整风险详情由上方「风险明细」表格负责展示，避免同一批风险完整渲染两遍。 -->
         <FeedbackPanel
           ref="feedbackRef"
+          compact
           :risk-items="riskItems"
           :contract-id="contractId"
           :loaded-feedbacks="loadedFeedbacks"
