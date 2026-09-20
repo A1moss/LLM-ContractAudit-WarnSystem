@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from ai.llm_client import llm_client
 from ai.llm_context import submit_with_context
+from ai import perf as perf   # 临时链路耗时诊断（BUG-2）
 from ai.utils import extract_json
 from ai.chunker import split_chunks
 
@@ -136,7 +137,8 @@ def _extract_chunk(chunk: str, feedback_context=None):
             + "\n\n请抽取以下合同的事实：\n"
             + chunk
         )
-        resp = llm_client.chat(prompt=prompt, temperature=0.0)
+        with perf.stage("evidence_llm"):
+            resp = llm_client.chat(prompt=prompt, temperature=0.0)
         ev = extract_json(resp)
         if isinstance(ev, dict):
             return ev
@@ -184,7 +186,7 @@ def _extract_one(text: str, feedback_context=None) -> dict:
     fail = 0
     with ThreadPoolExecutor(max_workers=min(len(chunks), 6)) as ex:
         # 复制上下文后提交：保证工作线程能读到用户个人 DeepSeek Key（见 ai/llm_context.py）
-        futs = [submit_with_context(ex, _call_extract_chunk, c, feedback_context) for c in chunks]
+        futs = [perf.submit_labeled_ctx(ex, _call_extract_chunk, c, feedback_context) for c in chunks]
         for ev in (f.result() for f in futs):
             if ev is None:
                 fail += 1
@@ -278,8 +280,8 @@ def extract_evidence_detailed(full_text: str, *, feedback_context=None) -> dict:
         # 正文与补全条款并行抽取（各自动分块），缩短审核等待
         with ThreadPoolExecutor(max_workers=2) as ex:
             # 复制上下文后提交：保证工作线程能读到用户个人 DeepSeek Key（见 ai/llm_context.py）
-            body_fut = submit_with_context(ex, _extract_one, body, feedback_context)
-            supp_fut = submit_with_context(ex, _extract_one, supplement, feedback_context)
+            body_fut = perf.submit_labeled_ctx(ex, _extract_one, body, feedback_context)
+            supp_fut = perf.submit_labeled_ctx(ex, _extract_one, supplement, feedback_context)
             body_r = body_fut.result()
             supp_r = supp_fut.result()
         evidence = _merge_override(body_r["evidence"], supp_r["evidence"])

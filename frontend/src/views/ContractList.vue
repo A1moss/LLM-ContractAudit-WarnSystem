@@ -107,10 +107,11 @@
 
         <el-table-column prop="contract_type" label="合同类型" width="170">
           <template #default="{ row }">
-            <el-tag v-if="row.contract_type" size="small">
+            <!-- 分类失败 = 「待分类」（灰），与模型判定的「无名合同」（正常标签）严格区分（BUG-1） -->
+            <el-tag v-if="isUnclassified(row)" size="small" type="info">待分类</el-tag>
+            <el-tag v-else size="small">
               {{ typeLabel(row.contract_type) }}
             </el-tag>
-            <span v-else style="color: #909399;">—</span>
             <el-tag v-if="row.is_outsourcing" size="small" type="warning" style="margin-left: 4px;">服务外包</el-tag>
           </template>
         </el-table-column>
@@ -182,7 +183,7 @@ import { Plus, Search, Folder, Files, Clock, Warning, CircleCheck } from '@eleme
 import { getContractList, deleteContract } from '../api/contract.js'
 import request from '../utils/request.js'
 import { formatTime } from '../utils/format.js'
-import { CONTRACT_TYPES, typeLabel } from '../constants/contractTypes.js'
+import { CONTRACT_TYPES, typeLabel, isUnclassified } from '../constants/contractTypes.js'
 
 const router = useRouter()
 

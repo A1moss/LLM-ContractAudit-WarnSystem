@@ -91,6 +91,11 @@ def _ensure_columns():
         if "is_outsourcing" not in existing:
             db.execute("ALTER TABLE contracts ADD COLUMN is_outsourcing BOOLEAN DEFAULT 0")
             db.commit()
+        # 分类结果状态（BUG-1）：新增列；**历史行一律不动**（保持 NULL，由读取侧按
+        # contract_type 是否为空推导），绝不靠改历史数据来"修复"分类不稳定。
+        if "classification_status" not in existing:
+            db.execute("ALTER TABLE contracts ADD COLUMN classification_status VARCHAR(20)")
+            db.commit()
         # audit_records 新增 evidence 列（证据链）
         try:
             existing_ar = {row[1] for row in db.execute("PRAGMA table_info(audit_records)")}

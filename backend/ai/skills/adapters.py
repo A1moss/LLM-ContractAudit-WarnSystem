@@ -204,7 +204,10 @@ register(make_skill(
     output_schema={
         "type": "object",
         "properties": {
-            "contract_type": {"type": "string"},
+            "contract_type": {"type": "string",
+                              "description": "法理分类名（必须在 taxonomy.ENABLED_TYPES 内）。"
+                                             "分类失败时为 null —— 调用方须按「待分类」处理，"
+                                             "不得当成任何法理类别（尤其不得当成「无名合同」）。"},
             "is_outsourcing": {"type": "boolean"},
             "confidence": {"type": "number"},
             "method": {
@@ -230,6 +233,7 @@ register(make_skill(
     notes=(
         "生产主实现是 RAG 版；零样本实现 ai.classifier.classifier.classify_contract "
         "仅作降级与评测基线，**不作为独立 Skill 注册**。exclude_self（评测防泄漏参数）已屏蔽。"
+        "失败态：contract_type=null + fallback=true（表示分类未成功，**不是**「无名合同」）。"
     ),
 ))
 

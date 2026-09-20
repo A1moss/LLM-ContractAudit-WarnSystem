@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from ai.chunker import split_chunks
 from ai.llm_client import llm_client
 from ai.llm_context import submit_with_context
+from ai import perf as perf   # 临时链路耗时诊断（BUG-2）
 from ai.taxonomy import ENABLED_TYPES
 from ai.utils import extract_json_dict
 
@@ -60,21 +61,36 @@ SYSTEM_PROMPT_CLASSIFY = f"""你是一个合同分类专家。请阅读以下合
 {{"contract_type": "合同类型", "is_outsourcing": true/false, "confidence": 0.0-1.0, "reason": "一句话判断依据"}}"""
 
 
+# 单块分类的**有界重试**次数（1 = 最多再试一次）。
+# 为什么需要：分类失败会把合同落成"待分类"，用户看到的是"同一份合同这次没识别出来"。
+# 单块 LLM 调用失败通常是一次性网络/限流抖动（实测：同一输入成功时结果稳定，
+# 不稳定来自失败分支），故对**瞬时失败**做一次有界重试，而不是拿兜底类型掩盖失败。
+CLASSIFY_RETRY = 1
+
+
 def _classify_one_chunk(text: str) -> dict | None:
-    """对单个文本块做分类，返回 {contract_type, is_outsourcing, confidence, reason}，失败返回 None。"""
+    """对单个文本块做分类，返回 {contract_type, is_outsourcing, confidence, reason}，失败返回 None。
+
+    瞬时失败（超时/限流/JSON 解析失败）最多重试 `CLASSIFY_RETRY` 次；重试仍失败返回 None，
+    由上层落"分类失败"，**绝不返回一个看起来正常的合同类型**。
+    """
     prompt = f"{SYSTEM_PROMPT_CLASSIFY}\n\n请判断以下合同片段的类型：\n{text}"
-    try:
-        response = llm_client.chat(prompt=prompt, temperature=0.1)
-        result = extract_json_dict(response)
-        if result and result.get("contract_type") in CONTRACT_TYPES:
-            return {
-                "contract_type": result["contract_type"],
-                "confidence": float(result.get("confidence", 0.5)),
-                "reason": result.get("reason", ""),
-                "is_outsourcing": bool(result.get("is_outsourcing", False)),
-            }
-    except Exception as e:
-        logger.warning("LLM 分类失败（单块）: %s", e)
+    for attempt in range(CLASSIFY_RETRY + 1):
+        try:
+            with perf.stage("classify_zeroshot_llm"):
+                response = llm_client.chat(prompt=prompt, temperature=0.1)
+            result = extract_json_dict(response)
+            if result and result.get("contract_type") in CONTRACT_TYPES:
+                return {
+                    "contract_type": result["contract_type"],
+                    "confidence": float(result.get("confidence", 0.5)),
+                    "reason": result.get("reason", ""),
+                    "is_outsourcing": bool(result.get("is_outsourcing", False)),
+                }
+            logger.warning("LLM 分类返回非法结果（第 %d 次）: %s", attempt + 1,
+                           str(result)[:200] if result is not None else "JSON 解析失败")
+        except Exception as e:
+            logger.warning("LLM 分类失败（单块，第 %d 次）: %s", attempt + 1, e)
     return None
 
 
@@ -97,11 +113,14 @@ def classify_contract(full_text: str) -> dict:
 
     Returns:
         dict: {contract_type, is_outsourcing, confidence, method, reason, fallback}
+              **失败时 contract_type 为 None**（不是"其他合同"之类伪类型）——
+              调用方据此落「分类失败/待分类」，绝不把失败伪装成一个正常合同类别。
+              语义区分见 ai/classifier/__init__.py 的模块说明。
     """
     chunks = split_chunks(full_text, MAX_CLASSIFY_CHARS)
     if not chunks:
         return {
-            "contract_type": "其他合同",
+            "contract_type": None,
             "is_outsourcing": False,
             "confidence": 0.0,
             "method": "fallback",
@@ -123,7 +142,7 @@ def classify_contract(full_text: str) -> dict:
     if len(sampled) > 1:
         with ThreadPoolExecutor(max_workers=min(len(sampled), 5)) as ex:
             # 复制上下文后提交：保证工作线程里能读到用户个人 DeepSeek Key（见 ai/llm_context.py）
-            futs = [submit_with_context(ex, _classify_one_chunk, c) for c in sampled]
+            futs = [perf.submit_labeled_ctx(ex, _classify_one_chunk, c) for c in sampled]
             results = [f.result() for f in futs]
     else:
         results = [_classify_one_chunk(sampled[0])]
@@ -151,7 +170,7 @@ def classify_contract(full_text: str) -> dict:
         }
 
     return {
-        "contract_type": "其他合同",
+        "contract_type": None,
         "is_outsourcing": False,
         "confidence": 0.0,
         "method": "fallback",

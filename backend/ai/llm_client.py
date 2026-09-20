@@ -30,6 +30,7 @@ from openai.types.chat import ChatCompletionMessageParam
 from dotenv import load_dotenv
 
 from ai.llm_context import get_user_api_key
+from ai import perf as _perf   # 临时链路耗时诊断（BUG-2）
 
 logger = logging.getLogger(__name__)
 
@@ -115,17 +116,29 @@ class DeepSeekClient:
     def __init__(self):
         self.chat_model = "deepseek-chat"
 
-    def chat(self, prompt: str, temperature: float = 0.1) -> str:
+    def chat(self, prompt: str, temperature: float = 0.1,
+             timeout: float | None = None) -> str:
+        """调用 DeepSeek。
+
+        `timeout`：**本次调用**的超时秒数，None 表示沿用 client 默认值（30s）。
+        为什么要按调用可配：同一个 client 承担"短输出"（分类/要素，秒级）与
+        "长输出"（条款比对要逐条生成 30 条 clauses 的 JSON，实测 15~25s，并发下会顶到 30s），
+        给后者单独放宽超时，比把全局默认一律调大更安全（短调用仍然快速失败）。
+        """
         key = require_api_key()
         messages: List[ChatCompletionMessageParam] = [
             {"role": "user", "content": prompt}
         ]
+        extra = {"timeout": timeout} if timeout is not None else {}
         try:
-            response = _client_for(key).chat.completions.create(
-                model=self.chat_model,
-                messages=messages,
-                temperature=temperature
-            )
+            with _perf.stage("llm"):   # 临时耗时诊断（BUG-2）：仅统计，不改语义
+                response = _client_for(key).chat.completions.create(
+                    model=self.chat_model,
+                    messages=messages,
+                    temperature=temperature,
+                    **extra,
+                )
+            _perf.count_llm()
             return response.choices[0].message.content
         except Exception as e:
             # 只记异常摘要；绝不输出 api_key / Authorization / 完整请求头

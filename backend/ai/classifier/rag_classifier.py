@@ -8,6 +8,7 @@ ai.classifier.rag_classifier — RAG 少样本分类
 import logging
 
 from ai.llm_client import llm_client
+from ai import perf as _perf   # 临时链路耗时诊断（BUG-2）
 from ai.taxonomy import ENABLED_TYPES
 from ai.utils import extract_json_dict
 
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 MAX_QUERY_CHARS = 12000   # 查询全文上限（示例+查询要在 LLM 上下文内）
 EXAMPLE_HEAD = 600        # 每个示例的首部字符数
 EXAMPLE_TAIL = 300        # 每个示例的尾部字符数（含违约/争议/成果归属）
+RAG_CLASSIFY_RETRY = 1    # 瞬时失败（超时/限流）有界重试次数；重试仍失败 ⇒ contract_type=None（待分类）
 
 SYSTEM_PROMPT_RAG = f"""你是一个合同分类专家。先阅读下面给出的几个「已分类合同范本」作为参考示例，再判断待分类合同的类型。
 
@@ -57,14 +59,18 @@ def classify_by_rag(full_text: str, top_k: int = 3, exclude_self: str = "") -> d
 
     Returns:
         dict: {contract_type, is_outsourcing, confidence, method, reason, top_matches, fallback}
+
+    **失败语义（BUG-1 收口）**：分类失败时 `contract_type=None`（不再是伪类型"其他合同"），
+    由调用方落「待分类」，与"模型判断该合同属于无名合同"严格区分。
     """
     if not full_text or not full_text.strip():
-        return {"contract_type": "其他合同", "is_outsourcing": False, "confidence": 0.0,
+        return {"contract_type": None, "is_outsourcing": False, "confidence": 0.0,
                 "method": "rag", "reason": "合同文本为空", "top_matches": [], "fallback": True}
 
     # 懒加载 RAG 向量库（避免启动链拖入 chromadb/sentence_transformers）
     from ai.rag.vector_store import search_similar_templates, _excerpt
-    matches = search_similar_templates(full_text[:MAX_QUERY_CHARS], top_k + 1)
+    with _perf.stage("rag_retrieve"):
+        matches = search_similar_templates(full_text[:MAX_QUERY_CHARS], top_k + 1)
     if exclude_self:
         matches = [m for m in matches if m.get("text") != exclude_self]
     matches = matches[:top_k]
@@ -89,24 +95,30 @@ def classify_by_rag(full_text: str, top_k: int = 3, exclude_self: str = "") -> d
         f"待分类合同：\n{full_text[:MAX_QUERY_CHARS]}"
     )
 
-    try:
-        response = llm_client.chat(prompt=prompt, temperature=0.1)
-        result = extract_json_dict(response)
-        if result and result.get("contract_type") in ENABLED_TYPES:
-            return {
-                "contract_type": result["contract_type"],
-                "is_outsourcing": bool(result.get("is_outsourcing", False)),
-                "confidence": float(result.get("confidence", 0.5)),
-                "method": "rag",
-                "reason": result.get("reason", ""),
-                "top_matches": [{"type": m["type"], "score": m["score"]} for m in matches],
-                "fallback": False,
-            }
-    except Exception as e:
-        logger.warning("RAG 分类失败: %s", e)
+    # 瞬时失败（超时/限流/JSON 解析失败）最多重试 RAG_CLASSIFY_RETRY 次：
+    # 与零样本分支同一策略——用**有界重试**换稳定，而不是拿兜底类型掩盖失败。
+    for attempt in range(RAG_CLASSIFY_RETRY + 1):
+        try:
+            with _perf.stage("classify_llm"):
+                response = llm_client.chat(prompt=prompt, temperature=0.1)
+            result = extract_json_dict(response)
+            if result and result.get("contract_type") in ENABLED_TYPES:
+                return {
+                    "contract_type": result["contract_type"],
+                    "is_outsourcing": bool(result.get("is_outsourcing", False)),
+                    "confidence": float(result.get("confidence", 0.5)),
+                    "method": "rag",
+                    "reason": result.get("reason", ""),
+                    "top_matches": [{"type": m["type"], "score": m["score"]} for m in matches],
+                    "fallback": False,
+                }
+            logger.warning("RAG 分类返回非法结果（第 %d 次）: %s", attempt + 1,
+                           str(result)[:200] if result is not None else "JSON 解析失败")
+        except Exception as e:
+            logger.warning("RAG 分类失败（第 %d 次）: %s", attempt + 1, e)
 
     return {
-        "contract_type": "其他合同",
+        "contract_type": None,
         "is_outsourcing": False,
         "confidence": 0.0,
         "method": "rag",

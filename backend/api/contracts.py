@@ -8,6 +8,7 @@ import uuid
 import mimetypes
 import html
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, status, BackgroundTasks
@@ -34,6 +35,7 @@ from ai.confidence import enrich_confidences
 from ai.matcher import compare_clauses
 from ai.reviser import revise_clause, generate_clause
 from ai.llm_context import submit_with_context
+from ai import perf as perf   # 临时链路耗时诊断（BUG-2）
 from ai.taxonomy import business_tag_names
 from models.audit_record import AuditRecord
 from models.template import Template
@@ -101,10 +103,36 @@ def _business_tag_label(is_outsourcing: bool):
 
 
 def _type_label(contract_type, is_outsourcing):
-    """双属性组合命名：法理类型 + 业务标签。如「承揽合同（服务外包）」。"""
-    base = contract_type or "未分类"
+    """双属性组合命名：法理类型 + 业务标签。如「承揽合同（服务外包）」。
+
+    类型为空 = **分类失败/待分类**（BUG-1），显式显示"待分类"，
+    绝不用任何法理类别（尤其「无名合同」）充当失败兜底。
+    """
+    if not contract_type:
+        return "待分类"
     tag = _business_tag_label(is_outsourcing)
+    base = contract_type
     return f"{base}（{tag}）" if tag else base
+
+
+# 分类结果状态（BUG-1）：与 models.contract.Contract.classification_status 同一口径。
+CLASSIFICATION_SUCCESS = "success"
+CLASSIFICATION_MANUAL = "manual"
+CLASSIFICATION_FAILED = "failed"
+
+
+def _classification_status_of(c: Contract) -> str:
+    """推导合同的分类状态（不修改数据）。
+
+    - 显式写入的状态优先（新数据）；
+    - 历史数据（NULL）按 `contract_type` 是否为空推导：
+      有类型 ⇒ success（含历史上的「无名合同」，那是模型真实判定）；
+      无类型 ⇒ failed。
+    """
+    status = getattr(c, "classification_status", None)
+    if status in (CLASSIFICATION_SUCCESS, CLASSIFICATION_MANUAL, CLASSIFICATION_FAILED):
+        return status
+    return CLASSIFICATION_SUCCESS if c.contract_type else CLASSIFICATION_FAILED
 
 
 WORKFLOW_ROLES = {"reviewer", "approver", "admin"}
@@ -429,15 +457,21 @@ def upload_contract(
     if ext not in (".pdf", ".docx", ".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp"):
         raise HTTPException(status_code=400, detail="仅支持 pdf/docx 或图片格式(jpg/png/tiff/bmp)")
 
+    # 临时链路耗时诊断（BUG-2）：仅在 A24_PERF 开启时统计，默认零行为差异
+    perf.reset(f"upload:{file.filename or ''}")
+    with perf.stage("upload_receive"):
+        content = file.file.read()
+
     saved_name = str(uuid.uuid4()) + ext  # 统一小写扩展名（BUG-043，原第二行重复计算且丢 lower）
     file_path = os.path.join(UPLOAD_DIR, saved_name)
-    content = file.file.read()
-    with open(file_path, "wb") as f:
-        f.write(content)
+    with perf.stage("upload_save"):
+        with open(file_path, "wb") as f:
+            f.write(content)
 
     full_text = ""
     try:
-        parsed = detect_and_parse(file_path)
+        with perf.stage("document_parse"):
+            parsed = detect_and_parse(file_path)
         full_text = parsed.get("full_text", "")
     except Exception as e:
         # 解析异常也清理已落盘文件，避免孤儿（BUG-038）
@@ -476,43 +510,66 @@ def upload_contract(
 
     # 分类与要素抽取并行（要素抽取对 contract_type 不敏感，用中性词占位，不必等分类结果）
     from concurrent.futures import ThreadPoolExecutor
-    cls_result = {"contract_type": contract_type or "other", "confidence": 0.0, "is_outsourcing": False}
+    cls_result = {"contract_type": None, "confidence": 0.0, "is_outsourcing": False, "fallback": True}
+    cls_failed = False
     elements = {}
-    with ThreadPoolExecutor(max_workers=2) as ex:
-        # submit_with_context：把当前请求上下文（含用户个人 DeepSeek Key）复制进工作线程，
-        # 否则线程内读不到用户 Key，LLM 会静默回退到 .env 默认 Key（个人 Key 失效）
-        cls_fut = submit_with_context(ex, classify_contract, full_text)
-        ele_fut = submit_with_context(ex, extract_elements, full_text, contract_type or "合同")
-        try:
-            cls_result = cls_fut.result()
-        except Exception as e:
-            logger.warning("合同分类失败，回退为 %s: %s", contract_type or "other", e)
-        try:
-            elements = ele_fut.result()
-        except Exception as e:
-            logger.warning("要素抽取失败，使用空要素: %s", e)
+    with perf.stage("classify_and_elements"):
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            # submit_with_context：把当前请求上下文（含用户个人 DeepSeek Key）复制进工作线程，
+            # 否则线程内读不到用户 Key，LLM 会静默回退到 .env 默认 Key（个人 Key 失效）
+            cls_fut = perf.submit_labeled_ctx(ex, classify_contract, full_text)
+            ele_fut = perf.submit_labeled_ctx(ex, extract_elements, full_text, contract_type or "合同")
+            try:
+                cls_result = cls_fut.result()
+            except Exception as e:
+                # 分类异常 = 分类失败（不再是"回退成某个类型"）：
+                # 落「待分类」，用户与审核链路都能看到"这份合同没识别出来"（BUG-1）
+                cls_failed = True
+                logger.warning("合同分类失败，落「待分类」（不回退任何合同类型）: %s", e)
+            try:
+                elements = ele_fut.result()
+            except Exception as e:
+                logger.warning("要素抽取失败，使用空要素: %s", e)
 
-    actual_type = contract_type or cls_result.get("contract_type", "other")
-    confidence = cls_result.get("confidence", 0.0)
-    is_outsourcing = bool(cls_result.get("is_outsourcing", False))
+    # 分类结果落库口径（BUG-1，三态互斥、绝不混用）：
+    #   ① 用户手工指定类型          → contract_type=用户值,      status="manual"
+    #   ② 分类成功（含模型判定无名）→ contract_type=模型类别,    status="success"
+    #   ③ 分类失败                  → contract_type=None,       status="failed"（前端显示"待分类"）
+    if contract_type:
+        actual_type, cls_status = contract_type, CLASSIFICATION_MANUAL
+    elif not cls_failed and cls_result.get("contract_type"):
+        actual_type, cls_status = cls_result["contract_type"], CLASSIFICATION_SUCCESS
+    else:
+        actual_type, cls_status = None, CLASSIFICATION_FAILED
+        logger.warning("合同分类未成功，落「待分类」（fallback=%s reason=%s）",
+                       cls_result.get("fallback"), cls_result.get("reason"))
 
-    contract = Contract(
-        user_id=current_user.id,
-        file_name=name or file.filename,
-        stored_path=file_path,
-        contract_type=actual_type,
-        type_confidence=confidence,
-        is_outsourcing=is_outsourcing,
-        parsed_text=full_text,
-        extracted_elements=elements,
-        status="parsed",
-        audit_mode=audit_mode,
-    )
-    db.add(contract)
-    db.commit()
-    db.refresh(contract)
+    confidence = float(cls_result.get("confidence", 0.0) or 0.0) if cls_status == CLASSIFICATION_SUCCESS else 0.0
+    is_outsourcing = bool(cls_result.get("is_outsourcing", False)) if cls_status == CLASSIFICATION_SUCCESS else False
 
-    return {"code": 0, "message": "ok", "data": {"id": contract.id}}
+    with perf.stage("db_write"):
+        contract = Contract(
+            user_id=current_user.id,
+            file_name=name or file.filename,
+            stored_path=file_path,
+            contract_type=actual_type,
+            classification_status=cls_status,
+            type_confidence=confidence,
+            is_outsourcing=is_outsourcing,
+            parsed_text=full_text,
+            extracted_elements=elements,
+            status="parsed",
+            audit_mode=audit_mode,
+        )
+        db.add(contract)
+        db.commit()
+        db.refresh(contract)
+
+    perf.report(f"upload:{file.filename or ''}")
+
+    return {"code": 0, "message": "ok",
+            "data": {"id": contract.id, "contract_type": actual_type,
+                     "classification_status": cls_status}}
 
 
 @router.get("")
@@ -569,12 +626,15 @@ def list_contracts(
 
     def item_dict(c):
         summary = risk_summary.get(c.id, {"risk_count": 0, "high_risk_count": 0, "mid_risk_count": 0, "low_risk_count": 0})
+        cls_status = _classification_status_of(c)
         return {
             "id": c.id,
             "file_name": c.file_name,
             "contract_type": c.contract_type,
+            "classification_status": cls_status,
             "is_outsourcing": c.is_outsourcing,
             "business_tag": _business_tag_label(c.is_outsourcing),
+            # 分类失败时类型标签直接是「待分类」，不再借用任何法理类别（BUG-1）
             "type_label": _type_label(c.contract_type, c.is_outsourcing),
             "type_confidence": c.type_confidence,
             "status": c.status,
@@ -730,17 +790,26 @@ def _recover_contract_status(contract_id: int):
 
 def _run_audit(contract_id: int):
     """后台执行完整审核流水线（独立 DB session，供 BackgroundTasks 调用）。"""
+    # 临时链路耗时诊断（BUG-2）：同一合同的上传阶段账本沿用同一 label，便于合并看总账
+    perf.reset(f"audit:{contract_id}")
     db = SessionLocal()
     try:
-        c = db.query(Contract).filter(Contract.id == contract_id).first()
+        with perf.stage("audit_load"):
+            c = db.query(Contract).filter(Contract.id == contract_id).first()
         if not c or not c.parsed_text:
             return
 
         audit_batch = str(uuid.uuid4())
         full_text = c.parsed_text
+        audit_mode = c.audit_mode
+        # 闭包捕获（避免跨线程读 ORM 对象的懒加载属性）
+        contract_type, is_outsourcing = c.contract_type, bool(c.is_outsourcing)
+        # 企业自定义模板（DB 读）在**主线程**先取好：条款比对线程里不再碰主 session（SQLite 单写者）
+        custom_clauses = _db_template_clauses(db, contract_type)
 
         # 1. Rule engine (fast 基线，始终先跑)
-        rule_results = run_rules(full_text)
+        with perf.stage("rule_scan"):
+            rule_results = run_rules(full_text)
 
         # Feedback RAG（人工反馈驱动的持续优化）：默认关闭。
         # 只在证据抽取阶段注入"已由人工审核并批准"的历史经验，作为**事实核查提示**。
@@ -769,10 +838,20 @@ def _run_audit(contract_id: int):
                 feedback_ctx = None
                 learning_context["error"] = str(e)
 
-        # 2. 证据抽取 + 确定性裁决（precise 主口径，v6.4 架构）
-        if c.audit_mode == "precise":
+        # 2. 证据抽取 + 确定性裁决（precise 主口径，v6.4 架构）+ 3. 条款比对
+        #
+        # 【BUG-2 并行化说明】三段 LLM 工作原先**严格串行**（证据 6s → 条款比对 20s → 建议 6s，
+        # 实测 42s 总墙钟），但它们的依赖关系是：
+        #     evidence → adjudicate（纯 Python）→ recommendation       （一条链）
+        #     compare_clauses（只依赖 full_text + contract_type）      （完全独立）
+        # 条款比对**不读** evidence / 裁决结果，裁决也**不读**条款比对结果，因此可安全并行。
+        # 保持的不变式（BUG-009/BUG-010）：条款比对仍在**任何 DB 写事务之前**完成，
+        # 且它只读（不写库、不建会话），不持有主 session 的写锁。
+        def _evidence_chain():
+            """证据抽取 → 确定性裁决 → 建议生成（任一环节异常都退回规则引擎粗筛）。"""
             try:
-                res = extract_evidence_detailed(full_text, feedback_context=feedback_ctx)
+                with perf.stage("evidence"):
+                    res = extract_evidence_detailed(full_text, feedback_context=feedback_ctx)
                 evidence = res["evidence"]
                 status = res["status"]
                 if status == "failed":
@@ -781,23 +860,55 @@ def _run_audit(contract_id: int):
                         "证据抽取完全失败（%d/%d 块），降级为规则引擎粗筛: contract_id=%s",
                         res["failed_chunks"], res["total_chunks"], contract_id,
                     )
-                    all_risks = list(rule_results)
-                else:
-                    if status == "partial":
-                        # 部分块失败：保留成功块证据继续裁决，但显式记录（不静默、不丢弃成功结果，BUG-008）
-                        logger.warning(
-                            "证据抽取部分失败（%d/%d 块），保留成功块证据继续裁决: contract_id=%s",
-                            res["failed_chunks"], res["total_chunks"], contract_id,
-                        )
+                    return list(rule_results)
+                if status == "partial":
+                    # 部分块失败：保留成功块证据继续裁决，但显式记录（不静默、不丢弃成功结果，BUG-008）
+                    logger.warning(
+                        "证据抽取部分失败（%d/%d 块），保留成功块证据继续裁决: contract_id=%s",
+                        res["failed_chunks"], res["total_chunks"], contract_id,
+                    )
+                with perf.stage("adjudicate"):
                     adjudicated = adjudicate_risks(evidence)
-                    # v6.5 建议层：只消费裁决结果，不反向影响 R01-R12 判定。
-                    # 裁决为空 = 合同干净（12 类风险均不成立），如实报 0 风险，绝不回退规则引擎误报。
-                    all_risks = build_recommendations(adjudicated, evidence)
+                # v6.5 建议层：只消费裁决结果，不反向影响 R01-R12 判定。
+                # 裁决为空 = 合同干净（12 类风险均不成立），如实报 0 风险，绝不回退规则引擎误报。
+                with perf.stage("recommendation"):
+                    return build_recommendations(adjudicated, evidence)
             except Exception as e:
                 logger.error("证据裁决异常，退回规则引擎: %s", e)
-                all_risks = list(rule_results)
-        else:
-            all_risks = list(rule_results)
+                return list(rule_results)
+
+        def _clause_compare():
+            """条款比对（只依赖 full_text + 合同类型 + 预先取好的企业模板；不碰任何风险判定）。
+
+            刻意**不建数据库会话**：企业自定义模板已在主线程取好并捕获进闭包，
+            而条款比对本身是只读纯计算（不写库），因此这个后台线程不接触 SQLite 写锁。
+            """
+            if audit_mode != "precise":
+                # fast 初筛不做条款比对（与改动前一致）：报告标注待重试，不阻塞
+                return None
+            # 分类失败的合同没有可信类型：**不再默认拿"买卖合同"标准条款去比**（BUG-1/2 收口），
+            # 改为"未分类"口径（不按类型过滤，回退全部标准条款），报告照原样标注可重试。
+            compare_type = contract_type or "未分类"
+            try:
+                with perf.stage("clause_compare"):
+                    r = compare_clauses(
+                        full_text,
+                        compare_type,
+                        is_outsourcing,
+                        standard_clauses=custom_clauses,
+                    )
+                logger.info("条款比对完成: %s", r.get("summary") if r else None)
+                return r
+            except Exception as e:
+                logger.warning("条款比对失败，报告将标注待重试: %s", e)
+                return None
+
+        # 两条链并行：墙钟 ≈ max(证据链, 条款比对)，而不是两者之和（实测 42s → ~20s）
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            ev_fut = perf.submit_labeled_ctx(ex, _evidence_chain)
+            cmp_fut = perf.submit_labeled_ctx(ex, _clause_compare)
+            all_risks = ev_fut.result()
+            compare_result = cmp_fut.result()
 
         # Feedback RAG 使用留痕：本次实际检索命中的经验 id 与经验库版本
         # （无论启用与否都写，字段结构一致，便于事后回答"这次审核用了哪些经验、哪一版"）
@@ -808,20 +919,8 @@ def _run_audit(contract_id: int):
                 logger.warning("Feedback RAG 留痕生成失败: %s", e)
                 learning_context["error"] = str(e)
 
-        # 条款比对：先于 DB 写事务执行（LLM ~30s；若放进写事务会长时间持有 SQLite 写锁，
-        # 导致并发审核 database is locked，BUG-009）。失败不阻断审核，报告标注待重试。
-        compare_result = None
-        try:
-            compare_result = compare_clauses(
-                full_text,
-                c.contract_type or "买卖合同",
-                c.is_outsourcing or False,
-                standard_clauses=_db_template_clauses(db, c.contract_type),
-            )
-            logger.info("条款比对完成: %s", compare_result.get("summary") if compare_result else None)
-        except Exception as e:
-            logger.warning("条款比对失败，报告将标注待重试: %s", e)
-
+        # 条款比对已在上面的并行块中完成（compare_result）；
+        # 它仍先于任何 DB 写事务结束，因此不改变 BUG-009/BUG-010 的锁与事务不变式。
         # 重新审核：旧「有效」记录置 superseded（曾被驳回 rejected / 已被替代 superseded 保持不变），
         # 不删物理记录，保留审计轨迹（BUG-028）；下方插入的新记录为 valid。
         _mark_audit_records(db, contract_id, "valid", "superseded")
@@ -909,18 +1008,22 @@ def _run_audit(contract_id: int):
         db.add(report)
 
         c.status = "completed"
-        db.commit()
+        with perf.stage("db_write"):
+            db.commit()
 
         # 非 DOCX（本轮：PDF）合同的**后置锚点回填**：独立、幂等、非致命。
         # 审核结果已在上方 commit，此处失败绝不影响审核本身（只记录日志）。
         # 只读 parsed_text/clause_text、只写 clause_position，不触碰任何风险判定。
         if is_pdf_like(c):
             try:
-                stats = backfill_pdf_anchors(db, c, audit_batch=audit_batch)
+                with perf.stage("pdf_anchor_backfill"):
+                    stats = backfill_pdf_anchors(db, c, audit_batch=audit_batch)
                 logger.info("PDF 锚点回填 contract=%s %s", contract_id, stats)
             except Exception as e:
                 db.rollback()
                 logger.warning("PDF 锚点回填失败（不影响审核结果）contract=%s: %s", contract_id, e)
+
+        perf.report(f"audit:{contract_id}")
 
         return {
             "code": 0,
@@ -2145,7 +2248,9 @@ def compare_contract_clauses(
     
     result = compare_clauses(
         c.parsed_text,
-        c.contract_type or "other",
+        # 分类失败（类型为空）时不默认拿"买卖合同"标准条款去比（BUG-1 收口）：
+        # 用"未分类"口径 ⇒ matcher 不按类型过滤、回退全部标准条款，与审核链路一致。
+        c.contract_type or "未分类",
         c.is_outsourcing or False,
         standard_clauses=_db_template_clauses(db, c.contract_type),
     )
@@ -2175,7 +2280,8 @@ def get_clause_comparison(
         from ai.matcher import compare_clauses
         result = compare_clauses(
             c.parsed_text,
-            c.contract_type or "买卖合同",
+            # 与审核链路同一口径：类型为空（分类失败）时用"未分类"，不默认冒充买卖合同（BUG-1）
+            c.contract_type or "未分类",
             c.is_outsourcing or False,
             standard_clauses=_db_template_clauses(db, c.contract_type),
         )
@@ -2205,7 +2311,8 @@ def trigger_clause_comparison(
         from ai.matcher import compare_clauses
         result = compare_clauses(
             c.parsed_text,
-            c.contract_type or "买卖合同",
+            # 与审核链路同一口径：类型为空（分类失败）时用"未分类"，不默认冒充买卖合同（BUG-1）
+            c.contract_type or "未分类",
             c.is_outsourcing or False,
             standard_clauses=_db_template_clauses(db, c.contract_type),
         )
@@ -2249,7 +2356,9 @@ def get_contract(
         "code": 0, "message": "ok",
         "data": {
             "id": c.id, "user_id": c.user_id, "file_name": c.file_name, "stored_path": c.stored_path,
-            "contract_type": c.contract_type, "is_outsourcing": c.is_outsourcing,
+            "contract_type": c.contract_type,
+            "classification_status": _classification_status_of(c),
+            "is_outsourcing": c.is_outsourcing,
             "business_tag": _business_tag_label(c.is_outsourcing), "type_label": _type_label(c.contract_type, c.is_outsourcing),
             "type_confidence": c.type_confidence, "status": c.status,
             "audit_mode": c.audit_mode, "template_version": c.template_version,

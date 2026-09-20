@@ -19,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from ai.chunker import split_chunks
 from ai.llm_client import llm_client
 from ai.llm_context import submit_with_context
+from ai import perf as perf   # 临时链路耗时诊断（BUG-2）
 from ai.taxonomy import TYPE_ALIAS
 from ai.utils import extract_json
 
@@ -26,6 +27,16 @@ logger = logging.getLogger(__name__)
 
 # 单块待比对合同文本上限（字符）。超长合同分块逐块比对，尾部条款不再漏检。
 MAX_COMPARE_CHARS = 6000
+
+# 条款比对的 LLM 单次调用超时（秒）：该阶段要逐条生成 clauses JSON（长输出），
+# 实测单次 15~25s，并发下会顶到 client 默认的 30s 而超时失败（失败=条款比对整段丢失）。
+# 这里单独放宽到 75s，client 的默认 30s 保持不变（分类/要素等短输出仍快速失败）。
+COMPARE_LLM_TIMEOUT = 75.0
+
+# 条款比对的**并发度**：实测把 4 个块同时打给 API 会被服务端排队（单跑 1.3s，4 并发 19.8s），
+# 反而比"少并发、每工作线程顺序处理多个块"更慢、也更容易触发 30s 超时。
+# 降到 2 并发 + 每线程顺序处理剩余块：总工作量不变、覆盖不变，只降低瞬时并发压力。
+COMPARE_MAX_PARALLEL = 2
 
 # 标准条款库路径：ai/matcher/matcher.py → ai/ → ai/knowledge/standard_clauses.json
 _KNOWLEDGE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "knowledge")
@@ -138,13 +149,16 @@ def _merge_clause_results(clause_list: list[dict]) -> list[dict]:
 def _compare_chunk(chunk_text: str, contract_type: str, standards: str) -> list[dict]:
     """对单个文本块做标准条款比对，返回 clauses 列表。"""
     try:
-        resp = llm_client.chat(
-            prompt=f"{SYSTEM_PROMPT_COMPARE}\n合同类型:{contract_type}\n标准条款:{standards}\n待比对合同:{chunk_text}\n请逐条比对输出JSON。",
-            temperature=0.1)
+        with perf.stage("compare_llm"):
+            resp = llm_client.chat(
+                prompt=f"{SYSTEM_PROMPT_COMPARE}\n合同类型:{contract_type}\n标准条款:{standards}\n待比对合同:{chunk_text}\n请逐条比对输出JSON。",
+                temperature=0.1,
+                timeout=COMPARE_LLM_TIMEOUT)
         r = extract_json(resp)
         data = r if isinstance(r, dict) else ({"clauses": r} if isinstance(r, list) else None)
         if data and data.get("clauses"):
             return data["clauses"]
+        logger.warning("条款比对：某块返回无可比对条款（可能被判为空或 JSON 解析失败）")
     except Exception as e:
         logger.error(f"compare_clauses 分块比对失败: {e}")
     return []
@@ -260,9 +274,18 @@ def compare_clauses(
 
     merged = []
     if len(chunks) > 1:
-        with ThreadPoolExecutor(max_workers=min(len(chunks), 6)) as ex:
+        # 并发度受控（COMPARE_MAX_PARALLEL）：每个工作线程顺序处理自己的块，
+        # 避免"块数越多瞬时并发越大"把 API 打到排队/超时（见 COMPARE_MAX_PARALLEL 注释）。
+        workers = max(1, min(len(chunks), COMPARE_MAX_PARALLEL))
+        batches = [chunks[i::workers] for i in range(workers)]
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            def _run_batch(batch: list[str]) -> list[dict]:
+                out: list[dict] = []
+                for c in batch:
+                    out.extend(_compare_chunk(c, contract_type, standards))
+                return out
             # 复制上下文后提交：保证工作线程能读到用户个人 DeepSeek Key（见 ai/llm_context.py）
-            futs = [submit_with_context(ex, _compare_chunk, c, contract_type, standards) for c in chunks]
+            futs = [perf.submit_labeled_ctx(ex, _run_batch, b) for b in batches]
             for clauses in (f.result() for f in futs):
                 merged.extend(clauses)
     else:

@@ -17,6 +17,7 @@ from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 
 from ai.rag.bm25 import bm25_search, rrf_fuse
+from ai import perf as _perf   # 临时链路耗时诊断（BUG-2）
 
 logger = logging.getLogger(__name__)
 
@@ -429,8 +430,10 @@ def search_similar_templates(query: str, top_k: int = 5) -> list[dict]:
 
     try:
         embedder = _get_embedder()
-        q_emb = embedder.encode([_excerpt(query)]).tolist()
-        results = collection.query(query_embeddings=q_emb, n_results=min(top_k, 10))
+        with _perf.stage("embed_encode"):   # 临时耗时诊断（BUG-2）：仅统计，不改语义
+            q_emb = embedder.encode([_excerpt(query)]).tolist()
+        with _perf.stage("chroma_query"):
+            results = collection.query(query_embeddings=q_emb, n_results=min(top_k, 10))
     except Exception as e:
         logger.warning("范本相似检索失败: %s", e)
         return []

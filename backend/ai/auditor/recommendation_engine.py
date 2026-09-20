@@ -19,6 +19,7 @@ import logging
 from pathlib import Path
 
 from ai.llm_client import llm_client
+from ai import perf as _perf   # 临时链路耗时诊断（BUG-2）
 from ai.utils import extract_json
 from ai.auditor.rule_engine import RULE_LAWS
 
@@ -133,7 +134,8 @@ def _generate_recommendations(contexts: list[dict]) -> list:
     payload = json.dumps(contexts, ensure_ascii=False)
     for attempt in range(2):  # 超时重试一次
         try:
-            resp = llm_client.chat(prompt=SYSTEM_PROMPT_RECOMMENDATION + "\n\n" + payload, temperature=0.0)
+            with _perf.stage("recommendation_llm"):
+                resp = llm_client.chat(prompt=SYSTEM_PROMPT_RECOMMENDATION + "\n\n" + payload, temperature=0.0)
             arr = extract_json(resp)
             if isinstance(arr, list):
                 return arr
