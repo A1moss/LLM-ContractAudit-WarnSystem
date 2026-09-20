@@ -268,3 +268,5 @@ models/
 # ==========================================================================
 A24-*-校赛包-*.zip
 A24-*-离线完整包-*.zip
+# Local DB backup dir created before a manual data deletion (never commit; ~11MB per copy)
+_backup_*/

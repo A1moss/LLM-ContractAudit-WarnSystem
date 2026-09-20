@@ -92,15 +92,29 @@
       </div>
     </div>
 
-    <!-- 当前选择 + 确认 -->
+    <!-- 当前选择 + 确认。三态必须区分清楚：
+         ① 已选定   = w.confirmedPosition（用户点过「确认位置」）
+         ② 已选待确认 = w.selectedPosition（用户选了候选，但还没确认）
+         ③ 尚未选定 = 两者都为空
+         「确认位置」按钮的动作是**提交选中项为最终位置**（调用状态层 confirmAddPosition），
+         不是父组件里的空动作 —— 推荐位置永远是候选，不得自动成为最终位置。 -->
     <div class="ipp-cur">
-      <div v-if="w.confirmedPosition" class="ipp-ok">已选定：{{ w.posHint || positionText(w.confirmedPosition) }}</div>
+      <div v-if="w.confirmedPosition" class="ipp-ok">
+        已选定：{{ positionText(w.confirmedPosition) }}
+      </div>
+      <div v-else-if="w.selectedPosition" class="ipp-pending">
+        已选择（待确认）：{{ positionText(w.selectedPosition) }} —— 请点「确认位置」完成选定。
+      </div>
       <div v-else class="ipp-warn">尚未选定插入位置。</div>
       <div class="ipp-row ipp-row-end">
-        <el-button size="small" type="primary" plain :disabled="!w.confirmedPosition" @click="$emit('confirm-position')">
+        <el-button
+          size="small" type="primary" plain
+          :disabled="!w.selectedPosition"
+          @click="ws.confirmAddPosition()"
+        >
           确认位置
         </el-button>
-        <el-button v-if="w.confirmedPosition" size="small" text @click="$emit('clear-position')">
+        <el-button v-if="w.confirmedPosition || w.selectedPosition" size="small" text @click="$emit('clear-position')">
           重新选
         </el-button>
       </div>
@@ -122,13 +136,15 @@ import { positionText } from '../../composables/useContractWorkspace.js'
  * （addPositionOk / beforeAnchorOf / chooseAddPosition），不存在第二套位置规则。
  *
  * 硬约束（V2.2 与产品红线，逐条来自既有实现）：
- *   - 推荐位置只作为**候选**填入 posMode，`confirmedPosition` 只有用户点「确认位置」才成立；
+ *   - 推荐位置只作为**候选**（`selectedPosition`），`confirmedPosition` 只有用户点「确认位置」
+ *     才成立（调用状态层 `confirmAddPosition()`）；
  *   - **没有推荐位置时绝不自作主张**（尤其不许默认 append）；
  *   - 「第X条之前」换算成「第X-1条之后」，第一条时明确提示无法表达；
  *   - 描述定位只调只读 locate 接口，候选必须用户点选。
  *
  * 本组件不自己改状态：位置计算与落定全部交给 useContractWorkspace 的
- * chooseAddPosition / chooseAddLocateCandidate / runAddLocate（避免出现第二套位置规则）。
+ * chooseAddPosition / confirmAddPosition / chooseAddLocateCandidate / runAddLocate
+ * （避免出现第二套位置规则）。
  */
 const props = defineProps({
   ws: { type: Object, required: true },
@@ -187,6 +203,7 @@ const beforePrevIdx = computed(() => {
 .ipp-row-end { justify-content: flex-end; }
 .ipp-cur { border-top: 1px dashed var(--a24-border); padding-top: 8px; margin-top: 2px; }
 .ipp-ok { font-size: 12px; color: #166534; background: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 6px; padding: 6px 8px; }
+.ipp-pending { font-size: 12px; color: #1D4ED8; background: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 6px; padding: 6px 8px; }
 .ipp-result { margin-top: 6px; }
 .ipp-result-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
 .ipp-cand { border: 1px solid var(--a24-border); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; }

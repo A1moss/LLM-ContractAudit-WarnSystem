@@ -1076,6 +1076,15 @@ export function useContractWorkspace() {
     //    改为把用户已输入的要求带进「新增条款」工作区，由用户确认插入位置——既不禁止处理，
     //    也不替用户决定位置。
     if (sessionAction(s) === 'add_clause') {
+      // ③-0 用户**已经确认过插入位置**（addWizard.confirmedPosition 成立、且工作区目标
+      //      就是当前会话）时，中栏发送即视为最终发送 ⇒ 直接复用既有 submitAddClause()
+      //      生成草案（不新增接口、不新增第二套生成逻辑）。
+      //      边界：只认 confirmedPosition —— 推荐位置/selectedPosition 都不算最终位置。
+      if (addPositionOk(addWizard.confirmedPosition) && addWizard.targetKey === s.key) {
+        addWizard.requirement = instruction
+        setAddRequirement(s.key, instruction)
+        return submitAddClause()
+      }
       const pos = s.lastRev?.position
       if (isAddOnly(s) && addPositionOk(pos)) {
         return submitRevise(s, ui, {
@@ -1089,6 +1098,8 @@ export function useContractWorkspace() {
           position: pos,
         }, instruction)
       }
+      // ③′ 还没有最终位置：只把需求带进工作区，**不生成**任何 ClauseRevision
+      //     （没有确认位置的 add_clause 无法写入 DOCX，见 docx_reviser._insert_one）。
       ui.input = ''
       openAddWizard({
         targetKey: s.key,
@@ -1100,6 +1111,7 @@ export function useContractWorkspace() {
         clauseNo: s.clauseNo ? String(s.clauseNo) : '',
         prefill: instruction,
       })
+      ElMessage.warning('已收到新增条款需求，请先在右栏确认插入位置，再发送或点「生成推荐草案」')
       return
     }
 
@@ -1190,6 +1202,11 @@ export function useContractWorkspace() {
     locateText: '',
     locateResult: null,
     locateLoading: false,
+    // 「选中」与「确认」是两件事（通用定位能力的核心状态）：
+    //   selectedPosition  = 用户当前**选中**的候选（推荐位置被点选后也落在这里）
+    //   confirmedPosition = 用户点「确认位置」后才成立的**最终位置**，业务只认它
+    // 合并二者会导致「确认位置」按钮无动作可做（选择时状态就已是最终态）。
+    selectedPosition: null,
     confirmedPosition: null,
   })
 
@@ -1200,7 +1217,7 @@ export function useContractWorkspace() {
       loading: false, submitting: false, loaded: false,
       targetKey: OVERVIEW_KEY, targetScope: 'overview', targetClauseNo: '',
       posMode: '', posAnchor: '', posHint: '', locateText: '', locateResult: null,
-      locateLoading: false, confirmedPosition: null,
+      locateLoading: false, selectedPosition: null, confirmedPosition: null,
     })
   }
 
@@ -1308,7 +1325,15 @@ export function useContractWorkspace() {
     addWizard.riskType = session.cmp?.title || session.risk?.risk_type || ''
     addWizard.riskTypeLabel = session.risk ? riskName(session.risk.risk_type) : (session.cmp?.title || '')
     await reloadAddSuggestion()
+    // 需求描述按会话恢复：本次输入过 → 恢复本次；否则回落到该会话已保存记录的 instruction。
+    // 这样"切走再切回"不会把用户输入的新增内容描述冲掉（与定位状态彼此独立）。
+    const rememberedReq = addRequirementFor(session.key)
+    addWizard.requirement = rememberedReq
+      || String(session.lastRev?.instruction || '').trim()
+      || addWizard.requirement
     if (kept) {
+      // 已保存/已确认过的位置恢复为"选中 + 已确认"（历史确认态保持，不让用户重选一遍）
+      addWizard.selectedPosition = kept
       addWizard.confirmedPosition = kept
       addWizard.posHint = positionText(kept)
       addWizard.posMode = kept.append ? 'append' : 'after'
@@ -1349,8 +1374,13 @@ export function useContractWorkspace() {
     if (!session) return
     const ui = uiFor(session.key)
     const typed = String(ui.input || '').trim()
+    // 先把本次输入记入按会话存储，再进入工作区（避免 ensureAddWorkspace 重置时丢失）
+    if (typed) setAddRequirement(session.key, typed)
     await ensureAddWorkspace(session)
-    if (typed) addWizard.requirement = typed
+    if (typed) {
+      addWizard.requirement = typed
+      setAddRequirement(session.key, typed)
+    }
   }
 
   /**
@@ -1378,36 +1408,92 @@ export function useContractWorkspace() {
       if (loc.paragraph_index != null) out.paragraph_index = loc.paragraph_index
       return out
     }
+    // 注意：这里只写「选中」(selectedPosition)。「最终位置」必须由用户点「确认位置」
+    // 触发 confirmAddPosition() 才算成立 —— 推荐位置只是候选，不能自动成为最终位置。
     if (mode === 'suggest') {
       const sp = addWizard.suggestedPosition || {}
       if (sp.append) {
         addWizard.posAnchor = ''
         addWizard.posHint = sp.hint || '追加到合同末尾'
-        addWizard.confirmedPosition = { append: true, hint: addWizard.posHint }
+        addWizard.selectedPosition = { append: true, hint: addWizard.posHint }
       } else if (sp.anchor) {
         addWizard.posAnchor = String(sp.anchor)
         addWizard.posHint = sp.hint || `第${sp.anchor}条之后`
         // 推荐位置自己也带精确定位（后端 _suggest_position 已附带 target_text）
-        addWizard.confirmedPosition = withLoc({ anchor: String(sp.anchor), hint: addWizard.posHint })
+        addWizard.selectedPosition = withLoc({ anchor: String(sp.anchor), hint: addWizard.posHint })
       }
     } else if (mode === 'after') {
       addWizard.posAnchor = String(payload?.anchor || '')
       addWizard.posHint = `第${addWizard.posAnchor}条之后`
-      addWizard.confirmedPosition = withLoc({ anchor: addWizard.posAnchor, hint: addWizard.posHint })
+      addWizard.selectedPosition = withLoc({ anchor: addWizard.posAnchor, hint: addWizard.posHint })
     } else if (mode === 'before') {
       const prev = payload?.prevAnchor
       if (prev == null) {
-        addWizard.confirmedPosition = null
+        addWizard.selectedPosition = null
         return
       }
       addWizard.posAnchor = String(prev)
       addWizard.posHint = `第${prev}条之后（即第${payload.num}条之前）`
-      addWizard.confirmedPosition = withLoc({ anchor: String(prev), hint: addWizard.posHint })
+      addWizard.selectedPosition = withLoc({ anchor: String(prev), hint: addWizard.posHint })
     } else if (mode === 'append') {
       addWizard.posAnchor = ''
       addWizard.posHint = '追加到合同末尾'
-      addWizard.confirmedPosition = { append: true, hint: '追加到合同末尾' }
+      addWizard.selectedPosition = { append: true, hint: '追加到合同末尾' }
     }
+  }
+
+  /**
+   * 「确认位置」：把用户**选中**的候选提交为**最终位置**（通用定位能力的唯一确认动作）。
+   *
+   * 语义边界（与产品红线一致）：
+   *   - 最终位置 = 用户确认时选中的那个；**推荐位置不会覆盖用户的选择**；
+   *   - 没有选中任何位置（含推荐位置为空且用户未选）时**拒绝确认**并提示，
+   *     绝不替用户决定、也绝不默认追加到合同末尾；
+   *   - 幂等：重复确认只是把当前选中项再提交一次。
+   *
+   * 注意：本函数**不涉及任何业务语义**（不知道 R09 / 条款比对 / 缺失条款），
+   * 只负责"让用户选定一个合同位置"。
+   */
+  function confirmAddPosition() {
+    const sel = addWizard.selectedPosition
+    if (!addPositionOk(sel)) {
+      ElMessage.warning('请先选择一种插入位置，再点「确认位置」（系统不会替你决定）')
+      return false
+    }
+    addWizard.confirmedPosition = sel
+    return true
+  }
+
+  /** 清空本次的位置选择（选中 + 已确认），供「重新选」与切换方式时复用 */
+  function clearAddPosition() {
+    addWizard.selectedPosition = null
+    addWizard.confirmedPosition = null
+    addWizard.posAnchor = ''
+    addWizard.posHint = ''
+  }
+
+  // ── 新增条款「需求描述」的**按会话**存储（正文描述与定位状态必须解耦）──
+  // 背景：`addWizard.requirement` 是全局单字段，而用户是在**每个会话**的中栏输入需求。
+  // 若不做按会话存储，只靠全局字段会出现两种断裂：
+  //   ① 用户在中栏输入后没有同步进 addWizard.requirement ⇒ 右栏仍显示"还没有条款正文"、
+  //      「生成推荐草案」按钮点不动（即使位置已确认）；
+  //   ② 从 A 会话切到 B 会话（right 栏 resetAddWizard）会把 A 的需求描述冲掉。
+  // 这里只存"用户需求描述"（= 用户希望新增什么），与「推荐草案正文」（lastRev.revised_clause）
+  // 、「最终合同内容」严格分开，不混用一个字段。
+  const addRequirementBySession = reactive({})
+
+  /** 记录某会话的新增条款需求描述（用 `hasOwnProperty` 区分"空串"与"没存过"） */
+  function setAddRequirement(key, text) {
+    const k = String(key || '')
+    const t = String(text || '')
+    if (t) addRequirementBySession[k] = t
+    else if (!Object.prototype.hasOwnProperty.call(addRequirementBySession, k)) addRequirementBySession[k] = ''
+  }
+
+  /** 读取某会话的需求描述；没存过返回 '' */
+  function addRequirementFor(key) {
+    const k = String(key || '')
+    return Object.prototype.hasOwnProperty.call(addRequirementBySession, k) ? addRequirementBySession[k] : ''
   }
 
   /** 方式三：自然语言描述 → 只读 locator → 候选 → 用户点选（绝不直接 revise） */
@@ -1443,7 +1529,8 @@ export function useContractWorkspace() {
     const pos = { anchor: String(c.clause_no), hint: addWizard.posHint }
     if (c.target_text) pos.target_text = c.target_text
     if (c.paragraph_index != null) pos.paragraph_index = c.paragraph_index
-    addWizard.confirmedPosition = pos
+    // 与其他方式一致：这里只是"选中"，仍需用户点「确认位置」才成为最终位置
+    addWizard.selectedPosition = pos
   }
 
   async function submitAddClause() {
@@ -2055,6 +2142,10 @@ export function useContractWorkspace() {
     proposalItemKind, proposalItemTitle, canIncludeProposalItem, proposalBlockingText, positionText,
     // 新增条款（唯一入口 = 右栏内联工作区；addWizard 是两边共用的同一份状态）
     addWizard, openAddWizard, reloadAddSuggestion, chooseAddPosition,
+    // 通用定位能力：选中 → 确认 → （可选）重新选；业务侧只认 confirmedPosition
+    confirmAddPosition, clearAddPosition,
+    // 新增条款「需求描述」的按会话读写（与定位状态解耦，避免互相覆盖）
+    addRequirementBySession, setAddRequirement, addRequirementFor,
     beforeAnchorOf: (num) => beforeAnchorOf(headings.value, num),
     runAddLocate, chooseAddLocateCandidate, submitAddClause, resetAddWizard,
     addAnchorHeadings,

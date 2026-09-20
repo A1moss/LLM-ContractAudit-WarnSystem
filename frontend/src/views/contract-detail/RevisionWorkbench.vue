@@ -350,10 +350,26 @@
               </div>
 
               <div class="wb-card">
-                <div class="wb-card-t">还没有条款正文</div>
+                <div class="wb-card-t">还没有条款正文（推荐草案尚未生成）</div>
                 <div class="wb-muted">
-                  请先在<b>中栏</b>描述你希望新增的内容（例如"新增发票与税务条款，明确开票时间与税率"），
-                  然后在下面选定插入位置，再生成推荐草案。
+                  这里说的"条款正文"指<b>系统生成的推荐草案</b>，不是你在中栏填写的需求描述。
+                  两者是分开的状态，需求描述不会因为确认位置而丢失。
+                </div>
+                <!-- 状态对应关系（避免"位置已确认却像丢了正文"的观感）：
+                     需求描述 = addWizard.requirement / 中栏输入；推荐草案 = 生成后的 lastRev.revised_clause -->
+                <div class="wb-muted">
+                  当前需求描述：
+                  <b v-if="addW.requirement">{{ addW.requirement }}</b>
+                  <span v-else>（还没有填写）—— 请先在<b>中栏</b>描述你希望新增的内容</span>
+                </div>
+                <div class="wb-muted">
+                  插入位置：
+                  <b v-if="addW.confirmedPosition">已选定 {{ positionTextOf(addW.confirmedPosition) }}</b>
+                  <span v-else-if="addW.selectedPosition">已选择（待确认）</span>
+                  <span v-else>尚未选定</span>
+                </div>
+                <div class="wb-muted">
+                  两步都就绪后，点下面的「生成推荐草案」生成条款正文（生成时会立即保存为一条修改记录）。
                 </div>
                 <div class="wb-actions wb-actions-top">
                   <el-button size="small" type="primary" plain @click="focusChatInput">去中栏描述</el-button>
@@ -369,7 +385,7 @@
                   :after-num="addAfterNum" :before-num="addBeforeNum"
                   @update:after-num="(v) => (addAfterNum = v)" @update:before-num="(v) => (addBeforeNum = v)"
                   @apply-after="addApplyAfter" @apply-before="addApplyBefore" @mode-change="addOnModeChange"
-                  @confirm-position="addW.step = 4" @clear-position="addClearPosition"
+                  @confirm-position="ws.confirmAddPosition()" @clear-position="addClearPosition"
                 />
               </div>
 
@@ -427,7 +443,7 @@
                   :after-num="addAfterNum" :before-num="addBeforeNum"
                   @update:after-num="(v) => (addAfterNum = v)" @update:before-num="(v) => (addBeforeNum = v)"
                   @apply-after="addApplyAfter" @apply-before="addApplyBefore" @mode-change="addOnModeChange"
-                  @confirm-position="addW.step = 4" @clear-position="addClearPosition"
+                  @confirm-position="ws.confirmAddPosition()" @clear-position="addClearPosition"
                 />
               </div>
 
@@ -800,17 +816,17 @@ function addOnModeChange(mode) {
   else if (mode === 'after' && addAfterNum.value != null) addApplyAfter()
   else if (mode === 'before' && addBeforeNum.value != null) addApplyBefore()
   else {
-    // 切换方式后清掉上一次的选定，避免沿用旧位置
-    addW.value.confirmedPosition = null
-    addW.value.posHint = ''
+    // 切换方式后清掉上一次的「选中 + 已确认」，避免沿用旧位置
+    props.ws.clearAddPosition()
+    addAfterNum.value = null
+    addBeforeNum.value = null
   }
 }
 function addClearPosition() {
-  addW.value.confirmedPosition = null
-  addW.value.posHint = ''
-  addW.value.posMode = ''
+  props.ws.clearAddPosition()
   addAfterNum.value = null
   addBeforeNum.value = null
+  addW.value.posMode = ''
 }
 
 /** 是否具备生成条件：有需求描述 + 已由用户选定插入位置 */
@@ -935,10 +951,43 @@ function focusChatInput() {
     if (el) el.focus()
   })
 }
+
+/** 位置可读文案（复用状态层的 positionText，不在组件里另写一套位置规则） */
+function positionTextOf(pos) {
+  return props.ws.positionText(pos)
+}
 async function reloadAll() {
   await Promise.all([props.ws.loadRevisions(), props.ws.loadOverview(), props.ws.loadProposals()])
   ElMessage.success('已刷新')
 }
+
+/**
+ * 中栏「需求描述」→ 新增条款工作区状态 的**实时同步**（修复"正文状态与定位状态不同步"）。
+ *
+ * 状态口径（三者严格分开，绝不混用）：
+ *   ① 用户新增内容描述 = `ui.input`（中栏输入框，按会话）→ 同步进
+ *      `addWizard.requirement` 与 `addWizard` 的按会话存储；
+ *   ② 推荐草案正文     = `session.lastRev.revised_clause`（生成后才有，hasDraft 判据）；
+ *   ③ 最终合同内容     = 用户「确认采用」的那一版。
+ *
+ * 为什么需要这个 watch：中栏输入只写 `ui.input`，而「生成推荐草案」读的是
+ * `addWizard.requirement`。此前两者只在 `openAddWorkspace()` 被显式调用时才同步，
+ * 于是用户输入完、确认完位置后，右栏仍显示"还没有条款正文"、按钮点不动。
+ * 这里只做"用户确实输入了内容"方向的同步（空串不回写），不会覆盖已有的推荐/预填内容。
+ */
+watch(
+  () => [uiFor.value.input, props.ws.activeKey, addW.value.targetKey],
+  () => {
+    const typed = String(uiFor.value.input || '').trim()
+    const sessionKey = String(s.value?.key || '')
+    if (!typed || !sessionKey) return
+    // 只同步"当前中栏会话"与"新增工作区目标会话"一致的情况，避免把 A 会话的描述写到 B 会话
+    if (addW.value.targetKey && addW.value.targetKey !== sessionKey) return
+    if (addW.value.requirement !== typed) addW.value.requirement = typed
+    if (props.ws.addRequirementFor(sessionKey) !== typed) props.ws.setAddRequirement(sessionKey, typed)
+  },
+  { immediate: true },
+)
 /**
  * 「新增其它条款」：在同一合同里再起一条新增条款。
  *
